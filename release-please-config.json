@@ -3,6 +3,5 @@
         ".": {
             "release-type": "python"
         }
-    },
-    "bootstrap-sha": "fbb5b4cb709de8028f91ac82c2e8ba38af0958f8"
+    }
 }
