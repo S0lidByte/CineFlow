@@ -9,7 +9,7 @@ from kink import di
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import and_, func, select
-from sqlalchemy.orm import Session, object_session
+from sqlalchemy.orm import Session, object_session, selectinload
 
 from program.db import db_functions
 from program.db.db import db_session
@@ -230,6 +230,19 @@ async def get_items(
     ] = False,
 ) -> ItemsResponse:
     query = select(MediaItem)
+    
+    if extended:
+        query = query.options(
+            selectinload(MediaItem.filesystem_entries),
+            selectinload(MediaItem.streams),
+            selectinload(MediaItem.subtitles),
+            selectinload(Show.seasons).selectinload(Season.episodes).selectinload(Episode.filesystem_entries),
+            selectinload(Show.seasons).selectinload(Season.episodes).selectinload(Episode.streams),
+            selectinload(Show.seasons).selectinload(Season.episodes).selectinload(Episode.subtitles),
+            selectinload(Season.episodes).selectinload(Episode.filesystem_entries),
+            selectinload(Season.episodes).selectinload(Episode.streams),
+            selectinload(Season.episodes).selectinload(Episode.subtitles),
+        )
 
     if search:
         search_lower = search.lower()
@@ -510,6 +523,19 @@ async def get_item(
                 query = select(MediaItem).where(
                     MediaItem.id == _id,
                 )
+
+        if extended:
+            query = query.options(
+                selectinload(MediaItem.filesystem_entries),
+                selectinload(MediaItem.streams),
+                selectinload(MediaItem.subtitles),
+                selectinload(Show.seasons).selectinload(Season.episodes).selectinload(Episode.filesystem_entries),
+                selectinload(Show.seasons).selectinload(Season.episodes).selectinload(Episode.streams),
+                selectinload(Show.seasons).selectinload(Season.episodes).selectinload(Episode.subtitles),
+                selectinload(Season.episodes).selectinload(Episode.filesystem_entries),
+                selectinload(Season.episodes).selectinload(Episode.streams),
+                selectinload(Season.episodes).selectinload(Episode.subtitles),
+            )
 
         try:
             item = session.execute(query).unique().scalar_one_or_none()

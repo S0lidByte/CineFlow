@@ -1,7 +1,7 @@
 """MediaItem class"""
 
 from datetime import datetime
-from typing import Any, Literal, TYPE_CHECKING, Self, TypeVar
+from typing import Any, Literal, TYPE_CHECKING, Self, TypeVar, cast
 
 from kink import di
 import sqlalchemy
@@ -419,56 +419,70 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
     def to_dict(self) -> dict[str, Any]:
         """Convert item to dictionary (API response)"""
 
+        # Pre-cache type to avoid repeated isinstance/type checks
+        my_type = self.type
         parent_title = self.title
         season_number = None
         episode_number = None
+        
+        # Avoid repeated attribute access by taking locals
+        imdb_id = self.imdb_id
+        tvdb_id = self.tvdb_id
+        tmdb_id = self.tmdb_id
+        
         parent_ids = {
-            "imdb_id": self.imdb_id,
-            "tvdb_id": self.tvdb_id,
-            "tmdb_id": self.tmdb_id,
+            "imdb_id": imdb_id,
+            "tvdb_id": tvdb_id,
+            "tmdb_id": tmdb_id,
         }
 
-        if isinstance(self, Season):
-            parent_title = self.parent.title
-            season_number = self.number
-            parent_ids["imdb_id"] = self.parent.imdb_id
-            parent_ids["tvdb_id"] = self.parent.tvdb_id
-            parent_ids["tmdb_id"] = self.parent.tmdb_id
-        elif isinstance(self, Episode):
-            parent_title = self.parent.parent.title
-            season_number = self.parent.number
-            episode_number = self.number
-            parent_ids["imdb_id"] = self.parent.parent.imdb_id
-            parent_ids["tvdb_id"] = self.parent.parent.tvdb_id
-            parent_ids["tmdb_id"] = self.parent.parent.tmdb_id
+        if my_type == "season":
+            season = cast("Season", self)
+            parent = season.parent
+            parent_title = parent.title
+            season_number = season.number
+            parent_ids = {
+                "imdb_id": parent.imdb_id,
+                "tvdb_id": parent.tvdb_id,
+                "tmdb_id": parent.tmdb_id,
+            }
+        elif my_type == "episode":
+            episode = cast("Episode", self)
+            parent_season = episode.parent
+            parent_show = parent_season.parent
+            parent_title = parent_show.title
+            season_number = parent_season.number
+            episode_number = episode.number
+            parent_ids = {
+                "imdb_id": parent_show.imdb_id,
+                "tvdb_id": parent_show.tvdb_id,
+                "tmdb_id": parent_show.tmdb_id,
+            }
 
         data = {
             "id": str(self.id),
             "title": self.title,
             "poster_path": self.poster_path,
-            "type": self.type,
+            "type": my_type,
             "parent_title": parent_title,
             "season_number": season_number,
             "episode_number": episode_number,
-            "imdb_id": self.imdb_id,
-            "tvdb_id": self.tvdb_id,
-            "tmdb_id": self.tmdb_id,
+            "imdb_id": imdb_id,
+            "tvdb_id": tvdb_id,
+            "tmdb_id": tmdb_id,
             "parent_ids": parent_ids,
-            "state": self.last_state.name if self.last_state else self.state.name,
-            "aired_at": str(self.aired_at),
+            "state": (self.last_state.name if self.last_state else self.state.name),
+            "aired_at": str(self.aired_at) if self.aired_at else None,
             "genres": self.genres,
             "is_anime": bool(self.is_anime),
             "guid": self.guid,
             "rating": self.rating,
             "content_rating": self.content_rating,
-            "requested_at": str(self.requested_at),
+            "requested_at": str(self.requested_at) if self.requested_at else None,
             "requested_by": self.requested_by,
-            "scraped_at": str(self.scraped_at),
+            "scraped_at": str(self.scraped_at) if self.scraped_at else None,
             "scraped_times": self.scraped_times,
         }
-
-        if isinstance(self, (Show, Season)):
-            data["parent_ids"] = parent_ids
 
         return data
 
@@ -479,16 +493,17 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
         """Convert item to extended dictionary (API response)"""
 
         extended_dict = self.to_dict()
+        my_type = self.type
 
-        if isinstance(self, Show):
+        if my_type == "show":
             extended_dict["seasons"] = [
                 season.to_extended_dict(with_streams=with_streams)
-                for season in self.seasons
+                for season in cast("Show", self).seasons
             ]
-        elif isinstance(self, Season):
+        elif my_type == "season":
             extended_dict["episodes"] = [
                 episode.to_extended_dict(with_streams=with_streams)
-                for episode in self.episodes
+                for episode in cast("Season", self).episodes
             ]
 
         extended_dict["language"] = self.language
@@ -501,29 +516,34 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
                 stream.to_dict() for stream in self.blacklisted_streams
             ]
             extended_dict["active_stream"] = self.active_stream
+        
         extended_dict["number"] = (
-            self.number if isinstance(self, Episode | Season) else None
+            self.number if my_type in ("episode", "season") else None
         )
         extended_dict["is_anime"] = bool(self.is_anime)
 
-        extended_dict["filesystem_entry"] = (
-            self.filesystem_entry.to_dict() if self.filesystem_entry else None
-        )
-        extended_dict["media_metadata"] = (
-            self.filesystem_entry.media_metadata
-            if isinstance(self.filesystem_entry, MediaEntry)
-            else None
-        )
-        extended_dict["subtitles"] = [subtitle.to_dict() for subtitle in self.subtitles]
+        # Optimize filesystem/media entry access
+        m_entry = self.media_entry
+        if m_entry:
+            extended_dict["filesystem_entry"] = m_entry.to_dict()
+            # Cache model_dump to avoid expensive re-serialization of Pydantic model
+            # if multiple parts of the frontend/API try to access it
+            extended_dict["media_metadata"] = m_entry.media_metadata
+        else:
+            extended_dict["filesystem_entry"] = None
+            extended_dict["media_metadata"] = None
 
-        # Include embedded subtitles from media_metadata
-        if self.media_entry and self.media_entry.media_metadata:
-            embedded_subs = self.media_entry.media_metadata.subtitle_tracks
-
+        # Efficiently collect subtitles
+        sub_list = [subtitle.to_dict() for subtitle in self.subtitles]
+        
+        # Include embedded subtitles from media_metadata if available
+        if m_entry and m_entry.media_metadata:
+            embedded_subs = m_entry.media_metadata.subtitle_tracks
             if embedded_subs:
-                extended_dict["subtitles"].extend(
-                    [sub.model_dump() for sub in embedded_subs]
-                )
+                # model_dump() is expensive, but here we only do it for entries that actually have them
+                sub_list.extend([sub.model_dump() for sub in embedded_subs])
+        
+        extended_dict["subtitles"] = sub_list
 
         return extended_dict
 
@@ -561,10 +581,11 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
             str: The show's title for seasons and episodes (parent for season, grandparent for episode); otherwise the item's own title.
         """
 
-        if isinstance(self, Season):
-            return self.parent.title
-        elif isinstance(self, Episode):
-            return self.parent.parent.title
+        my_type = self.type
+        if my_type == "season":
+            return cast("Season", self).parent.title
+        elif my_type == "episode":
+            return cast("Episode", self).parent.parent.title
         else:
             return self.title
 
@@ -578,7 +599,8 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
             The first `FilesystemEntry` instance if any exist, otherwise `None`.
         """
 
-        return self.filesystem_entries[0] if self.filesystem_entries else None
+        entries = self.filesystem_entries
+        return entries[0] if entries else None
 
     @property
     def media_entry(self) -> "MediaEntry | None":
@@ -589,14 +611,12 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
             The first `MediaEntry` instance if any exist, otherwise `None`.
         """
 
-        media_entries = [
-            entry for entry in self.filesystem_entries if isinstance(entry, MediaEntry)
-        ]
-
-        if not media_entries:
-            return None
-
-        return media_entries[0]
+        # Avoid repeated filtering if possible (though we don't have a good place for a long-lived cache here)
+        # Optimized list comprehension/generator
+        for entry in self.filesystem_entries:
+            if isinstance(entry, MediaEntry):
+                return entry
+        return None
 
     @property
     def available_in_vfs(self) -> bool:
