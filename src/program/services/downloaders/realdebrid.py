@@ -120,6 +120,19 @@ class RealDebridError(Exception):
     """Base exception for Real-Debrid related errors."""
 
 
+class RealDebridCircuitBreakerOpenError(RealDebridError):
+    """Raised when Real-Debrid circuit breaker is OPEN and requests are fail-fast."""
+
+    def __init__(self, *, retry_after_seconds: float | None = None):
+        msg = "Real-Debrid circuit breaker is OPEN"
+
+        if retry_after_seconds is not None:
+            msg += f"; retry after approximately {retry_after_seconds:.1f}s"
+
+        super().__init__(msg)
+        self.retry_after_seconds = retry_after_seconds
+
+
 class RealDebridAPI:
     """
     Minimal Real-Debrid API client using SmartSession for retries, rate limits, and circuit breaker.
@@ -670,6 +683,14 @@ class RealDebridDownloader(DownloaderBase):
             return UnrestrictedLink.model_validate(response.json())
         except DebridServiceLinkUnavailable:
             raise
+        except CircuitBreakerOpen as e:
+            logger.warning(
+                f"Real-Debrid unrestrict skipped: circuit breaker OPEN ({e})"
+            )
+
+            raise RealDebridCircuitBreakerOpenError(
+                retry_after_seconds=e.retry_after_seconds,
+            ) from e
         except Exception as e:
             logger.debug(f"Direct unrestrict_link failed for {link}: {e}")
 

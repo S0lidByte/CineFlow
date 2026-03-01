@@ -107,9 +107,10 @@ class TokenBucket:
 class CircuitBreakerOpen(RuntimeError):
     """Raised when a circuit breaker is OPEN and requests should fail fast."""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, retry_after_seconds: float | None = None):
         super().__init__(f"Circuit breaker OPEN for {name}")
         self.name = name
+        self.retry_after_seconds = retry_after_seconds
 
 
 class CircuitBreaker:
@@ -146,12 +147,15 @@ class CircuitBreaker:
             RuntimeError: If the breaker is OPEN and recovery time not passed.
         """
         if self.state == "OPEN" and self.last_failure_time:
-            if (time.monotonic() - self.last_failure_time) > self.recovery_time:
+            elapsed = time.monotonic() - self.last_failure_time
+
+            if elapsed > self.recovery_time:
                 self.state = "HALF_OPEN"
                 logger.debug(f"Breaker for {self.name} HALF_OPEN (probe)")
             else:
+                retry_after = max(0.0, self.recovery_time - elapsed)
                 logger.debug(f"Breaker for {self.name} OPEN (fail-fast)")
-                raise CircuitBreakerOpen(self.name)
+                raise CircuitBreakerOpen(self.name, retry_after_seconds=retry_after)
 
     def after_request(self, success: bool):
         """

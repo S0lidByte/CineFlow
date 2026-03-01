@@ -45,6 +45,10 @@ from .stream_connection import StreamConnection
 # Providers that require proxy connections for streaming
 PROXY_REQUIRED_PROVIDERS = {"alldebrid"}
 
+# Guard against transient short scan reads from unstable debrid/CDN responses.
+DISCRETE_SCAN_MAX_INTEGRITY_ATTEMPTS = 3
+DISCRETE_SCAN_RETRY_BACKOFF_SECONDS = [0.1, 0.25]
+
 
 type ReadType = Literal[
     "header_scan",
@@ -801,35 +805,69 @@ class MediaStream:
                     stream.raise_for_status()
 
                     content_length = stream.headers.get("Content-Length")
+                    content_range = stream.headers.get("Content-Range")
+                    accept_ranges = stream.headers.get("Accept-Ranges")
 
                     if end is not None:
                         range_bytes = end - start + 1
+
+                        if stream.status_code == HTTPStatus.OK:
+                            logger.warning(
+                                self.build_log_message(
+                                    "Ranged request returned HTTP 200; "
+                                    f"content-length={content_length} "
+                                    f"content-range={content_range} "
+                                    f"accept-ranges={accept_ranges}"
+                                )
+                            )
+                        elif stream.status_code == HTTPStatus.PARTIAL_CONTENT:
+                            expected_prefix = f"bytes {start}-"
+
+                            if not content_range:
+                                logger.warning(
+                                    self.build_log_message(
+                                        "HTTP 206 response missing Content-Range header"
+                                    )
+                                )
+                            elif not content_range.startswith(expected_prefix):
+                                logger.warning(
+                                    self.build_log_message(
+                                        f"HTTP 206 Content-Range mismatch; "
+                                        f"expected prefix '{expected_prefix}', got '{content_range}'"
+                                    )
+                                )
                     else:
                         range_bytes = self.file_metadata.file_size - start
 
-                    if (
-                        stream.status_code == HTTPStatus.OK
-                        and content_length is not None
-                        and int(content_length) > range_bytes
-                    ):
-                        # Server appears to be ignoring the range request and returning full content.
-                        # This is incompatible with our stream, as it will start at the incorrect position.
-                        logger.warning(
-                            self.build_log_message(
-                                "Server returned full content instead of range."
+                    if stream.status_code == HTTPStatus.OK and content_length is not None:
+                        try:
+                            parsed_content_length = int(content_length)
+                        except ValueError:
+                            logger.warning(
+                                self.build_log_message(
+                                    f"Invalid Content-Length header '{content_length}'"
+                                )
                             )
-                        )
+                        else:
+                            if parsed_content_length > range_bytes:
+                                # Server appears to be ignoring the range request and returning full content.
+                                # This is incompatible with our stream, as it will start at the incorrect position.
+                                logger.warning(
+                                    self.build_log_message(
+                                        "Server returned full content instead of range."
+                                    )
+                                )
 
-                        if await self._retry_with_backoff(
-                            attempt,
-                            max_attempts,
-                            backoffs,
-                        ):
-                            continue
+                                if await self._retry_with_backoff(
+                                    attempt,
+                                    max_attempts,
+                                    backoffs,
+                                ):
+                                    continue
 
-                        raise DebridServiceRefusedRangeRequestException(
-                            provider=self.provider
-                        )
+                                raise DebridServiceRefusedRangeRequestException(
+                                    provider=self.provider
+                                )
 
                     self.session_statistics.total_session_connections += 1
 
@@ -1063,23 +1101,59 @@ class MediaStream:
         if size <= 0:
             raise ValueError("Size must be positive")
 
-        async with self.establish_connection(
-            start=start,
-            end=start + size - 1,
-        ) as response:
-            data = await response.aread()
+        for integrity_attempt in range(1, DISCRETE_SCAN_MAX_INTEGRITY_ATTEMPTS + 1):
+            async with self.establish_connection(
+                start=start,
+                end=start + size - 1,
+            ) as response:
+                data = await response.aread()
 
-            self.session_statistics.bytes_transferred += len(data)
+                self.session_statistics.bytes_transferred += len(data)
 
-            verified_data = self._verify_scan_integrity((start, start + size), data)
+                if len(data) < size:
+                    logger.warning(
+                        self.build_log_message(
+                            "Short scan read detected; "
+                            f"attempt={integrity_attempt}/{DISCRETE_SCAN_MAX_INTEGRITY_ATTEMPTS} "
+                            f"expected={size} actual={len(data)} "
+                            f"status={response.status_code} "
+                            f"content-length={response.headers.get('Content-Length')} "
+                            f"content-range={response.headers.get('Content-Range')}"
+                        )
+                    )
 
-            if should_cache:
-                await self._cache_chunk(
-                    start=start,
-                    data=verified_data[:size],
-                )
+                    if integrity_attempt < DISCRETE_SCAN_MAX_INTEGRITY_ATTEMPTS:
+                        has_fresh_url = await self._refresh_download_url()
 
-            return verified_data
+                        if has_fresh_url:
+                            logger.warning(
+                                self.build_log_message(
+                                    "Refreshed URL after short scan read"
+                                )
+                            )
+
+                        await trio.sleep(
+                            DISCRETE_SCAN_RETRY_BACKOFF_SECONDS[
+                                min(
+                                    integrity_attempt - 1,
+                                    len(DISCRETE_SCAN_RETRY_BACKOFF_SECONDS) - 1,
+                                )
+                            ]
+                        )
+
+                        continue
+
+                verified_data = self._verify_scan_integrity((start, start + size), data)
+
+                if should_cache:
+                    await self._cache_chunk(
+                        start=start,
+                        data=verified_data[:size],
+                    )
+
+                return verified_data
+
+        raise RuntimeError("Failed to fetch discrete byte range after integrity retries")
 
     async def _wait_until_chunks_ready(
         self,
