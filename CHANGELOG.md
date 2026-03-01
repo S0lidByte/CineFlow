@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.5.1](https://github.com/S0lidByte/triven/compare/v1.5.0...v1.5.1) (2026-03-01)
+
+
+### Bug Fixes
+
+* harden Real-Debrid stream recovery and breaker observability ([f89fa0f](https://github.com/S0lidByte/triven/commit/f89fa0f2813681bd9cb2916c40e7ed698cfb55ef))
+* optimize MediaItem serialization and implement eager loading for items API ([8902f65](https://github.com/S0lidByte/triven/commit/8902f657548a0b7e36f2875febdd5f662461daa2))
+* trigger release-please to update pull request ([e0d970c](https://github.com/S0lidByte/triven/commit/e0d970ccb0c6efe7973041d0958aca7259c9887a))
+
 ## [1.5.0](https://github.com/S0lidByte/triven/compare/v1.4.9...v1.5.0) (2026-03-01)
 
 
