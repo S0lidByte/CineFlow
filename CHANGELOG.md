@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/S0lidByte/triven/compare/v1.4.9...v1.5.0) (2026-03-01)
+
+
+### Features
+
+* break version loop and sync to 1.5.0
+
 ## [1.4.6](https://github.com/S0lidByte/triven/compare/v1.4.5...v1.4.6) (2026-03-01)
 
 
