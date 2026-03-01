@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/S0lidByte/triven/compare/v1.5.0...v1.5.1) (2026-03-01)
+
+
+### Bug Fixes
+
+* harden Real-Debrid stream recovery and breaker observability ([f89fa0f](https://github.com/S0lidByte/triven/commit/f89fa0f2813681bd9cb2916c40e7ed698cfb55ef))
+
 ## [1.5.0](https://github.com/S0lidByte/triven/compare/v1.4.9...v1.5.0) (2026-03-01)
 
 
