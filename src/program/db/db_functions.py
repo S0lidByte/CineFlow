@@ -322,16 +322,19 @@ def create_calendar(
 
     def build_calendar_dict(item: MediaItem) -> dict[str, Any]:
         tmdb_id = item.tmdb_id
-        # Clickability fallback: use parent Show's tmdb_id if item's own is missing
-        if not tmdb_id:
-            if isinstance(item, Season) and item.parent:
-                tmdb_id = item.parent.tmdb_id
-            elif isinstance(item, Episode) and item.parent and item.parent.parent:
-                tmdb_id = item.parent.parent.tmdb_id
+        tvdb_id = item.tvdb_id
+
+        # For TV items, we MUST use the top-level Show's ID for linking,
+        # otherwise the frontend will try to load episode details as if they were a show.
+        if isinstance(item, (Season, Episode)):
+            top = item.top_parent
+            if top:
+                tmdb_id = top.tmdb_id or tmdb_id
+                tvdb_id = top.tvdb_id or tvdb_id
 
         data: dict[str, Any] = {
             "item_id": item.id,
-            "tvdb_id": item.tvdb_id,
+            "tvdb_id": tvdb_id,
             "tmdb_id": tmdb_id,
             "show_title": item.top_title,
             "item_type": item.type,
