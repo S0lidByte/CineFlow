@@ -1601,7 +1601,7 @@ requires-dist = [
     { name = "apscheduler", specifier = ">=3.10.4,<4" },
     { name = "babel", specifier = ">=2.17.0,<3" },
     { name = "bencodepy", specifier = ">=0.9.5,<0.10" },
-    { name = "cachetools", specifier = ">=5.3.3,<6" },
+    { name = "cachetools", specifier = ">=5.3.3,<8" },
     { name = "coverage", specifier = ">=7.6.8,<8" },
     { name = "dill", specifier = ">=0.3.8,<0.4" },
     { name = "fastapi", specifier = ">=0.110.0,<0.111" },
