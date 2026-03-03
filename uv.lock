@@ -1645,7 +1645,7 @@ dev = [
     { name = "mypy", specifier = ">=1.11.2,<2" },
     { name = "openapi-generator-cli", extras = ["jdk4py"], specifier = ">=7.17.0" },
     { name = "pre-commit", specifier = ">=4.3.0,<5" },
-    { name = "pyfakefs", specifier = ">=5.4.1,<6" },
+    { name = "pyfakefs", specifier = ">=5.4.1,<7" },
     { name = "pyperf", specifier = ">=2.2.0,<3" },
     { name = "pyright", specifier = ">=1.1.352,<2" },
     { name = "pytest", specifier = ">=8.3.2,<9" },
