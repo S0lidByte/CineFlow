@@ -1910,7 +1910,7 @@ class RivenVFS(pyfuse3.Operations):
                         stream.build_log_message(f"{exc.__class__.__name__}: {exc}")
                     )
 
-                raise pyfuse3.FUSEError(errno.EACCES) from e
+                return b""
             except* DebridServiceForbiddenException as e:
                 for exc in e.exceptions:
                     logger.error(

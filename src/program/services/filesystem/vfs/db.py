@@ -148,7 +148,7 @@ class VFSDatabase:
                 logger.warning(
                     f"Fair usage limit reached when unrestricting URL for {entry.original_filename}: {e}"
                 )
-                raise
+                return entry.unrestricted_url
             except DebridServiceLinkUnavailable as e:
                 logger.warning(
                     f"Failed to unrestrict URL for {entry.original_filename}: {e}"
@@ -240,7 +240,7 @@ class VFSDatabase:
                     modified=(entry.updated_at.isoformat()),
                     entry_type="media",
                 )
-        except (DebridServiceLinkUnavailable, DebridServiceFairUsageLimitException):
+        except DebridServiceLinkUnavailable:
             raise
         except Exception as e:
             logger.error(
