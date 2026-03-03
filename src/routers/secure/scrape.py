@@ -1108,12 +1108,16 @@ async def auto_scrape(
                                 .where(Show.id == item_id)
                             ).scalar_one()
                             
-                            # Run the indexer — this modifies sync_item in-place
-                            for result in indexer.run(sync_item):
-                                pass
+                            # Use no_autoflush to prevent premature flush of transient Season objects
+                            with sync_session.no_autoflush:
+                                # Run the indexer — this modifies sync_item in-place,
+                                # adding new seasons via show.add_season() which appends
+                                # to the ORM relationship collection tracked by sync_session
+                                for result in indexer.run(sync_item):
+                                    pass
                             
-                            # Persist the updated show (with new seasons) to DB
-                            sync_session.merge(sync_item)
+                            # Commit — SQLAlchemy's dirty tracking will persist
+                            # all in-place modifications including new child objects
                             sync_session.commit()
                     
                     await asyncio.wait_for(asyncio.to_thread(run_sync), timeout=30)
