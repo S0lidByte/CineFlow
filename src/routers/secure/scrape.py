@@ -1091,18 +1091,34 @@ async def auto_scrape(
                     )
                 
                 try:
-                    # Run indexer in a thread to avoid blocking event loop
+                    # Run indexer in a separate thread with its own DB session
+                    # because SQLAlchemy sessions are not thread-safe
                     from program.program import riven
                     indexer = riven.services.indexer
+                    item_id = item.id
                     
                     def run_sync():
-                        # Consume the generator to perform indexing
-                        for _ in indexer.run(item):
-                            pass
+                        from program.db.db import db_session as sync_db_session
+                        from sqlalchemy.orm import selectinload as sync_selectinload
+                        with sync_db_session() as sync_session:
+                            # Re-load the item in this thread's own session
+                            sync_item = sync_session.execute(
+                                select(Show)
+                                .options(sync_selectinload(Show.seasons).selectinload(Season.episodes))
+                                .where(Show.id == item_id)
+                            ).scalar_one()
+                            
+                            # Run the indexer — this modifies sync_item in-place
+                            for result in indexer.run(sync_item):
+                                pass
+                            
+                            # Persist the updated show (with new seasons) to DB
+                            sync_session.merge(sync_item)
+                            sync_session.commit()
                     
                     await asyncio.wait_for(asyncio.to_thread(run_sync), timeout=30)
                     
-                    # Refresh item to see new seasons
+                    # Refresh item in the main session to see new seasons
                     session.expire(item)
                     item = session.execute(
                         select(Show)

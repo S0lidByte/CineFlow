@@ -37,6 +37,7 @@ class IndexerService(BaseIndexer):
                 item=item,
                 log_msg=log_msg,
             )
+            return
         elif isinstance(item, (Show, Season, Episode)) or (
             item.tvdb_id and not item.tmdb_id
         ):
@@ -44,6 +45,7 @@ class IndexerService(BaseIndexer):
                 item=item,
                 log_msg=log_msg,
             )
+            return
         else:
             movie_result = self.tmdb_indexer.run(
                 item=item,
