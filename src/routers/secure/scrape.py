@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import asyncio
 from typing import Annotated, Any, Literal, cast, TypeAlias
 from uuid import uuid4
 
@@ -38,6 +39,7 @@ from ..models.shared import MessageResponse
 from program.settings import settings_manager
 from program.settings.models import RTNSettingsModel
 from program.services.scrapers import Scraping
+from program.utils.locking import ItemLock
 
 class Stream(BaseModel):
     infohash: str
@@ -1074,6 +1076,48 @@ async def auto_scrape(
             seasons_to_scrape: list[Season] = []
             seasons_to_pause: list[Season] = []
             
+            # Check if any requested seasons are missing from DB
+            available_season_numbers = [s.number for s in item.seasons]
+            missing_seasons = [n for n in request.season_numbers if n not in available_season_numbers]
+
+            if missing_seasons:
+                logger.info(f"Requested seasons {missing_seasons} missing for {item.log_string}. Triggering on-demand sync.")
+                
+                # Attempt to acquire lock to prevent double-indexing
+                if not await ItemLock.acquire(item.id, timeout=1):
+                    logger.info(f"Sync already in progress for {item.log_string}. Returning 202.")
+                    return MessageResponse(
+                        message=f"Sync already in progress for {item.log_string}. Please retry in a few moments."
+                    )
+                
+                try:
+                    # Run indexer in a thread to avoid blocking event loop
+                    from program.services.indexers import IndexerService
+                    indexer = di[IndexerService]
+                    
+                    async def run_sync():
+                        # Consume the generator to perform indexing
+                        for _ in indexer.run(item):
+                            pass
+                    
+                    await asyncio.wait_for(asyncio.to_thread(run_sync), timeout=30)
+                    
+                    # Refresh item to see new seasons
+                    session.expire(item)
+                    item = session.execute(
+                        select(Show)
+                        .options(selectinload(Show.seasons).selectinload(Season.episodes))
+                        .where(Show.id == item.id)
+                    ).scalar_one()
+                except asyncio.TimeoutError:
+                    logger.warning(f"Metadata sync timed out for {item.log_string}")
+                    raise HTTPException(status_code=504, detail="Metadata sync timed out")
+                except Exception as e:
+                    logger.exception(f"Metadata sync failed for {item.log_string}: {e}")
+                    raise HTTPException(status_code=503, detail="Failed to sync metadata from TVDB. Please try again later.")
+                finally:
+                    ItemLock.release(item.id)
+
             for season in item.seasons:
                 if season.number in request.season_numbers:
                     seasons_to_scrape.append(season)
