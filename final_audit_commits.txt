@@ -1,0 +1,21 @@
+f6eb2af4 | 2026-02-28 | S0lidByte | Merge pull request #9 from S0lidByte/release-please--branches--main
+184815df | 2026-02-28 | S0lidByte | Update funding information in FUNDING.yml
+11ac6efe | 2026-02-28 | S0lidByte | Merge pull request #8 from S0lidByte/release-please--branches--main
+6a08b6c7 | 2026-02-27 | S0lidByte | Merge pull request #7 from S0lidByte/release-please--branches--main
+198a0c31 | 2026-02-27 | S0lidByte | Merge pull request #6 from S0lidByte/release-please--branches--main
+e1006620 | 2026-02-27 | S0lidByte | Merge pull request #5 from S0lidByte/release-please--branches--main
+2643834b | 2026-02-27 | S0lidByte | Merge pull request #4 from S0lidByte/release-please--branches--main
+eef14d7a | 2026-02-26 | S0lidByte | Merge pull request #3 from S0lidByte/release-please--branches--main
+87a9adaa | 2026-02-26 | S0lidByte | Merge pull request #2 from S0lidByte/release-please--branches--main
+5d7809a3 | 2026-02-26 | S0lidByte | Merge pull request #1 from S0lidByte/release-please--branches--main
+2aeae950 | 2026-01-02 | Goldy | feat: force asyncio backend detection in HTTP clients using sniffio to prevent conflicts with other async libraries (#1330)
+ca03d852 | 2025-12-24 | Goldy | feat: add custom title and IMDB ID parameters to scrape endpoints (#1319)
+25428062 | 2025-12-22 | Goldy | feat: new file streaming endpoint (#1304)
+1ff97e35 | 2025-12-16 | Goldy | fix: add x-uuid header to log upload request to get a UUID paste name that's pretty much impossible to guess (#1303)
+b396323f | 2025-11-03 | Goldy | refactor(downloaders): streamline proxy handling in AllDebrid, DebridLink, and RealDebrid APIs (#1251)
+987957ec | 2025-11-03 | Goldy | refactor(scrapers): replace hardcoded retries with configurable settings (#1247)
+77a7cc94 | 2025-11-03 | Goldy | refactor(scrapers, utils): streamline infohash extraction logic and remove redundant patterns (#1245)
+7b81d9a7 | 2025-11-01 | Goldy | feat(scrapers): parallel infohash fetching on prowlarr/jackett (#1241)
+1fe201a8 | 2025-10-30 | g0ldyy | feat(scrapers): enhance and unify infohash extraction logic
+8a9942a2 | 2024-10-15 | equinox | docs: remove duplicate service from readme
+f89b5c01 | 2023-12-17 | JustHereToBreakThings | Fix dockerfile (#48)

@@ -31,8 +31,8 @@ class GetCollection200ResponseInnerSeasonsInner(BaseModel):
     GetCollection200ResponseInnerSeasonsInner
     """  # noqa: E501
 
-    number: Union[StrictFloat, StrictInt]
-    episodes: List[GetCollection200ResponseInnerSeasonsInnerEpisodesInner]
+    number: Optional[Union[StrictFloat, StrictInt]] = None
+    episodes: Optional[List[GetCollection200ResponseInnerSeasonsInnerEpisodesInner]] = None
     __properties: ClassVar[List[str]] = ["number", "episodes"]
 
     model_config = ConfigDict(

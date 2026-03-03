@@ -31,9 +31,9 @@ class GetCollection200ResponseInnerSeasonsInnerEpisodesInner(BaseModel):
     GetCollection200ResponseInnerSeasonsInnerEpisodesInner
     """  # noqa: E501
 
-    number: Union[StrictFloat, StrictInt]
-    collected_at: StrictStr
-    metadata: GetCollection200ResponseInnerSeasonsInnerEpisodesInnerMetadata
+    number: Optional[Union[StrictFloat, StrictInt]] = None
+    collected_at: Optional[StrictStr] = None
+    metadata: Optional[GetCollection200ResponseInnerSeasonsInnerEpisodesInnerMetadata] = None
     __properties: ClassVar[List[str]] = ["number", "collected_at", "metadata"]
 
     model_config = ConfigDict(

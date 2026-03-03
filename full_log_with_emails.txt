@@ -1,0 +1,901 @@
+f60b9dac | coldspirit <coldspirit@gmail.com> | 2026-03-03 | fix(backend): rewrite on-demand sync to use direct TVDB indexer with explicit session.add for new seasons
+b33c5c00 | coldspirit <coldspirit@gmail.com> | 2026-03-03 | fix(backend): use no_autoflush to properly persist new seasons during on-demand sync
+e7fa31fb | coldspirit <coldspirit@gmail.com> | 2026-03-03 | fix(backend): persist re-indexed seasons to DB and fix spurious 'Unknown item type' warning
+cc24cfe5 | coldspirit <coldspirit@gmail.com> | 2026-03-03 | fix(backend): fix asyncio.to_thread coroutine warning in on-demand sync
+77f94397 | coldspirit <coldspirit@gmail.com> | 2026-03-03 | fix(backend): use riven global instance instead of di for IndexerService to resolve 503 error
+928a7e14 | coldspirit <coldspirit@gmail.com> | 2026-03-03 | fix(backend): implement on-demand sync and concurrency protection for season requests
+555ed391 | coldspirit <coldspirit@gmail.com> | 2026-03-02 | fix(calendar): ensure TV show links use parent Series ID
+456daf48 | coldspirit <coldspirit@gmail.com> | 2026-03-01 | feat: trigger release-please with real file changes in backend
+335c7329 | coldspirit <coldspirit@gmail.com> | 2026-03-01 | feat: enhance release-please observability in backend
+3666d615 | coldspirit <coldspirit@gmail.com> | 2026-03-01 | fix: trigger release-please to re-evaluate backend after stale branch reset
+8902f657 | coldspirit <coldspirit@gmail.com> | 2026-03-01 | fix: optimize MediaItem serialization and implement eager loading for items API
+e0d970cc | coldspirit <coldspirit@gmail.com> | 2026-03-01 | fix: trigger release-please to update pull request
+f89fa0f2 | coldspirit <coldspirit@gmail.com> | 2026-03-01 | fix: harden Real-Debrid stream recovery and breaker observability
+9903682c | coldspirit <coldspirit@gmail.com> | 2026-03-01 | Harden Real-Debrid stream recovery and breaker observability
+1516c003 | coldspirit <coldspirit@gmail.com> | 2026-03-01 | chore(release): remove stale bootstrap-sha from release-please config
+45a519a3 | coldspirit <coldspirit@gmail.com> | 2026-03-01 | chore(main): bump version to 1.5.0 to break version loop
+0bd8a464 | github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> | 2026-03-01 | chore(main): release 1.4.6 (#16)
+ca97d72d | coldspirit <coldspirit@gmail.com> | 2026-03-01 | fix: downloader user info endpoint - defensive handling, no 500, full traceback in logs
+2be9f6e6 | coldspirit <coldspirit@gmail.com> | 2026-03-01 | chore: align release manifest and version to 1.4.5
+ca677d00 | coldspirit <coldspirit@gmail.com> | 2026-03-01 | fix(docker): add linux-headers to builder for ARM64 compatibility
+68b8515f | coldspirit <coldspirit@gmail.com> | 2026-03-01 | chore: configure release please filtering and ci fixes
+87ad82b0 | github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> | 2026-03-01 | chore(main): release 1.2.1 (#13)
+189c48b4 | coldspirit <coldspirit@gmail.com> | 2026-03-01 | chore: fresh start for release please 1.5.0
+8e842287 | coldspirit <coldspirit@gmail.com> | 2026-03-01 | chore: trigger release-please to generate clean 1.5.0 changelog
+f0ac2593 | coldspirit <coldspirit@gmail.com> | 2026-03-01 | chore: jump to 1.5.0 and filter upstream Riven history
+fcb1c771 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore: strip discord webhook and delete old changelog
+318a3222 | github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> | 2026-02-28 | chore(main): release 1.2.1 (#11)
+abe2710f | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore: setup release-please config with bootstrap-sha
+94ef1031 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore: release 1.2.1
+92068c14 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore: test release-please after updating branch rules
+129ea099 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore: revert to GITHUB_TOKEN for release-please
+eea50f97 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore: align release-please config with upstream rivenmedia/riven
+242be7e6 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore: relocate release-please config to root
+dffd710e | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore: simplify release-please config to strictly match frontend
+a08b839a | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore: trigger release-please to verify fix
+20d87cd4 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore: align release-please config with frontend and pin to v4.4.0
+2058a189 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore: reorganize release-please config and add label-check job
+66ff4ad5 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore: add missing permissions to release-please workflow
+a1423cbf | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore: configure release-please manifest for root python package
+e92c2b81 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore: sync version with github release 1.2.0
+a89bc780 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | feat: fix ffmpeg shell injection and bump starlette
+b10fd42b | coldspirit <coldspirit@gmail.com> | 2026-02-28 | ci: fix github action paths and remove broken gitlinks
+f6eb2af4 | S0lidByte <99444813+S0lidByte@users.noreply.github.com> | 2026-02-28 | Merge pull request #9 from S0lidByte/release-please--branches--main
+184815df | S0lidByte <99444813+S0lidByte@users.noreply.github.com> | 2026-02-28 | Update funding information in FUNDING.yml
+fc7e47b6 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | chore(docker): use gosu in backend entrypoint for proper signal forwarding
+e080539b | github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> | 2026-02-28 | chore(main): release 1.2.0
+772696af | coldspirit <coldspirit@gmail.com> | 2026-02-28 | refactor: dissolve submodules, move backend to repo root
+11ac6efe | S0lidByte <99444813+S0lidByte@users.noreply.github.com> | 2026-02-28 | Merge pull request #8 from S0lidByte/release-please--branches--main
+ada365f7 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | ci: add submodules: false to all workflow checkouts
+623b42cb | github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> | 2026-02-28 | chore(main): release 1.2.0
+494d6b4b | coldspirit <coldspirit@gmail.com> | 2026-02-28 | fix(calendar): revert SQL JSON filter to Python — SeriesReleaseDecorator is not raw JSONB
+ccb529f3 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | perf(calendar): V6 optimizations — bounded JSON query, set-based dedup, tmdb_id fallback
+86816922 | coldspirit <coldspirit@gmail.com> | 2026-02-28 | fix(calendar): strip timezone from iso parsed datetimes to prevent 500 comparison error
+b5d95ace | coldspirit <coldspirit@gmail.com> | 2026-02-28 | feat(calendar): overhaul calendar api bounds, add deduplication guard and ui tweaks
+da8a025c | coldspirit <coldspirit@gmail.com> | 2026-02-28 | fix(vfs): resolve subtitle caching, dead-link retries, and TOCTOU races
+078ab180 | coldspirit <coldspirit@gmail.com> | 2026-02-27 | fix: retry scraper trigger + PlexWatchlist memory leak
+282176e9 | coldspirit <coldspirit@gmail.com> | 2026-02-27 | fix(core): Handle Unknown state in transition and CI PLATFORM_PAIR access
+6a08b6c7 | S0lidByte <99444813+S0lidByte@users.noreply.github.com> | 2026-02-27 | Merge pull request #7 from S0lidByte/release-please--branches--main
+82d00ee0 | github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> | 2026-02-27 | chore(main): release 1.1.5
+4791e6ab | coldspirit <coldspirit@gmail.com> | 2026-02-27 | fix(debug): import time for trace logs
+c759d674 | coldspirit <coldspirit@gmail.com> | 2026-02-27 | build(debug): add trace logging to run_thread_with_db_item
+f378bf70 | coldspirit <coldspirit@gmail.com> | 2026-02-27 | fix(memory): free httpx decoder buffers and revert thread pool to 5
+94d93579 | coldspirit <coldspirit@gmail.com> | 2026-02-27 | perf(downloader): increase thread pool to 10 and limit to 1 stream per run
+9ab0b8a1 | coldspirit <coldspirit@gmail.com> | 2026-02-27 | fix(downloader): fall back to Indexed when all streams exhausted
+22902b7e | coldspirit <coldspirit@gmail.com> | 2026-02-27 | fix(retry): reset failed_attempts and Failed state on child episodes
+198a0c31 | S0lidByte <99444813+S0lidByte@users.noreply.github.com> | 2026-02-27 | Merge pull request #6 from S0lidByte/release-please--branches--main
+946078f2 | github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> | 2026-02-27 | chore(main): release 1.1.4
+c968ed4b | coldspirit <coldspirit@gmail.com> | 2026-02-27 | fix(retry): recursively reset scraped_at/scraped_times on child seasons and episodes
+8fac650e | coldspirit <coldspirit@gmail.com> | 2026-02-27 | fix(api): properly return 404 instead of 500 when GET /items/{id} fails
+e1006620 | S0lidByte <99444813+S0lidByte@users.noreply.github.com> | 2026-02-27 | Merge pull request #5 from S0lidByte/release-please--branches--main
+abdac42b | github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> | 2026-02-27 | chore(main): release 1.1.3
+a26547ad | coldspirit <coldspirit@gmail.com> | 2026-02-27 | fix(items): validate TVDB IDs before enqueuing, surface 404s to frontend
+2643834b | S0lidByte <99444813+S0lidByte@users.noreply.github.com> | 2026-02-27 | Merge pull request #4 from S0lidByte/release-please--branches--main
+05c10a7a | github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> | 2026-02-27 | chore(main): release 1.1.2
+c81e642a | coldspirit <coldspirit@gmail.com> | 2026-02-27 | fix(backend): resolve 5 post-audit regressions
+eef14d7a | S0lidByte <99444813+S0lidByte@users.noreply.github.com> | 2026-02-26 | Merge pull request #3 from S0lidByte/release-please--branches--main
+b51c890c | github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> | 2026-02-26 | chore(main): release 1.1.1
+dcdb90b0 | coldspirit <coldspirit@gmail.com> | 2026-02-26 | fix(backend): resolve 500 on /items endpoint and zilean fallback
+87a9adaa | S0lidByte <99444813+S0lidByte@users.noreply.github.com> | 2026-02-26 | Merge pull request #2 from S0lidByte/release-please--branches--main
+37858c9e | github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> | 2026-02-26 | chore(main): release 1.1.0
+ded391ca | coldspirit <coldspirit@gmail.com> | 2026-02-26 | feat(backend): implement comprehensive audit fixes for performance and stability
+3b740b8e | coldspirit <coldspirit@gmail.com> | 2026-02-26 | build: reorganize repository into monorepo layout (Triven_backend)
+5d7809a3 | S0lidByte <99444813+S0lidByte@users.noreply.github.com> | 2026-02-26 | Merge pull request #1 from S0lidByte/release-please--branches--main
+f3a87aad | coldspirit <coldspirit@gmail.com> | 2026-02-26 | ci: remove Discord release notification workflow
+3fb9a38e | github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> | 2026-02-26 | chore(main): release 1.0.0
+48c7bcda | coldspirit <coldspirit@gmail.com> | 2026-02-26 | ci: fix dev docker image names and switch release-please to GITHUB_TOKEN
+c4635e18 | coldspirit <coldspirit@gmail.com> | 2026-02-26 | ci: fix docker hub image name to coldspirit/triven
+12fdd4ac | coldspirit <coldspirit@gmail.com> | 2026-02-26 | ci: point docker image tags to fork owner instead of upstream
+207e3837 | coldspirit <coldspirit@gmail.com> | 2026-02-26 | fix: resolve queue deadlock and stream fetch crash
+91bfd582 | Spoked <dreu.lavelle@gmail.com> | 2026-01-24 | fix: tidy error log for torrentio outages
+c7c5f5b0 | Oliver Walton <38323818+olivertgwalton@users.noreply.github.com> | 2026-01-22 | chore: Refactor manual scraping  (#1347)
+9bfdb891 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2026-01-10 | fix: remove anime check from aiostreamms
+e221e503 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2026-01-08 | feat: add aiostreams scraper and fix mediafusion scraper & update schemas (#1340)
+fbb5b4cb | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2026-01-07 | fix: minor prowlarr condition check fix
+254505cd | Sam Xie <sam@samxie.me> | 2026-01-05 | fix: refresh links on service unavailable (#1335)
+f4bb33a4 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2026-01-04 | feat: log all ranking denied reasons on trace for better debugging (#1329)
+f777d055 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2026-01-04 | feat: settings api improvement (#1333)
+fd2c47ad | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2026-01-02 | chore: handle detached instance in log string (#1332)
+02c360ed | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2026-01-02 | chore: fix pydantic validation errors (#1331)
+895a0b5f | davidemarcoli <davide@marcoli.ch> | 2026-01-02 | feat: add HLS streaming
+2aeae950 | Goldy <153996346+g0ldyy@users.noreply.github.com> | 2026-01-02 | feat: force asyncio backend detection in HTTP clients using sniffio to prevent conflicts with other async libraries (#1330)
+ba0b3451 | davidemarcoli <davide@marcoli.ch> | 2026-01-02 | feat: include IMDb, TMDb, and TVDb IDs in state change notifications to make correlation with frontend item possible
+e90d22b5 | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-12-26 | chore: use selectin for media item joins (#1318)
+3c7e26d8 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-12-25 | feat: add debug and db related endpoints (#1321)
+ca03d852 | Goldy <153996346+g0ldyy@users.noreply.github.com> | 2025-12-24 | feat: add custom title and IMDB ID parameters to scrape endpoints (#1319)
+1a47d926 | Oliver Walton <38323818+olivertgwalton@users.noreply.github.com> | 2025-12-24 | feat: manual scraping (#1288)
+25428062 | Goldy <153996346+g0ldyy@users.noreply.github.com> | 2025-12-22 | feat: new file streaming endpoint (#1304)
+f2495cdc | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-12-21 | chore: skip cdn url validation for subtitle files (#1309)
+265bab82 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-12-20 | fix: prowlarr tz awareness (#1308)
+1ff97e35 | Goldy <153996346+g0ldyy@users.noreply.github.com> | 2025-12-16 | fix: add x-uuid header to log upload request to get a UUID paste name that's pretty much impossible to guess (#1303)
+5b51cfe9 | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-12-14 | fix: data wipe when rate limited with subtitles enabled (#1302)
+41505d40 | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-12-11 | chore: fix more api issues (#1296)
+28fa2774 | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-12-10 | chore: fix jackett schema validation (#1295)
+6f06bbe5 | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-12-08 | chore: fix various errors from type migration (#1294)
+4b89e63c | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-12-07 | chore: fix types (#1265)
+ade53c14 | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-11-30 | chore: add generated schemas (#1286)
+cccad0d5 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-11-18 | Revert "fix: probe media urls before adding to vfs (#1274)" (#1279)
+15a040e9 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-11-17 | fix: probe media urls before adding to vfs (#1274)
+717be706 | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-11-12 | fix: refresh dead links (#1269)
+91d580e6 | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-11-11 | Fix typo in feature request issue template title (#1271)
+de6e9ccf | Spoked <dreu.lavelle@gmail.com> | 2025-11-10 | chore: update deps
+77c8e9d4 | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-11-10 | feat: switch to streaming over chunking (#1217)
+269bc0b8 | Spoked <dreu.lavelle@gmail.com> | 2025-11-09 | chore: add migration script for serialization fix
+086c3534 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-11-09 | fix: serialization bug on media_metadata (#1264)
+dbcf7b7c | Spoked <dreu.lavelle@gmail.com> | 2025-11-09 | fix(downloader): hotfix resolution and quality parsing bug
+d18a3189 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2025-11-09 | feat: custom naming, standardize media metadata (#1243)
+c3829eca | Spoked <dreu.lavelle@gmail.com> | 2025-11-08 | fix: show completed items in calendar
+5413261e | Spoked <dreu.lavelle@gmail.com> | 2025-11-07 | feat: add state to calendar items
+05d61b5c | Spoked <dreu.lavelle@gmail.com> | 2025-11-07 | fix: missing update_ongoing func for api use
+ac39d080 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-11-06 | fix: improvements to calendar and stats endpoint (#1262)
+4c5ac3b7 | Christian <christbru@live.com> | 2025-11-04 | fix: Environment variable handling and improve error messages (#1249)
+2437cfa7 | Gaisberg <None> | 2025-11-03 | refactor(sse): no pooling of events, use sse instead of webhooks for stuff
+b396323f | Goldy <153996346+g0ldyy@users.noreply.github.com> | 2025-11-03 | refactor(downloaders): streamline proxy handling in AllDebrid, DebridLink, and RealDebrid APIs (#1251)
+dc76e51d | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-11-02 | feat: add handling of aliases for movies/shows via Trakt (#1248)
+987957ec | Goldy <153996346+g0ldyy@users.noreply.github.com> | 2025-11-03 | refactor(scrapers): replace hardcoded retries with configurable settings (#1247)
+77a7cc94 | Goldy <153996346+g0ldyy@users.noreply.github.com> | 2025-11-03 | refactor(scrapers, utils): streamline infohash extraction logic and remove redundant patterns (#1245)
+2002e85d | Gaisberg <None> | 2025-11-02 | feat: alldebrid provider, remove dead code etc...
+edded17b | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-11-02 | fix: remove movie-episode check in calendar
+7b81d9a7 | Goldy <153996346+g0ldyy@users.noreply.github.com> | 2025-11-01 | feat(scrapers): parallel infohash fetching on prowlarr/jackett (#1241)
+7513f4a4 | Spoked <dreu.lavelle@gmail.com> | 2025-10-30 | fix: removed torbox downloader
+d670a27a | Gaisberg <None> | 2025-10-30 | chore(vfs): validate library profile paths, persist library base folders
+1fe201a8 | g0ldyy <153996346+g0ldyy@users.noreply.github.com> | 2025-10-30 | feat(scrapers): enhance and unify infohash extraction logic
+b9ec1eed | Gaisberg <None> | 2025-10-29 | feat: debrid-link downloader support
+391c5ef7 | Gaisberg <None> | 2025-10-30 | fix: /remove vfs entries recursively
+ab2b6911 | Gaisberg <None> | 2025-10-29 | fix: prowlarr using request contextmanager when there is none
+fe436fc0 | Spoked <dreu.lavelle@gmail.com> | 2025-10-29 | fix: ditch show title in season dir naming. fixes #1234
+7270fddb | davidemarcoli <davide@marcoli.ch> | 2025-10-28 | chore: update all remaining discord links
+bc0d920d | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2025-10-28 | chore: change discord link in readme
+4040b735 | Spoked <dreu.lavelle@gmail.com> | 2025-10-26 | fix: ditch RTN profiles and set 'best' profile as the new default when scraping
+e7995e16 | Spoked <dreu.lavelle@gmail.com> | 2025-10-26 | chore(deps): upgrade RTN dep to 1.9.3; upgrade parsett dep to 1.8.2
+083fefe0 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2025-10-26 | chore(db): implement v1 base schema migration  (#1228)
+d3dde896 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2025-10-26 | chore: fix snapshoting, adds postgresql-client to container
+f82e8a45 | Spoked <dreu.lavelle@gmail.com> | 2025-10-25 | chore: update deps
+3392e68a | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-10-24 | fix(items): enhance media item search, filtering and sorting options (#1227)
+9b327a8b | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-10-23 | fix: remove poster_path from alembic migrations temporarily
+3f6d3830 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-10-23 | feat: add poster path to MediaItem (#1225)
+e5d29a6b | Spoked <dreu.lavelle@gmail.com> | 2025-10-21 | chore: bump version to 1.0.0
+95b61400 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-10-21 | fix: load dotenv before db to initialize SETTINGS_FILENAME env
+f04f6313 | Gaisberg <None> | 2025-10-20 | fix(mdblist): Skips items without required IDs.
+effbab28 | Gaisberg <None> | 2025-10-18 | chore: improve _sync_full performance
+116346ca | Spoked <dreu.lavelle@gmail.com> | 2025-10-17 | chore: update dep caching
+3b480015 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-10-17 | feat: move to uv (#1218)
+9f38bc97 | Spoked <dreu.lavelle@gmail.com> | 2025-10-17 | chore: set python version to 3.13
+b4123b70 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-10-17 | feat: schedule new releases and reindex on time (#1209)
+a785ad3f | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-10-17 | chore: update pre commit hook (#1213)
+7fe6f021 | Gaisberg <None> | 2025-10-17 | chore: fix multiepisodes for rivenvfs
+654747c9 | Gaisberg <None> | 2025-10-16 | chore: always store in base path to avoid loops
+556ebd3d | Gaisberg <None> | 2025-10-16 | chore(rivenvfs): actually commit changes in initial sync
+7d0f1add | Gaisberg <None> | 2025-10-16 | chore: fix the migration script, update logger import in db_functions to work with env reset
+289dbe66 | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-10-16 | chore: fix regressed types (#1211)
+30c6d973 | Gaisberg <None> | 2025-10-15 | feat: !prefix filter for libraries, improve path generations and rivenfs api, fix subtitles generation for library paths
+e588a605 | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-10-16 | feat: use httpx for stream requests (#1202)
+153c3a3f | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-10-15 | refactor(net): move to httpx instead of request lib (#1196)
+6045ee27 | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-10-14 | refactor: run formatter (#1208)
+54510272 | Spoked <dreu.lavelle@gmail.com> | 2025-10-13 | fix(docs): remove elfhosted from readme
+9ee58655 | Gaisberg <None> | 2025-10-13 | chore: rollback on reindexing errors
+9fe0d2bb | Gaisberg <None> | 2025-10-13 | chore: some cleanup and fix subtitle search tags creation
+78465398 | Gaisberg <None> | 2025-10-13 | feat(indexer): add in-place reindexing for ongoing items and legacy shows without status
+a6df95cb | Gaisberg <None> | 2025-10-11 | feat(indexer): add automatic attribute inheritance and TVDB status tracking
+dd6ccbc8 | Spoked <dreu.lavelle@gmail.com> | 2025-10-12 | fix: updated calendar endpoint
+0a67c6b9 | Spoked <dreu.lavelle@gmail.com> | 2025-10-10 | fix: typo in mediaitem attr
+50329e17 | Spoked <dreu.lavelle@gmail.com> | 2025-10-10 | fix: switch to tvdb/tmdb in orionoid scraping
+a7016a93 | Gaisberg <None> | 2025-10-10 | refactor(notifications): move notifications into a single service, fix orionoid and vfs registering
+fc984773 | Gaisberg <None> | 2025-10-09 | feat: metadata based libraries
+3a0a9a76 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-10-09 | perf(scraping): no more pesky imdb-only service roundup on every scrape (#1197)
+2f9c3391 | Spoked <dreu.lavelle@gmail.com> | 2025-10-09 | chore(deps): pin rtn version to 1.9.0 (old)
+b76423d5 | Spoked <dreu.lavelle@gmail.com> | 2025-10-09 | chore: fixed a few typos
+d2fed520 | Joe McKie <4980618+joemckie@users.noreply.github.com> | 2025-10-07 | fix: prevent HTTP2 full body requests
+40899965 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2025-10-08 | chore(deps): bump pydantic from 2.11.9 to 2.11.10
+b185613d | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2025-10-08 | chore(deps): bump psutil from 6.1.1 to 7.1.0
+178ff2c6 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2025-10-08 | chore(deps): bump xmltodict from 0.13.0 to 1.0.2
+327ff991 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2025-10-06 | chore(deps-dev): bump ruff from 0.7.4 to 0.13.3
+edb502ec | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-10-07 | fix: various bug fixes (#1193)
+39bc9974 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-10-05 | fix: fix fs dupes through alembic migration (#1184)
+aaad909b | davidemarcoli <davide@marcoli.ch> | 2025-10-05 | fix: simplify iteration over service sub-services
+78a512a0 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-10-05 | fix: subtitles not initializing
+888f1e5b | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-10-05 | fix: add description and minor fixes for setting models (#1185)
+582778ed | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2025-10-04 | feat(notifications): add SSE event publishing for completed media items (#1183)
+0c0bf64d | Spoked <dreu.lavelle@gmail.com> | 2025-10-03 | fix: make requests explicit. no guessing when trying to index
+20013620 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-10-03 | feat(logs): expose log settings for users (#1182)
+a0a459e6 | Gaisberg <None> | 2025-10-03 | feat(post-processing): implement media analysis and enhance subtitle services
+adb11c30 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-10-03 | refactor(scraping): moved to abstract class on scrapers (#1177)
+9bc3f4d5 | Gaisberg <None> | 2025-10-03 | chore(vfs): performance improvements in cache and scanner detection in containerized environments
+27cacf43 | Gaisberg <None> | 2025-10-02 | fix(updater): after refactor updater keys went missing
+c9b6dba2 | coderabbitai[bot] <136622811+coderabbitai[bot]@users.noreply.github.com> | 2025-10-02 | chore: Add docstrings to `general_refactoring` (#1175)
+d28ae785 | Gaisberg <None> | 2025-10-02 | fix(cli,vfs): fix environment variable handling and event listener invocation
+a94785be | Gaisberg <None> | 2025-10-02 | refactor(db)!: flip MediaItem-FilesystemEntry relationship and add automatic cleanup
+b7c08109 | Gaisberg <None> | 2025-10-02 | refactor(orm): simplify filesystem entry creation
+d0c5b777 | Gaisberg <None> | 2025-10-02 | refactor(items): replace raw SQL with ORM and add mutation helper for state management
+fe832aa2 | Gaisberg <None> | 2025-10-02 | fix(updater): incorrect logic in updater after refactor
+6f4bc85a | Gaisberg <None> | 2025-10-01 | refactor: signification code cleaning and optimizations
+722c7c47 | Gaisberg <None> | 2025-10-01 | feat!: introduce rivenvfs, get rid of that pesky rclone mount and symlinks
+0b8b3e72 | Gaisberg <None> | 2025-10-01 | feat: implement proper ratelimiting for services
+7e7dcc59 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-10-01 | feat!: seperate from trakt to tvdb and tmdb indexers feat: implement proper ratelimiting for services feat!: introduce rivenvfs, get rid of that pesky rclone mount and symlinks refactor: signification code cleaning and optimizations
+add17ed5 | Spoked <dreu.lavelle@gmail.com> | 2025-09-02 | fix: fixed incompleted items from reinit db
+2f201350 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-08-24 | chore(main): release 0.23.6 (#1137)
+5d1e30dd | Spoked <dreu.lavelle@gmail.com> | 2025-08-24 | chore(deps): update deps
+dc7ef059 | Spoked <dreu.lavelle@gmail.com> | 2025-08-24 | fix: revert max_delay in limiter back to 0
+1c00c0a5 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-08-20 | chore(main): release 0.23.5 (#1136)
+e1fcb495 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-08-20 | fix: temporarily use fixed plexapi dependency from fork (#1135)
+68312f76 | Spoked <dreu.lavelle@gmail.com> | 2025-08-15 | chore(deps): update parsett to 1.6.16
+086a3f06 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-08-15 | chore(main): release 0.23.4 (#1129)
+c61074f3 | Spoked <dreu.lavelle@gmail.com> | 2025-08-15 | fix: check for valid symlink video types on db reinit
+e26de41d | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-08-15 | chore(main): release 0.23.3 (#1128)
+25e68105 | Spoked <dreu.lavelle@gmail.com> | 2025-08-15 | fix: add more parent item data
+914cee96 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-08-14 | chore(main): release 0.23.2 (#1127)
+44fb11b2 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-08-14 | fix: add proxy_url setting for trakt
+a70f8bcf | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-08-14 | chore: add pysocks dependency
+50a1714a | Spoked <dreu.lavelle@gmail.com> | 2025-08-14 | fix: added default 10s max delay limit to fix hanging in RD requests
+c7153bc2 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-08-10 | chore(main): release 0.23.1 (#1120)
+ff97b5c4 | Spoked <dreu.lavelle@gmail.com> | 2025-08-10 | fix: fixed notadirectoryerror on re-init symlinks
+acdcac09 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-08-06 | chore(main): release 0.23.0 (#1118)
+315fc294 | Spoked <dreu.lavelle@gmail.com> | 2025-08-06 | fix: swapped to use trakt indexer directly on reindex route
+ed80503d | Spoked <dreu.lavelle@gmail.com> | 2025-08-05 | feat(api): added reindex api route to manually reindex items
+a23f5d6c | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-08-05 | chore(main): release 0.22.0 (#1078)
+422db783 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-08-05 | fix: fixed hanging on downloader. improved logging. (#1116)
+16ada643 | Elvis Perconic <45233935+Wiz1991@users.noreply.github.com> | 2025-07-24 | feat: set the media type when performing search (#1110)
+d91dd254 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-05-22 | fix: handle create_item_from_imdb_id response exception
+7fd087f7 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-05-21 | feat: add TRAKT_API_CLIENT_ID env to override the default trakt client id used by trakt indexer
+45105dbd | Spoked <dreu.lavelle@gmail.com> | 2025-05-19 | fix: readtimeout issue with rd, updated timeout to 25s instead of 15s. added exception handling for this as well.
+9875109e | Wamy <25761442+Wamy-Dev@users.noreply.github.com> | 2025-05-12 | feat: Add TorBox downloader to Riven (#1074)
+36610407 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-05-11 | chore(main): release 0.21.21 (#1072)
+5d47fba3 | Spoked <dreu.lavelle@gmail.com> | 2025-05-11 | chore: update deps
+38fc68bc | Spoked <dreu.lavelle@gmail.com> | 2025-05-02 | fix: restrict usage of mediafusion from elfhosted instances
+639bd7ab | Spoked <dreu.lavelle@gmail.com> | 2025-05-02 | chore: update deps
+77117db9 | Spoked <dreu.lavelle@gmail.com> | 2025-05-02 | fix: restrict usage of comet from elfhosted instances
+853586f9 | Spoked <dreu.lavelle@gmail.com> | 2025-05-02 | fix: im going back to bed..
+0372ad5c | Spoked <dreu.lavelle@gmail.com> | 2025-05-02 | fix: copy attrs down to episode as well
+f0f1a3ba | Spoked <dreu.lavelle@gmail.com> | 2025-05-02 | fix: further improvements to validations
+9c0ea94f | Spoked <dreu.lavelle@gmail.com> | 2025-04-29 | fix: fixed bug on failing to lowercase during anime check
+a19e09e9 | Spoked <dreu.lavelle@gmail.com> | 2025-04-29 | fix: anime fix for non-anime related content
+b7c378e7 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-04-26 | chore(main): release 0.21.20 (#1062)
+db525c47 | Spoked <dreu.lavelle@gmail.com> | 2025-04-26 | chore: update deps
+5772f41c | Spoked <dreu.lavelle@gmail.com> | 2025-04-17 | chore: update deps
+e8e16cbe | Spoked <dreu.lavelle@gmail.com> | 2025-04-17 | fix: update parsett from 1.6.7 to 1.6.11 (latest)
+2d3f9274 | Spoked <dreu.lavelle@gmail.com> | 2025-04-14 | fix: improve skipping special episodes/seasons
+01554a5e | Spoked <dreu.lavelle@gmail.com> | 2025-04-14 | fix: improved logging on retry_library and update_ongoing for clarity
+7a98d751 | Spoked <dreu.lavelle@gmail.com> | 2025-04-12 | fix: notifications simplified. fixed anime type check on chinese and korean anime.
+fd1b846c | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-04-10 | chore(main): release 0.21.19 (#1060)
+5408d55a | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2025-04-10 | fix: duplicate notifications being sent when using multiple service urls (#1059)
+41922f22 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-04-04 | chore: docs improvement
+03417c1d | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-04-04 | chore: docs improvement
+1b2a9677 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-04-04 | chore: docs improvement
+03008e77 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-04-03 | chore(main): release 0.21.18 (#1053)
+a1b23ad6 | Spoked <dreu.lavelle@gmail.com> | 2025-04-02 | fix: add ffprobe endpoint. fixed trakt id getattr on item.
+dc2ac8d6 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-31 | chore(main): release 0.21.17 (#1052)
+9ef5751e | Spoked <dreu.lavelle@gmail.com> | 2025-04-01 | fix: switch scrape endpoint to list input
+4fc49fb9 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-31 | chore(main): release 0.21.16 (#1051)
+5fdc6c8d | Spoked <dreu.lavelle@gmail.com> | 2025-03-31 | Merge branch 'main' of https://github.com/rivenmedia/riven
+78445af5 | Spoked <dreu.lavelle@gmail.com> | 2025-03-31 | fix: add calendar and parse endpoints
+dc196376 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-30 | chore(main): release 0.21.15 (#1047)
+19522df4 | Spoked <dreu.lavelle@gmail.com> | 2025-03-30 | fix: get your shit together goldyy
+cb4fd33d | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-29 | chore(main): release 0.21.14 (#1041)
+b23339a3 | Spoked <dreu.lavelle@gmail.com> | 2025-03-29 | fix: wrong attr in prowlar scraper
+9163c43a | Spoked <dreu.lavelle@gmail.com> | 2025-03-29 | fix: update comet scraper
+f253cd45 | Spoked <dreu.lavelle@gmail.com> | 2025-03-28 | fix: season attr bug in prowlarr
+343bc553 | Spoked <dreu.lavelle@gmail.com> | 2025-03-28 | fix: use temp request handler on fetching indexers
+b13a52ff | Spoked <dreu.lavelle@gmail.com> | 2025-03-28 | fix: rewrite prowlarr
+11379dd6 | Spoked <dreu.lavelle@gmail.com> | 2025-03-25 | fix: missing stream for completed item.
+7fa60f15 | Spoked <dreu.lavelle@gmail.com> | 2025-03-25 | fix: fixed resume button in frontend, notifications for shows, and alldebrid missing path attr bug
+07e2b848 | Spoked <dreu.lavelle@gmail.com> | 2025-03-22 | fix: jellyfin updating using wrong endpoint
+28be3d79 | davidemarcoli <davide@marcoli.ch> | 2025-03-20 | fix: add summary and operation ID to abort manual scraping session endpoint
+1fb45746 | Spoked <dreu.lavelle@gmail.com> | 2025-03-18 | fix: raise instead of return on remove api endpoint
+84c7c11b | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-18 | chore(main): release 0.21.13 (#1040)
+b9ae02e0 | Spoked <dreu.lavelle@gmail.com> | 2025-03-18 | fix: updated parsett to 1.6.2. made cached status false by default in api
+c55fdc53 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-18 | chore(main): release 0.21.12 (#1039)
+26b85d86 | Spoked <dreu.lavelle@gmail.com> | 2025-03-18 | fix: add cache status on manual scrape (revert)
+ed971907 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-18 | chore(main): release 0.21.11 (#1038)
+f6595fce | Spoked <dreu.lavelle@gmail.com> | 2025-03-18 | fix: fixed duplicate imdb endpoint. better handling of indexing bad items during scraping
+e571862a | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-18 | chore(main): release 0.21.10 (#1037)
+0b84ccaa | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-18 | fix: fixed api endpoints. tidied logging. fixed show/season not black… (#1036)
+608ad310 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-13 | chore(main): release 0.21.9 (#1029)
+ff67dc1b | Spoked <dreu.lavelle@gmail.com> | 2025-03-13 | Merge branch 'main' of https://github.com/rivenmedia/riven
+1f866d62 | Spoked <dreu.lavelle@gmail.com> | 2025-03-13 | fix: improve episode validation on manual scrape
+4eb0e365 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-13 | chore(main): release 0.21.8 (#1028)
+59f1e751 | Spoked <dreu.lavelle@gmail.com> | 2025-03-13 | fix: fixed season and episode manual scrape session handling
+0182f4b6 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-13 | chore(main): release 0.21.7 (#1027)
+7c351cfd | Spoked <dreu.lavelle@gmail.com> | 2025-03-13 | fix: reorder stream addition to item on manual scrape
+2a4a974b | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-13 | chore(main): release 0.21.6 (#1026)
+a949d94e | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-13 | fix: improved episode handling on manual scraping (#1025)
+7aa78a66 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-12 | chore(main): release 0.21.5 (#1018)
+4f29e979 | Spoked <dreu.lavelle@gmail.com> | 2025-03-12 | fix: fixed blacklist loop on symlink failure. improved scrape on non anime show packs.
+fb24ab4b | Spoked <dreu.lavelle@gmail.com> | 2025-03-12 | fix: increased episode check on show/season packs from 1 to 7
+0354889b | Spoked <dreu.lavelle@gmail.com> | 2025-03-12 | fix: fixed rd downloading issue. added symlink repair api endpoint.
+b7c3c970 | Spoked <dreu.lavelle@gmail.com> | 2025-03-12 | fix: fixed symlink repair. added update_ongoing and retry_library as api endpoints.
+5778217f | Spoked <dreu.lavelle@gmail.com> | 2025-03-10 | fix: revert trakt cache checking in api
+c01bbffc | Spoked <dreu.lavelle@gmail.com> | 2025-03-10 | fix: symlink repair error due to missing import
+ba57f75b | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-10 | fix: various fixes. improved scraping and downloading. (#1024)
+486bbfff | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-03-07 | fix: update instance availability logic for the scrape endpoint (#1023)
+0f221058 | Spoked <dreu.lavelle@gmail.com> | 2025-02-28 | fix: added reset streams endpoint
+cd7b1851 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-02-28 | chore(main): release 0.21.4 (#1017)
+31b29f71 | Spoked <dreu.lavelle@gmail.com> | 2025-02-28 | fix: frontend missing buttons. updated PTT.
+7159b283 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-02-27 | chore(main): release 0.21.3 (#1016)
+5185dbd8 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-02-27 | fix: multiple logging improvements and various other fixes (#1015)
+3278d642 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-02-25 | chore(main): release 0.21.2 (#1013)
+ebc7fc97 | Spoked <dreu.lavelle@gmail.com> | 2025-02-25 | fix: reverted postprocessing to patch subliminal issue
+a4ae8b6d | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-02-25 | chore(main): release 0.21.1 (#1010)
+41509bac | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-02-25 | fix: minor tweaks and validation handling (#1009)
+25239939 | davidemarcoli <davide@marcoli.ch> | 2025-02-21 | fix: ensure item retrieval returns a valid result in get_item function
+6405dd6b | davidemarcoli <davide@marcoli.ch> | 2025-02-21 | fix: correct cache usage logic in TraktAPI
+82a6588f | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-02-20 | chore(main): release 0.21.0 (#920)
+ffc630e9 | Jamie Isaksen <jamie@jamie.no> | 2025-02-20 | fix: resolve trakt data fetch error (#987)
+16ac0e48 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2025-02-17 | feat: add extended websocket support (#1007)
+2dc14984 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-02-17 | feat: add pause and failed states. fixed mediafusion. added more logging to parsing. (#977)
+d42fb35d | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2025-02-16 | fix: listrr response being treated as a dict (#979)
+3504754f | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-02-12 | fix: update .env names and fix SKIP_TRAKT_CACHE (#1001)
+6b295f6e | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2025-02-10 | fix: enable conditional caching for Trakt API session (#978)
+d1ad6fda | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-02-09 | feat: add proxy_url to torrentio (#994)
+2eb98cad | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2025-02-08 | feat: add RIVEN_SETTINGS_FILENAME env (#993)
+4b64e0f1 | davidemarcoli <davide@marcoli.ch> | 2025-02-07 | fix: correct route formatting for unblacklist_stream endpoint
+a18a66ce | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-01-21 | fix: no streams found or filtered streams from adult content throws e… (#976)
+c9cc836b | Spoked <dreu.lavelle@gmail.com> | 2025-01-21 | chore: release 0.21.0
+c0ea9fac | Arrrrr <11490236+wolfemir@users.noreply.github.com> | 2025-01-21 | Update issue templates
+6975f9d4 | Arrrrr <11490236+wolfemir@users.noreply.github.com> | 2025-01-20 | Update issue templates
+426342a7 | Arrrrr <11490236+wolfemir@users.noreply.github.com> | 2025-01-19 | Update issue templates
+5d49499d | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2025-01-18 | fix!: Torbox Removal (#971)
+8a5e849a | Spoked <dreu.lavelle@gmail.com> | 2024-12-06 | fix: updated sample handling for allowed video files
+6d43d7f3 | Arrrrr <11490236+wolfemir@users.noreply.github.com> | 2024-12-05 | feat: Add 6th retry attempt to symlinker (#926)
+eacfe06b | Mohamed Zumair <mhdzumair@gmail.com> | 2024-12-06 | Improve MediaFusion scraping configs
+42829a2e | Spoked <dreu.lavelle@gmail.com> | 2024-12-05 | fix: add alldebrid as option in mediafusion
+44f047e7 | Spoked <dreu.lavelle@gmail.com> | 2024-12-01 | fix: add strong typed response to scrape api endpoint
+346b352c | Spoked <dreu.lavelle@gmail.com> | 2024-11-27 | fix: manual scraping updated for downloader rework
+7fb50f85 | Spoked <dreu.lavelle@gmail.com> | 2024-11-27 | fix: api manual scraping fixes. wip
+d2a6b5bb | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-11-30 | fix: fixed alldebrid instantavail file processing (#916)
+fc7ed053 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-11-28 | fix: remove catalog configuration from Mediafusion settings and scraper (#919)
+7659a37d | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-11-28 | fix: update ListrrAPI validate method to use correct path (#906)
+73b5179c | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-11-27 | chore(main): release 0.20.1
+f945d25f | Spoked <dreu.lavelle@gmail.com> | 2024-11-27 | fix: fixed RD, TB and AD support
+50d9d6eb | Spoked <dreu.lavelle@gmail.com> | 2024-11-26 | fix: moved downloader proxy settings to parent instead of per debrid
+602f7322 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-11-26 | refactor: downloaders reworked (#903)
+4c68cfb6 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-11-26 | chore(deps): bump coverage from 7.6.7 to 7.6.8 (#909)
+83418d6f | davidemarcoli <davide@marcoli.ch> | 2024-11-22 | fix: consolidate User-Agent header usage in Torrentio scraper
+bb799b57 | davidemarcoli <davide@marcoli.ch> | 2024-11-22 | fix: add User-Agent header to torrentio request
+3511e6cf | Spoked <dreu.lavelle@gmail.com> | 2024-11-20 | fix: improve mediafusion validation on startup
+72f6813b | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-11-20 | chore(main): release 0.20.0
+d3b5293d | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-11-20 | feat: add denied reasoning when trashing torrents and added adult parsing (#888)
+24ee3d81 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-11-14 | chore(main): release 0.19.0
+21cd3939 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-11-14 | fix: chunk initial symlinks on re-ingest (#882)
+0a2c5a94 | Spoked <dreu.lavelle@gmail.com> | 2024-11-14 | chore: delete scheduler
+60f5b26a | Spoked <dreu.lavelle@gmail.com> | 2024-11-14 | chore: add missing file
+47f23fa0 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-11-14 | fix: re-check ongoing/unreleased items (#880)
+d1041db7 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-11-13 | feat: implement filesize validation for movies and episodes (#869)
+f2636e40 | Dustin Miller <1342542+spdustin@users.noreply.github.com> | 2024-11-13 | fix: correct Prowlarr capabilities (#879)
+4b726e5c | Spoked <dreu.lavelle@gmail.com> | 2024-11-11 | chore: update deps
+98cb2c12 | Spoked <dreu.lavelle@gmail.com> | 2024-11-11 | fix: skip unindexable items when resetting db
+5123567d | Spoked <dreu.lavelle@gmail.com> | 2024-11-11 | fix: disable reindexing. wip. change get items endpoint to use id instead of imdbid.
+139d9364 | Spoked <dreu.lavelle@gmail.com> | 2024-11-10 | feat: add reindexing of movie/shows in unreleased or ongoing state
+bb855171 | Spoked <dreu.lavelle@gmail.com> | 2024-11-09 | fix: added cleaner directory log when rebuilding symlinks
+b25658d2 | Spoked <dreu.lavelle@gmail.com> | 2024-11-08 | fix: more tweaks for scrapers and fine tuning.
+73c0bcc9 | Spoked <dreu.lavelle@gmail.com> | 2024-11-07 | fix: updated mediafusion and tweaked scrape func to be cleaner
+afdb9f6f | Spoked <dreu.lavelle@gmail.com> | 2024-11-07 | fix: updated torbox scraper to use api key. refactored scrapers slightly. added more logging to scrapers.
+ebd11fd7 | FlashLightning67 <98236663+FlashLightning67@users.noreply.github.com> | 2024-11-06 | fix: detecting multiple episodes in symlink library (#862)
+4430d2da | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-11-06 | fix: update state filtering logic to allow 'All' as a valid state (#870)
+3ad6caeb | Spoked <dreu.lavelle@gmail.com> | 2024-11-06 | feat: added upload logs endpoint to be used by frontend
+84cd9425 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-11-06 | chore(main): release 0.18.0
+656506ff | Spoked <dreu.lavelle@gmail.com> | 2024-11-06 | fix: fixed log for downloaded message
+d2cb0d9b | Spoked <dreu.lavelle@gmail.com> | 2024-11-05 | fix: remove orionoid sub check
+cb655720 | Spoked <dreu.lavelle@gmail.com> | 2024-11-05 | chore: sort and remove unused deps
+5aec8fb0 | Spoked <dreu.lavelle@gmail.com> | 2024-11-05 | fix: removed unused functions relating to resolving duplicates
+0c8057ae | iPromKnight <156901906+iPromKnight@users.noreply.github.com> | 2024-11-05 | fix: add HTTP adapter configuration for Jackett and Prowlarr scrapers… (#865)
+1713a516 | iPromKnight <156901906+iPromKnight@users.noreply.github.com> | 2024-11-05 | feat: add retry policy and connection pool configuration to request utils (#864)
+91d3f7d8 | Spoked <dreu.lavelle@gmail.com> | 2024-11-05 | fix: wrong headers attr and added orionoid sub check
+fd5c7264 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-11-05 | chore(main): release 0.17.0 (#808)
+703ad334 | iPromKnight <156901906+iPromKnight@users.noreply.github.com> | 2024-11-05 | fix: jackett again - my bad (#860)
+ed5fb2cb | iPromKnight <156901906+iPromKnight@users.noreply.github.com> | 2024-11-05 | feat: integrate dependency injection with kink library (#859)
+c80f609c | Gaisberg <None> | 2024-11-05 | chore: hotfix for db_migration merge
+14e818f1 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-11-05 | feat: database migrations, so long db resets (#858)
+27c8534f | iPromKnight <156901906+iPromKnight@users.noreply.github.com> | 2024-11-05 | feat: add rate limiting tests and update dependencies (#857)
+0bbde7d3 | iPromKnight <156901906+iPromKnight@users.noreply.github.com> | 2024-11-05 | fix: MediaFusion scraper. (#850)
+00ffee94 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-11-04 | chore(deps-dev): bump ruff from 0.3.7 to 0.7.2
+d41c2ff3 | iPromKnight <156901906+iPromKnight@users.noreply.github.com> | 2024-11-04 | feat: requests second pass (#848)
+6d014075 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-11-04 | Requesthandler bugfixes (#847)
+0d31e419 | PromKnight <promknight@proton.me> | 2024-11-04 | refactor: rework request handling and rate limiting for downloaders
+877ffec4 | PromKnight <promknight@proton.me> | 2024-11-04 | fix: remove accidental cache enablement
+78f76b9d | PromKnight <promknight@proton.me> | 2024-11-04 | refactor: integrate rate limiting and caching into service sessions
+00f4d236 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-11-03 | refactor: remove annatar scraper (#845)
+9c093ac8 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-11-03 | fix: mediafusion sometimes throwing error when parsing response (#844)
+19cf38fe | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-11-03 | fix: invalid rd instant availibility call if no infohashes should be checked (#843)
+13aa94e5 | iPromKnight <156901906+iPromKnight@users.noreply.github.com> | 2024-11-03 | feat: enhance session management and event processing (#842)
+86e6fd0f | iPromKnight <156901906+iPromKnight@users.noreply.github.com> | 2024-11-02 | fix: ensure selected files are stored in session during manual selection (#841)
+2096a4e8 | iPromKnight <156901906+iPromKnight@users.noreply.github.com> | 2024-11-02 | fix: handle removal of nested media items in remove_item function (#840)
+f91ffece | iPromKnight <156901906+iPromKnight@users.noreply.github.com> | 2024-11-02 | fix: correct type hint for incomplete_retries in StatsResponse (#839)
+2a0291c3 | iPromKnight <156901906+iPromKnight@users.noreply.github.com> | 2024-11-02 | refactor: implement composite key generation for MediaItem (#838)
+4e57c420 | PromKnight <promknight@proton.me> | 2024-11-02 | refactor: replace private attribute '_id' with 'id' in database models
+71a38839 | Gaisberg <None> | 2024-11-02 | chore: symlink library fixes
+f3fb3430 | Gaisberg <None> | 2024-11-01 | chore: styling
+26e73df1 | Gaisberg <None> | 2024-11-01 | refactor: incrementing id -> trakt_id
+4d7ac8d6 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-11-01 | fix: duplicate item after scraping for media that isn't in the database already (#834)
+d426a8ae | Gaisberg <None> | 2024-11-01 | chore: realdebrid logging to debug level
+86310082 | Gaisberg <None> | 2024-11-01 | fix: hotfix blacklist active stream
+c5ef5cc9 | Gaisberg <None> | 2024-11-01 | chore: uncomment alldebrid
+d75149eb | Gaisberg <None> | 2024-10-29 | refactor: simplify downloaders chore: option to manually trigger dev build refactor: rework /scrape to enable manual scraping via ui feat: stream management endpoints chore: refactore alldebrid, untested
+18cfa3b4 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-10-26 | fix: misleading message when manually adding a torrent (#822)
+d2f8374a | davidemarcoli <davide@marcoli.ch> | 2024-10-26 | feat: filesize filter
+acb22ce9 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-10-26 | feat: add manual torrent adding (#785)
+45528a9e | Spoked <dreu.lavelle@gmail.com> | 2024-10-26 | fix: overseerr outputting items without imdbid's
+325df429 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-10-26 | feat: Add Most Wanted items from Trakt (#777)
+19cedc84 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-10-26 | fix: future cancellation resulted in reset, retry endpoints fialing (#817)
+2676fe80 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-10-26 | fix: retry api now resets scraped_at (#816)
+0de32fd9 | Gaisberg <None> | 2024-10-24 | feat: auth bearer authentication
+f397041e | Gaisberg <None> | 2024-10-22 | chore: send sse data in different format
+02b7a81f | davidemarcoli <davide@marcoli.ch> | 2024-10-19 | fix: files sometimes not found in mount
+efbc471e | Gaisberg <None> | 2024-10-21 | feat: we now server sse via /stream
+28305ce5 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-10-19 | chore: remove unused tmdb api router
+bc6ff28f | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-10-19 | fix: add default value for API_KEY
+65a4aec2 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-10-19 | fix: add python-dotenv to load .env variables
+0020ad23 | Gaisberg <None> | 2024-10-19 | chore: add generateapikey endpoint, use loguru imports for logging
+f788fc4a | Gaisberg <None> | 2024-10-18 | !feat: secure most of api behind api_key
+a7ebb58b | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-10-20 | chore(main): release 0.16.2
+b35d67a3 | Spoked <dreu.lavelle@gmail.com> | 2024-10-20 | chore(deps): update deps
+8db6541f | Spoked <dreu.lavelle@gmail.com> | 2024-10-20 | fix: fixed replace torrents
+3fcaecfe | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-10-19 | chore(main): release 0.16.1
+502e52b5 | Spoked <dreu.lavelle@gmail.com> | 2024-10-19 | fix: listrr outputting imdbids instead of items. solves #802
+7aa48ede | Spoked <dreu.lavelle@gmail.com> | 2024-10-19 | fix: check item instance before add from content services
+6624b482 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-10-18 | chore(main): release 0.16.0
+8501c363 | Spoked <dreu.lavelle@gmail.com> | 2024-10-18 | fix: fixed wrongful checking of bad dirs and images when rebuilding symlink library
+7074fb0e | Spoked <dreu.lavelle@gmail.com> | 2024-10-18 | fix: changed default update interval from 5m to 24h on content list services
+612964ee | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-10-18 | fix: address memory usage (#787)
+a4e07935 | the-eversio <github@burninglava.com> | 2024-10-18 | refactor: use an abstract base class for downloaders (#762)
+f2020ed8 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-10-16 | fix: service endpoint response for downloaders (#782)
+8a9942a2 | equinox <Equinox@users.noreply.github.com> | 2024-10-15 | docs: remove duplicate service from readme
+254a7d34 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-10-14 | refactor: remove unnecessary checks for notifications (#781)
+1f24e4fe | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-10-14 | fix: fix state filter in items endpoint (#791)
+5bfe63aa | Filip Trplan <filip@trplan.si> | 2024-10-13 | fix: delete the movie relation before deleting the mediaitem (#788)
+943433cb | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-10-11 | fix: remove add to recurring on plex watchlist
+bf34db52 | davidemarcoli <davide@marcoli.ch> | 2024-10-10 | fix: plex watchlist not returning any items
+0dd561a1 | davidemarcoli <davide@marcoli.ch> | 2024-10-11 | fix: serialize subtitles for api response
+197713ae | Spoked <dreu.lavelle@gmail.com> | 2024-10-10 | fix: lower max events added to queue
+6a79f018 | Spoked <dreu.lavelle@gmail.com> | 2024-10-10 | Merge branch 'main' into oom_fix
+82fe92d9 | Filip Trplan <filip@trplan.si> | 2024-10-10 | fix: reset the scraped time when replacing magnets
+d6722fa4 | Spoked <dreu.lavelle@gmail.com> | 2024-10-10 | fix: respect orm when removing items
+01a506fa | Spoked <dreu.lavelle@gmail.com> | 2024-10-10 | fix: minor fixes post merge
+d04cbf1c | Spoked <dreu.lavelle@gmail.com> | 2024-10-10 | Merge branch 'main' into oom_fix
+e4b6e2b6 | Spoked <dreu.lavelle@gmail.com> | 2024-10-10 | fix: improved removing items from database
+9eec02dd | Filip Trplan <filip@trplan.si> | 2024-10-10 | feat: Types for the FastAPI API and API refactor (#748)
+ff14f855 | Spoked <dreu.lavelle@gmail.com> | 2024-10-09 | fix: stream results on stats endpoint
+a8a6aa9f | Spoked <dreu.lavelle@gmail.com> | 2024-10-09 | fix: switch to batched streaming stats endpoint for inc items
+bf4fc0e7 | Spoked <dreu.lavelle@gmail.com> | 2024-10-09 | fix: switch to generator for reset/retry endpoints
+24904fcc | centerionware <roguestar191@comcast.net> | 2024-10-03 | feat: Add debugpy as optional to entrypoint script if DEBUG env variable is set to anything.
+667e8840 | eversio <github@burninglava.com> | 2024-10-02 | test: add tests for symlink creation
+0139dddc | eversio <github@burninglava.com> | 2024-10-02 | test: fix failing symlink library tests
+314bd5b6 | eversio <github@burninglava.com> | 2024-10-02 | refactor: remove duplicate method `symlink(item)`
+d3ca7a4a | Spoked <dreu.lavelle@gmail.com> | 2024-10-02 | fix: update full compose with latest zilean changes
+a396400d | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-10-02 | chore(main): release 0.15.3
+6ae2a686 | Spoked <dreu.lavelle@gmail.com> | 2024-10-02 | fix: fixed comet unpack issue
+bef6056c | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-10-02 | chore(main): release 0.15.2 (#747)
+6ad6d4dd | eversio <github@burninglava.com> | 2024-10-02 | fix: support files in rclone root
+7aeca0bf | Spoked <dreu.lavelle@gmail.com> | 2024-09-30 | fix: changed to speed mode by default for downloaders
+5a81a0c1 | Spoked <dreu.lavelle@gmail.com> | 2024-09-30 | fix: add log back to orion
+52f466e3 | Spoked <dreu.lavelle@gmail.com> | 2024-09-30 | fix: orionoid and mediafusion fixed
+895ad0fe | Spoked <dreu.lavelle@gmail.com> | 2024-09-29 | Merge branch 'main' of https://github.com/rivenmedia/riven
+4ca9ca2c | eversio <github@burninglava.com> | 2024-09-27 | fix: refactor and re-enable alldebrid
+bdc33b22 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-29 | chore(main): release 0.15.1
+c9b80109 | Filip Trplan <filip@trplan.si> | 2024-09-29 | fix: prevent error when more than two streams with the same hash in set_torrent_rd
+96069563 | Spoked <dreu.lavelle@gmail.com> | 2024-09-29 | refactor: scraper housekeeping. improved stats endpoint for summary page on frontend
+61bc6803 | eversio <github@burninglava.com> | 2024-09-27 | fix: refactor and re-enable alldebrid
+0889a032 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-29 | chore(main): release 0.15.1
+eaefd631 | Filip Trplan <filip@trplan.si> | 2024-09-29 | fix: prevent error when more than two streams with the same hash in set_torrent_rd
+afc58b85 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-26 | chore(main): release 0.15.0 (#736)
+2308ce5d | Spoked <dreu.lavelle@gmail.com> | 2024-09-26 | fix: housekeeping
+40636dc3 | Spoked <dreu.lavelle@gmail.com> | 2024-09-26 | feat: added magnet handling for use in frontend
+7fc5b1b9 | Spoked <dreu.lavelle@gmail.com> | 2024-09-26 | feat: add magnets for use in frontend
+dc5219f8 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-26 | chore(main): release 0.14.2
+a9f8c4c6 | Filip Trplan <tg.trplan@gmail.com> | 2024-09-26 | feature: Replace torrents with magnet links (#733)
+d4f845cb | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-26 | chore(main): release 0.14.2
+8380b7ce | Spoked <dreu.lavelle@gmail.com> | 2024-09-26 | fix: lower worker count on symlink repair from 8 to 4 workers
+13a278f3 | Spoked <dreu.lavelle@gmail.com> | 2024-09-25 | fix: remove reverse on event sort
+839d63c2 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-24 | chore: fix discord invites
+f5388a6c | Gaisberg <None> | 2024-09-24 | chore: add port startup argument
+7cc491d0 | Spoked <dreu.lavelle@gmail.com> | 2024-09-24 | chore: updated env examples
+15444cb7 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-23 | chore(main): release 0.14.1
+d768eb8b | Spoked <dreu.lavelle@gmail.com> | 2024-09-23 | fix: update notification workflow
+3be31a64 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-23 | chore(main): release 0.14.0
+77dd6063 | Spoked <dreu.lavelle@gmail.com> | 2024-09-23 | chore(deps): updated project dependencies
+3967f1ea | Spoked <dreu.lavelle@gmail.com> | 2024-09-23 | chore(workflows): added differentiation to discord notification
+f4619c43 | Spoked <dreu.lavelle@gmail.com> | 2024-09-23 | fix: torbox scraper missing setting issue fixed.
+57f23d63 | Spoked <dreu.lavelle@gmail.com> | 2024-09-23 | feat: add manual scrape endpoint. fixed mdblist empty list issue. other small tweaks.
+e7e7e1d2 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-22 | chore: add sponsorship
+7e5290b7 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-22 | chore(main): release 0.13.3
+048cd718 | Spoked <dreu.lavelle@gmail.com> | 2024-09-22 | fix: mdblist error on imdb_id as NoneType
+8d526a8f | Spoked <dreu.lavelle@gmail.com> | 2024-09-22 | chore: add discord release notification
+550eb944 | Spoked <dreu.lavelle@gmail.com> | 2024-09-22 | chore: add discord release notification
+6fb94181 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-22 | chore(main): release 0.13.2
+76ccbf30 | Spoked <dreu.lavelle@gmail.com> | 2024-09-22 | chore: release 0.13.2
+805182a8 | Spoked <dreu.lavelle@gmail.com> | 2024-09-22 | fix: forgot to add updater files.....
+b600b6cc | Spoked <dreu.lavelle@gmail.com> | 2024-09-22 | feat: add jellyfin & emby support.
+4b8ce746 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-22 | chore(main): release 0.13.1
+c925a5b7 | Spoked <dreu.lavelle@gmail.com> | 2024-09-22 | fix: jackett isinstance using list instead of tuple
+ac3af99c | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-22 | chore(main): release 0.13.0
+10f10447 | Spoked <dreu.lavelle@gmail.com> | 2024-09-22 | fix: mdblist nonetype on imdb_id
+375302ea | Spoked <dreu.lavelle@gmail.com> | 2024-09-22 | feat: add jellyfin & emby support.
+220a0b5b | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-22 | chore(main): release 0.12.8
+5c50cc60 | Spoked <dreu.lavelle@gmail.com> | 2024-09-22 | fix: fixed type on env var for symlink workers
+039a3db6 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-21 | chore(main): release 0.12.7
+0481b982 | Spoked <dreu.lavelle@gmail.com> | 2024-09-21 | fix: lowered symlink max workers to 4 on db init
+846e8168 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-21 | chore(main): release 0.12.6
+5625307a | Spoked <dreu.lavelle@gmail.com> | 2024-09-21 | fix: remove missing attr
+dd4c796d | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-21 | chore(main): release 0.12.5
+540ba528 | Spoked <dreu.lavelle@gmail.com> | 2024-09-21 | fix: corrected rate limit for Torrentio
+591b07a9 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-21 | chore(main): release 0.12.4
+9a2a0c14 | Spoked <dreu.lavelle@gmail.com> | 2024-09-21 | fix: plex rss startswith error
+12f4a1aa | Spoked <dreu.lavelle@gmail.com> | 2024-09-21 | fix: revert schema validation, this is causing issues.
+0dfccbd0 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-21 | chore(main): release 0.12.3
+63fc95b7 | Spoked <dreu.lavelle@gmail.com> | 2024-09-21 | fix: mdblist list item validation fixed
+4ecc5c50 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-21 | chore(main): release 0.12.2
+1b7365c7 | Spoked <dreu.lavelle@gmail.com> | 2024-09-21 | fix: update api with json schema
+6cb5c1f1 | Spoked <dreu.lavelle@gmail.com> | 2024-09-21 | chore: sorted imports.
+dca7f48e | Spoked <dreu.lavelle@gmail.com> | 2024-09-21 | chore(api): add json schema support
+72feafaa | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-20 | chore(main): release 0.12.1
+652924eb | Spoked <dreu.lavelle@gmail.com> | 2024-09-21 | fix: tweak db reset. fixed issue with mdblist.
+3b852ff4 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-09-20 | chore(main): release 0.12.0
+5a7f93da | Spoked <dreu.lavelle@gmail.com> | 2024-09-20 | chore(deps): update deps
+98f9e495 | Spoked <dreu.lavelle@gmail.com> | 2024-09-20 | feat: improvements to reset/retry/remove endpoints
+365f0223 | Spoked <dreu.lavelle@gmail.com> | 2024-09-19 | feat: add alias support in parsing when scraping torrents. several other tweaks.
+2f15fbd9 | Spoked <dreu.lavelle@gmail.com> | 2024-09-17 | fix: tweak logging for db init from symlinks.
+17a579e1 | Spoked <dreu.lavelle@gmail.com> | 2024-09-16 | fix: throw exception instead of error on plex validation
+71fb8592 | Spoked <dreu.lavelle@gmail.com> | 2024-09-16 | feat: move symlink db init to progress bar. added threading to speed it up. needs testing!
+797778ca | Spoked <dreu.lavelle@gmail.com> | 2024-09-16 | fix: content services now only output new items that arent in the db. tidied some initial startup logging.
+9491e530 | Spoked <dreu.lavelle@gmail.com> | 2024-09-13 | fix: add infohash to scraped log msg. added exclude for unreleased to retry lib.
+f7668c68 | Dreu LaVelle <spoked@dev.bjorn.com> | 2024-09-13 | fix: unhardcode orionoid limitcount. whoops!
+6a1c056d | Gaisberg <None> | 2024-09-12 | refactor: use last_state where possible to avoid excess calculation
+f5e08f8f | Gaisberg <None> | 2024-09-12 | fix: slow api calls due to calculating state for every item
+46a65104 | Gaisberg <None> | 2024-09-12 | fix: revert back to old way of retry library
+1fc32c84 | Gaisberg <None> | 2024-09-11 | chore: move init warning logs to debug level
+c6f93375 | Gaisberg <None> | 2024-09-10 | fix: select biggest file for movie caches
+578ae8f8 | Gaisberg <None> | 2024-09-10 | fix: ranking wasnt followed by downloader
+f5c849f0 | Gaisberg <None> | 2024-09-10 | fix: resetting a item would make it unresettable again
+18f22c1d | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-09-09 | fix: revert item in db check during state processing
+c0e1e2c4 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-09-05 | fix: movie obj trying to index as show type
+aecaf372 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-09-04 | fix: add torrent name and infohash to download log. update deps to resolve parsing bugs.
+d45882f9 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-09-02 | fix: fixed completed items being added to queue on startup
+44e0161c | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-09-01 | fix: anime movies not showing in correct dir
+17659bbd | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-09-01 | chore(deps): update deps for bugs
+f3974efc | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-09-01 | fix: fixed bug with upscaled in parsett. update dep
+475f9345 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-09-01 | fix: moved log cleaning to scheduled func. fixed bug with new furiosa movie
+bbc5ce75 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-09-01 | feat: update RTN to latest
+01e71f02 | iPromKnight <156901906+iPromKnight@users.noreply.github.com> | 2024-08-31 | fix: add sleep between event retries
+2ebbf31f | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-08-30 | chore(main): release 0.11.1
+4453a15d | Gaisberg <None> | 2024-08-30 | chore: release 0.11.1
+f94097dc | Gaisberg <None> | 2024-08-30 | hotfix: realdebrid, handle empty cached streams
+8b0e1d82 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-08-30 | chore(main): release 0.11.0
+6ee47424 | Gaisberg <None> | 2024-08-26 | refactor: downloader, realdebrid, state transitions, symlink module (exponential backoff) chore: add run_at attr to event types to specify next run time and include event with futures fix: get all content from content services (previously only one item was picked) fix: trakt indexer not picking up shows chore: stop spamming retry count in logs chore: remove whitespaces from modified files chore: remove unnecessary logging and change some log levels fix: remove local updater and stop possibility of looping with symlinked state fix: validate subtitle providers on init, remove addic7ed and napiprojekt providers feat: "Ongoing" and "Unreleased" states for shows fix: event updates for frontend fix: trakt indexing was not copying correct item attributes in previous release
+71012efe | hjongedijk <harm@h-mail.nl> | 2024-08-21 | fix: updated settings.json variables for opensubtitles
+65e97254 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-08-19 | chore(deps): bump uvicorn from 0.27.1 to 0.30.6
+276ed79f | iPromKnight <promknight@proton.me> | 2024-08-20 | refactor: Refactor codebase to improve logging, error handling, and session management
+072a352f | Gaisberg <None> | 2024-08-20 | chore: reset endpoint to use db functions
+085d3cbd | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-08-19 | chore(main): release 0.10.5
+5c3c39f1 | Gaisberg <None> | 2024-08-19 | chore: bump version to 0.10.5
+37ded449 | Gaisberg <None> | 2024-08-19 | ci: build dev image from main
+54507130 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-08-19 | chore(main): release 0.10.4 (#646)
+f96fe54a | Gaisberg <None> | 2024-08-19 | feat: add a subtitle provider (subliminal) fix: address high memory usage refactor: events, threading, api fix: various small bug fixes chore: websockets for smoother frontend experience
+cacbc46f | Gaisberg <None> | 2024-08-19 | chore: release 0.10.4
+4ececcbc | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-08-19 | Dev branch draft (#590)
+0126d7aa | iPromKnight <promknight@proton.me> | 2024-08-17 | Revert "fix: address memory leak by closing SQLAlchemy sessions and add connection pool options"
+b1f699dc | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-08-17 | chore(main): release 0.10.3
+0ebd38fb | iPromKnight <promknight@proton.me> | 2024-08-17 | fix: address memory leak by closing SQLAlchemy sessions and add connection pool options
+a7f7586d | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-08-16 | Update README.md
+f9587558 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-08-16 | Update LICENSE.md
+650869e9 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-08-16 | Create CONTRIBUTING.md
+aac5c804 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-08-16 | Create CODE_OF_CONDUCT.md
+99408ab1 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-08-14 | chore(main): release 0.10.2
+6e26304f | iPromKnight <promknight@proton.me> | 2024-08-14 | fix: correct attribute names in zilean scraper
+9000e771 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-08-10 | chore(main): release 0.10.1
+b110cac6 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-08-11 | fix: add cascade drop on alembic table
+65c721e5 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-08-10 | chore(main): release 0.10.0
+a072821c | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-08-10 | feat: release 0.9.3
+8de0a9b7 | Zombie <174158372+ZombieApps@users.noreply.github.com> | 2024-08-06 | add database to frontend docker compose (#601)
+3aea8a49 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-31 | chore(main): release 0.9.2 (#588)
+aca5a0f0 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-31 | fix: removed lazy from mapped_column on blacklisted_streams
+989bf8bc | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-31 | fix: moved blacklisting to an attr of item
+d8e565f9 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-31 | feat: add ignore hash feature
+b037e2a9 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-30 | chore(main): release 0.9.1 (#584)
+f3103b6f | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-31 | fix: merged changes with db fixes
+6047b96e | David Young <davidy@funkypenguin.co.nz> | 2024-07-29 | docs: Update ElfHosted details in README (#578)
+af88478a | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-27 | fix: add libtorrent to docker image
+7eb9767f | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-27 | chore(main): release 0.9.0 (#582)
+91ba58bf | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-27 | fix: add alembic reinit to hard reset
+e3366a63 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-27 | fix: add hard reset to cli
+16c1ceb3 | Gaisberg <None> | 2024-07-27 | fix: add parent object into stream
+e57d06c4 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-27 | fix: update rollback
+ce074b32 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-27 | fix: plex watchlist updated to work with new api changes. added db guards. improved trakt id detection. changed rd blacklisting to only blacklist on movie/episode items or on empty rd cache
+76fdd894 | Gaisberg <None> | 2024-07-26 | fix: remove state logging where state is not available
+d55e0617 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-26 | feat: add automatic dev builds in pipeline
+ae4ed64a | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-26 | Merge pull request #579 from rivenmedia/fix_symlink_count
+f4ff9b39 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-26 | Merge pull request #575 from rivenmedia/stream_rework
+5c7943d8 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-26 | fix: tidied push_event_queue. this func has been causing looping issues we're seeing.
+87c32418 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-25 | fix: add extra logging to track issue. added mutex to add_to_running
+03c60236 | Gaisberg <None> | 2024-07-24 | fix: include stream in db, rework blacklisting
+cbe90126 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-25 | fix: wrong symlink count at startup. corrected post symlink handling
+ade01476 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-25 | chore(main): release 0.8.4 (#577)
+266cf0cb | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-25 | fix: Release 0.8.4
+32be8fc1 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-25 | fix: tweaked comet scraper. removed poetry venv from entrypoint.
+0ae2bcf4 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-25 | chore(main): release 0.8.3 (#576)
+66085da7 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-25 | chore: release 0.8.3
+2dc24dca | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-24 | chore: Update README.md
+c8f873cc | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-24 | chore: update docker-compose.yml
+e4c34b48 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-24 | Merge pull request #574 from rivenmedia/release-please--branches--main
+3b759834 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-24 | chore(main): release 0.8.2
+02aab4f4 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-24 | Merge pull request #573 from rivenmedia/fix_api_port
+6a7cf4fb | Gaisberg <None> | 2024-07-24 | fix: api port back to 8080
+e1db03dd | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-23 | chore(main): release 0.8.1 (#572)
+8becb592 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-24 | fix: revert appendleft on push_event_queue
+a0eb41b7 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-24 | fix: moved poetry files to root workdir
+24ca30ca | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-23 | chore(main): release 0.8.0 (#571)
+091d0bc1 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-24 | chore: release 0.8.0
+572b2940 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-24 | Merge pull request #570 from rivenmedia/fix_ruff_errors
+08b7144b | Gaisberg <None> | 2024-07-24 | fix: docker metadata from release please
+0fb4ba8c | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-24 | Merge pull request #568 from rivenmedia/fix_ruff_errors
+e48659ff | Gaisberg <None> | 2024-07-24 | fix: docker metadata from release please
+b5b8cff2 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-24 | Merge pull request #567 from rivenmedia/fix_ruff_errors
+d30679d9 | Gaisberg <none> | 2024-07-23 | fix: fix around 200 ruff errors
+2a014ba1 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-23 | Merge pull request #563 from rivenmedia/conventional-commits
+0c8ad756 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-23 | Merge pull request #565 from rivenmedia/revert-564-fix_ruff_errors
+19c499e5 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-23 | Revert "fix: fix around 200 ruff errors"
+fe923f4b | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-23 | Merge pull request #558 from rivenmedia/dependabot/pip/pytest-8.3.1
+37f52152 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-23 | Merge pull request #564 from rivenmedia/fix_ruff_errors
+a73fbfd6 | Gaisberg <none> | 2024-07-23 | fix: fix around 200 ruff errors
+522bde09 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-23 | Merge pull request #507 from rivenmedia/bugfix/more-startup-validation
+308c5acf | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-23 | Merge pull request #550 from rivenmedia/fix/crash-on-failed-metadata-enhancement
+5ffddc10 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-07-23 | feat: enforce conventional commits
+5bf802d3 | Dreu LaVelle <dreu.lavelle@gmail.com> | 2024-07-23 | fix: change version filename in dockerfile
+14eff8d7 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-22 | feat: add changelog. add version.txt (#562)
+dc637d90 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-22 | Hotfix enhance exiting (#561)
+657068f8 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-22 | fix: continue instead of exit on failed to enhance metadata (#560)
+59e0204e | Harm Jongedijk <harm@h-mail.nl> | 2024-07-23 | Added missing docker files for port specific and network_mode: host - SQLite and Postgres (#556)
+2ee11fcb | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-07-22 | chore(deps-dev): bump pytest from 8.2.2 to 8.3.1
+5f8d8c42 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-22 | fix: comet validation needed is_ok on response instead of ok (#557)
+563159cc | Harm Jongedijk <harm@h-mail.nl> | 2024-07-22 | Updated tab style readme (#555)
+a2a2baf1 | Harm Jongedijk <harm@h-mail.nl> | 2024-07-22 | Created multiple docker files and updated readme to latest version (#553)
+652671e1 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-07-22 | feat: Add endpoint to manually request items (#551)
+eeb2d006 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-07-22 | fix: remove frontend ci (#552)
+6016c54e | davidemarcoli <davide@marcoli.ch> | 2024-07-11 | fix: validate rd user data and updater settings on startup
+88b7f0b9 | davidemarcoli <davide@marcoli.ch> | 2024-07-22 | fix: crash on failed metadata enhancement
+b6e6bc38 | iPromKnight <156901906+iPromKnight@users.noreply.github.com> | 2024-07-22 | Release 080 (#549)
+0355e648 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-14 | fix: switch to dynamic private env (#523)
+eb8d3d0a | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-14 | fix: switch to dynamic private env (#522)
+a02ab943 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-14 | refactor: move code with private env to different file (#521)
+ffad7e31 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-14 | fix: add BACKEND_URL arg to avoid build error (#520)
+b7309c49 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-14 | fix: add BACKEND_URL arg to avoid build error (#519)
+e48ee932 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-14 | feat!: add BACKEND_URL environment variable to support for custom backend URL (#518)
+f2bc6f6a | David Young <davidy@funkypenguin.co.nz> | 2024-07-14 | Add releaseplease workflow (#484)
+78f512d3 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-07-12 | chore(deps-dev): bump vitest from 1.6.0 to 2.0.1 in /frontend (#498)
+5379784e | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-11 | fix: text color on light theme (#506)
+5ef689be | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-11 | feat: add top rated section (#505)
+41e2c716 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-11 | fix: lower the z index and increase z index of header (#504)
+8085f15d | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-10 | fix: minor ui improvements (#503)
+fadab73b | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-10 | feat: add lazy loading for images in statistics and home pages (#502)
+71e6365d | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-07-10 | feat: improved ui (#422)
+0dbc9f70 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-02 | Release 076 (#488)
+12f5c679 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-02 | Release 076 (#487)
+d09f512a | Spoked <Spoked@localhost> | 2024-07-01 | fix: add try-catch to submit_job for runtime errors
+864535b0 | Spoked <Spoked@localhost> | 2024-07-01 | fix: revert trakt/item modules back to 0.7.4
+a9b1ea93 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-07-01 | Release 0.7.5 (#478)
+fba45b1b | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-06-26 | chore(deps): bump coverage from 7.5.3 to 7.5.4 (#467)
+2e33f46a | KingPin <KingPin@users.noreply.github.com> | 2024-06-23 | Update docker-build.yml (#463)
+64a99782 | KingPin <KingPin@users.noreply.github.com> | 2024-06-23 | Update docker-build.yml (#462)
+7c1b32f9 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-22 | Release 0.7.4 (#454)
+cb296f53 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-20 | Changes (#453)
+6f301251 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-20 | Release 0.7.3 (#439)
+adf54f44 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-06-19 | chore: remove unncessary identifier (#446)
+99996829 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-06-19 | chore(deps): bump embla-carousel-svelte from 8.1.3 to 8.1.5 in /frontend (#427)
+de056209 | Andres <aamorin@gmail.com> | 2024-06-18 | Bugfix - Fetch all pages unless limit is set (#437)
+a99eaa97 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-18 | Bugfixes (#436)
+561a8d2b | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-18 | Bugfixes (#435)
+ab78bd6e | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-17 | Bugfixes (#434)
+80a7b794 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-17 | Small Tweaks (#433)
+6e7512dc | DrMxrcy <58747968+DrMxrcy@users.noreply.github.com> | 2024-06-17 | Add Proxy Support to Real Debrid (#418)
+c5412ab5 | Matthew Adams <roguestar191@comcast.net> | 2024-06-17 | Feat-prowlarr (#431)
+f6c5175a | lostb1t <coding-mosses0z@icloud.com> | 2024-06-17 | Return of the string type for mdb lists (#423)
+c6338531 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-17 | Docker (#421)
+aa30c564 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-17 | Docker (#420)
+9f6c7d14 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-17 | Docker (#419)
+38c1b751 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-06-16 | fix: add new settings changes to frontend (#416)
+f2b86e08 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-16 | fix: RTN import incorrect after updating package (#415)
+15df41d3 | Spoked <Spoked@localhost> | 2024-06-16 | fix: update packages
+9c82c9cd | Spoked <Spoked@localhost> | 2024-06-16 | chore: update readme & ci. add env example vars.
+cc90a1ed | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-06-16 | chore: minor fastapi tweaks (#414)
+adc4e9a0 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-06-16 | feat: added tmdb api support (#410)
+8e3c63be | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-16 | Fix (#395)
+282eb356 | lostb1t <coding-mosses0z@icloud.com> | 2024-06-13 | feat: add support for mdblist urls (#402)
+dac79dc4 | David Young <davidy@funkypenguin.co.nz> | 2024-06-13 | Propose README update (#396)
+5dec3e95 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-12 | Tidy (#391)
+8a9e941f | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-06-12 | feat: frontend backend and ui improvements (#358)
+41bc74e4 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-11 | fix: change Path objs to str (#389)
+2944bf07 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-11 | fix: convert str to path first (#388)
+3e0a5758 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-11 | fix: episode attr error when checking Show type (#387)
+d814c038 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-11 | Force refresh (#385)
+73f437be | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-11 | Force refresh (#383)
+b88c4754 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-11 | fix: change mdblist str to int (#382)
+5e1eadaf | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-11 | docker: small fixes (#381)
+075f9183 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-11 | Fixes (#378)
+f9b2feb2 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-07 | API Changes (#359)
+1288691f | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-07 | Changes (#357)
+7351440b | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-07 | Changes (#356)
+8edb0ce7 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-06-07 | fix: minor fix to hooks.server.ts (#355)
+64a0874f | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-06-07 | Fix mediafusion form (#354)
+08a2c41a | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-06-06 | Add mediafusion scraper (#352)
+2c708380 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-06 | Realdebrid and Symlink Changes (#351)
+666a1ee4 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-06-06 | Jackett improvements (#349)
+c66f01af | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-06-06 | Merge pull request #350 from dreulavelle/bugfix/plex-watchlist-return-type
+45b2d1f1 | davidemarcoli <davide@marcoli.ch> | 2024-06-06 | Fix plex qatchlist return type when not using rss
+cc7b9312 | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-06-06 | Merge pull request #342 from dreulavelle/fix_invalid_settings_crash
+fb17afba | Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com> | 2024-06-06 | Merge pull request #348 from dreulavelle/feature/knightcrawler
+4cca08d7 | davidemarcoli <davide@marcoli.ch> | 2024-06-06 | Improve handling of invalid settings file
+0c87f47b | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-06-06 | fix: fixed about page github errors and other minor improvements (#347)
+86575324 | davidemarcoli <davide@marcoli.ch> | 2024-06-06 | Small cleanup
+4121039f | davidemarcoli <davide@marcoli.ch> | 2024-06-06 | Revert more stuff
+9a82a16e | davidemarcoli <davide@marcoli.ch> | 2024-06-06 | Revert stuff not related to knightcrawler
+bd2c58bf | davidemarcoli <davide@marcoli.ch> | 2024-06-06 | Add knightcrawler scraper Add torbox downloader to frontend Fix dashboard page
+03cd45c2 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-06-05 | fix: fixed the errors in frontend to make it working, still some changes and rewrite needed for improvements (#346)
+61736fb3 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-04 | Fix/orionoid exception (#343)
+dcd5067a | davidemarcoli <davide@marcoli.ch> | 2024-06-04 | Improve error handling
+6dc32ea8 | davidemarcoli <davide@marcoli.ch> | 2024-06-04 | Use default settings when the provided settings file can't be parsed
+a45ca8e4 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-04 | Tidy (#341)
+9eef9cc3 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-04 | Tidy (#340)
+509bf3d4 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-04 | Tidy (#339)
+e0e51a8b | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-04 | Tidy (#338)
+8233f8fc | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-04 | Tidy (#337)
+5ca02a48 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-03 | feat: finish up trakt integration (#333)
+25cd6b27 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-03 | forgot to add files.. will delete after (#332)
+10a92f58 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-06-03 | chore: turn off tests. need to redo a couple tests (#330)
+6d2679bd | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-05-28 | Bug fixes (#287)
+3f9b71ad | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-04-07 | Implement Versions & Sorting (#256)
+a529bea2 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-03-05 | Initialization status moved to enable onboarding (#249)
+af697a08 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-03-05 | chore(deps): bump lucide-svelte from 0.341.0 to 0.344.0 in /frontend (#244)
+bab1f29e | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-03-05 | chore(deps-dev): bump vitest from 1.2.1 to 1.3.1 in /frontend (#245)
+46970610 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-03-05 | chore(deps-dev): bump eslint from 8.56.0 to 8.57.0 in /frontend (#246)
+dfd35dc9 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-03-05 | chore(deps): bump bits-ui from 0.18.2 to 0.19.3 in /frontend (#247)
+bd82b239 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-03-03 | fix: tidy parser. add lint/test to makefile. (#241)
+45f33814 | Hank Bond <3474285+omnunum@users.noreply.github.com> | 2024-03-02 | Alternate startup logic to correctly wait on services to validate (#242)
+f58f3263 | Hank Bond <3474285+omnunum@users.noreply.github.com> | 2024-03-02 | Merge pull request #239 from dreulavelle/hotfix-scrapers
+345dc7bf | Hank Bond <3474285+omnunum@users.noreply.github.com> | 2024-03-02 | fix jacked merge round 2
+459e94bc | Hank Bond <3474285+omnunum@users.noreply.github.com> | 2024-03-02 | fix jacked merge
+b794b2ac | Hank Bond <3474285+omnunum@users.noreply.github.com> | 2024-03-02 | Merge branch 'hotfix-scrapers' of https://github.com/dreulavelle/iceberg into hotfix-scrapers
+2c115ed3 | Hank Bond <3474285+omnunum@users.noreply.github.com> | 2024-03-02 | fix smell
+188bd71d | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-02-27 | Merge branch 'main' into hotfix-scrapers
+fadacf93 | Hank Bond <3474285+omnunum@users.noreply.github.com> | 2024-02-27 | Yield item from Jackett
+10b52583 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-02-27 | chore(deps-dev): bump @typescript-eslint/eslint-plugin in /frontend (#220)
+6d181fc7 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-02-27 | chore(deps): bump tailwind-variants from 0.1.20 to 0.2.0 in /frontend (#222)
+3c9f873f | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-02-27 | chore(deps): bump lucide-svelte from 0.323.0 to 0.341.0 in /frontend (#233)
+697829d2 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-02-27 | chore(deps): bump bits-ui from 0.17.0 to 0.18.2 in /frontend (#234)
+04c53be5 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-02-27 | chore(deps-dev): bump vite from 5.0.12 to 5.1.4 in /frontend (#235)
+86f6ad08 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-02-26 | Dev (#237)
+b932df68 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-02-06 | chore(deps): bump bits-ui from 0.16.0 to 0.17.0 in /frontend (#210)
+fbc922aa | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-02-06 | chore(deps): bump lucide-svelte from 0.314.0 to 0.323.0 in /frontend (#207)
+1f05549b | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-02-06 | chore(deps-dev): bump @sveltejs/adapter-node in /frontend (#206)
+080d02cf | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-02-03 | feat: frontend and backend improvements (#197)
+77e7ad73 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-02-02 | feat: improved frontend ui (#195)
+22e309f4 | KingPin <KingPin@users.noreply.github.com> | 2024-02-01 | add commit hash based docker image tags (#194)
+f3341b15 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-30 | chore(deps-dev): bump @typescript-eslint/parser in /frontend (#183)
+1ed41055 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-30 | chore(deps-dev): bump @typescript-eslint/eslint-plugin in /frontend (#184)
+c8bfa472 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-30 | chore(deps): bump mode-watcher from 0.1.2 to 0.2.0 in /frontend (#185)
+ebbba07c | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-30 | chore(deps-dev): bump @sveltejs/kit from 2.4.3 to 2.5.0 in /frontend (#186)
+94e27d4f | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-30 | chore(deps): bump bits-ui from 0.15.1 to 0.16.0 in /frontend (#187)
+b3b816b7 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-01-29 | Update 0.4.5 (#180)
+b155e606 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-01-24 | fix: correct parsing of external id's (#163)
+bac8284f | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-01-24 | docs: minor improvements (#162)
+2ad79866 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-01-24 | docs: minor improvements (#161)
+0d0a12f5 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-01-24 | docs: minor improvements (#160)
+b6c26999 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-01-24 | feat: frontend improvements (#159)
+1e714bfc | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2024-01-24 | feat: frontend improvements (#158)
+a0aa0767 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-23 | chore(deps): bump bits-ui from 0.14.0 to 0.15.1 in /frontend (#153)
+4833c7bf | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-23 | chore(deps): bump lucide-svelte from 0.309.0 to 0.314.0 in /frontend (#154)
+b0071969 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-23 | chore(deps-dev): bump prettier from 3.1.1 to 3.2.4 in /frontend (#155)
+840ca909 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-23 | chore(deps-dev): bump @sveltejs/kit from 2.3.2 to 2.4.2 in /frontend (#156)
+6101511b | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-01-20 | fix: handle bad quality manually in parser (#145)
+95472496 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-01-18 | Merge pull request #143 from dreulavelle/bug/content/update_None_items
+98063664 | Gaisberg <None> | 2024-01-18 | Avoid [None] if empty content service
+a93050a2 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-01-17 | Jackett rewrite (#139)
+943b098f | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-01-17 | feat: Listrr Support Added (#136)
+9020ee54 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-01-17 | Merge pull request #137 from dreulavelle/dev_startup
+7be327dd | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-17 | chore(deps-dev): bump @sveltejs/adapter-node in /frontend (#138)
+d377c96b | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-17 | chore(deps): bump bits-ui from 0.13.0 to 0.14.0 in /frontend (#130)
+a76aaecd | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-17 | chore(deps-dev): bump @sveltejs/kit from 2.0.1 to 2.3.2 in /frontend (#132)
+e27bd4d4 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-17 | chore(deps): bump lucide-svelte from 0.307.0 to 0.309.0 in /frontend (#133)
+8ef8efa2 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-17 | chore(deps-dev): bump @typescript-eslint/eslint-plugin in /frontend (#134)
+39f87532 | Gaisberg <None> | 2024-01-17 | Dev startup to disabling pickling
+156f56e5 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-01-17 | Merge pull request #117 from dreulavelle/GH-82
+6704f8d3 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-01-14 | Parse rewrite (#128)
+e47c89b1 | Gaisberg <None> | 2024-01-15 | Remove uncached stream hashes from item to avoid loop, some blacklisting logic could also be good
+657475f4 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-09 | chore(deps): bump lucide-svelte from 0.303.0 to 0.307.0 in /frontend (#124)
+1b686ed2 | Gaisberg <None> | 2024-01-08 | Temporary fix to test
+97d2b183 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-01-08 | Parser (#119)
+bdbe23b6 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2024-01-06 | Parser (#118)
+d7c0d2a4 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-01-06 | Look for only movies and shows (#115)
+4b35ab82 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-01-06 | Fix faulty logic in plex_watchlist (#113)
+bd1cc947 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-01-06 | Merge pull request #114 from dreulavelle/health_endpoint
+5a43a72b | Gaisberg <None> | 2024-01-06 | Remove useless method
+68d45aef | Gaisberg <None> | 2024-01-06 | fix typo in state machine and handle movie pathing correctly
+546bc0d4 | Gaisberg <None> | 2024-01-06 | Simplified downloading logic and modified state matchine
+0dd7c031 | Gaisberg <None> | 2024-01-06 | Add initialized status to app health endpoint
+a1bae19c | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2024-01-06 | Empty settings, jackett and performance improvements (#109)
+7e9524aa | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-02 | chore(deps-dev): bump @typescript-eslint/parser in /frontend (#104)
+0a553955 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-02 | chore(deps): bump lucide-svelte from 0.302.0 to 0.303.0 in /frontend (#103)
+8196cad4 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-02 | chore(deps-dev): bump @typescript-eslint/eslint-plugin in /frontend (#105)
+9234f785 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2024-01-02 | chore(deps): bump bits-ui from 0.11.8 to 0.13.0 in /frontend (#106)
+5e9ffa47 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-29 | Orionoid (#96)
+c3326dd9 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2023-12-29 | feat: fixed size of command palette on large device (#98)
+2161e4f4 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2023-12-28 | State machine improvements (#94)
+de4c3197 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2023-12-26 | chore(deps-dev): bump @typescript-eslint/parser in /frontend (#90)
+74c66076 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2023-12-26 | chore(deps): bump lucide-svelte from 0.298.0 to 0.302.0 in /frontend (#91)
+74f75299 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2023-12-26 | chore(deps): bump tailwind-merge from 2.1.0 to 2.2.0 in /frontend (#92)
+01d41048 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2023-12-26 | chore(deps-dev): bump @typescript-eslint/eslint-plugin in /frontend (#93)
+22e71d37 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2023-12-26 | chore(deps-dev): bump vitest from 1.0.4 to 1.1.0 in /frontend (#89)
+f3444ccf | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2023-12-26 | feat: added content settings and other minor improvements (#88)
+2641de0f | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2023-12-24 | feat: frontend improvements,, added settings! (#86)
+4d37e8b8 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-22 | set scrape type to series instad of show. invalid url before. (#85)
+2f668f2d | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2023-12-22 | Merge pull request #78 from dreulavelle/gb_tweaks
+3625577c | Gaisberg <None> | 2023-12-22 | Fix scraping logging indent
+4fdf3b37 | KingPin <KingPin@users.noreply.github.com> | 2023-12-21 | add explicit permissions to GHA (#81)
+a4547c60 | KingPin <KingPin@users.noreply.github.com> | 2023-12-21 | Update github actions with multiarch etc (#80)
+bab31725 | Spoked <Spoked@localhost> | 2023-12-21 | fix watchlist. needs rewrite to use plexapi. will fix later.
+d8272758 | Gaisberg <None> | 2023-12-22 | Address slow loading times and cpu usage, hacky but what the hell
+c503b8a7 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-21 | Symlink fixes (#76)
+14da4053 | Gaisberg <None> | 2023-12-21 | Add tweaks, add some kind of parsing for torrents etc.
+f469ab01 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-21 | tidy imports (#79)
+ca2c0890 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-21 | Symlink fixes (#76)
+52205441 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-20 | Symlink fixes (#75)
+f4b35d68 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-19 | Docker (#70)
+555d9b50 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2023-12-19 | Merge pull request #66 from dreulavelle/GH-65
+0ce381b5 | Gaisberg <None> | 2023-12-19 | Add symlinking guide to readme
+5e70b760 | Gaisberg <None> | 2023-12-19 | Get plex items from only wanted sections
+75f0c442 | Gaisberg <None> | 2023-12-19 | Remove unused settings
+79ba1e94 | Gaisberg <None> | 2023-12-19 | Move mount settings to general settings, fix section updating for only our sections
+c2abeff5 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2023-12-19 | Merge pull request #64 from dreulavelle/GH-63
+cfba13e4 | Gaisberg <None> | 2023-12-18 | Aired_at == None for not released seasons
+b1304cd7 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2023-12-18 | Merge pull request #62 from dreulavelle/GH-53
+7ad9dab4 | Gaisberg <None> | 2023-12-18 | Torrentio rate limiter improvements, realdebrid downloading improvements
+8d54ed5c | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2023-12-18 | Concurrency and show fixes (#52)
+315f3109 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2023-12-18 | feat: formatted using black & prettier (in frontend) and moved to crlf (#51)
+ffec1c47 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2023-12-17 | feat: frontend improvements (#50)
+ee59e95e | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-17 | Fix dockerfile (#49)
+f89b5c01 | JustHereToBreakThings <154031386+JustHereToBreakThings@users.noreply.github.com> | 2023-12-17 | Fix dockerfile (#48)
+750822d6 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-17 | remove entrypoint as its causing issues. set default puid/pgid. (#47)
+a4e6f4c6 | Spoked <Spoked@localhost> | 2023-12-16 | Needs to be set to alias instead of explicit id
+f5d2636d | Spoked <Spoked@localhost> | 2023-12-16 | Fix perms on dir/files
+022aa8f9 | Spoked <Spoked@localhost> | 2023-12-16 | Fix perms on dir/files
+d3e2030b | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-16 | Docker (#45)
+4e61a4fc | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-16 | fix symlink permission issue (#44)
+b53dc9d1 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2023-12-16 | chore(deps): bump lucide-svelte from 0.294.0 to 0.298.0 in /frontend (#39)
+67a7b210 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2023-12-16 | chore(deps-dev): bump @typescript-eslint/eslint-plugin in /frontend (#41)
+5390cf09 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2023-12-16 | chore(deps-dev): bump eslint-config-prettier in /frontend (#42)
+e0ab0379 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-16 | Dependabot (#36)
+b7357a32 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2023-12-16 | chore(deps-dev): bump svelte from 4.2.7 to 4.2.8 in /frontend (#34)
+6bc2257c | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2023-12-16 | chore(deps-dev): bump prettier-plugin-tailwindcss in /frontend (#33)
+48d72f55 | dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> | 2023-12-16 | chore(deps-dev): bump eslint-plugin-svelte in /frontend (#32)
+b6d46a99 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-16 | add dependabot. some minor tweaks. (#28)
+b43ad6a9 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2023-12-16 | Use datetime object for aired_at and implement requested_at (#30)
+fd19f8a8 | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2023-12-16 | feat: frontend fixes and improvements (#29)
+e6b0a466 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2023-12-15 | Minor symlinking and state tweaks (#27)
+15d674cd | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-15 | Fix media items (#26)
+77f7f4e5 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2023-12-15 | Fix media.py merge conflict fuckups (#25)
+839dc938 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-14 | Fix update filter. Switch to debug logging. (#22)
+0a909c83 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-14 | Add docker. Other light fixes for paths (#24)
+65caf772 | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2023-12-14 | Merge pull request #17 from dreulavelle/symlinking
+24e1318c | Gaisberg <none> | 2023-12-14 | Data changes, stab at library refesh logs
+c1ea9e3d | Gaisberg <none> | 2023-12-14 | Fix requirements file
+640466b2 | Gaisberg <none> | 2023-12-13 | Fix gitignore
+1fff7756 | Gaisberg <none> | 2023-12-13 | Modify default settings
+c9a2266e | Gaisberg <none> | 2023-12-13 | Merge branch 'main' into symlinking
+9f5c01a0 | Gaisberg <none> | 2023-12-13 | Symlinking, rough first round
+d958a4ba | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2023-12-13 | feat: frontend improvements (#16)
+0b517c71 | Spoked <Spoked@localhost> | 2023-12-13 | revert scraped_at and streams back
+f0f0a04e | Spoked <Spoked@localhost> | 2023-12-13 | Refactored. Plex Watchlist working correctly.
+65808657 | Spoked <Spoked@localhost> | 2023-12-13 | Refactored. Plex Watchlist working correctly.
+299b7c68 | Spoked <Spoked@localhost> | 2023-12-12 | wip. started adding watchlist. needs to be added to program.run
+aef401e3 | Spoked <Spoked@localhost> | 2023-12-12 | wip. started adding watchlist. needs to be added to program.run
+8c519d7b | Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com> | 2023-12-13 | feat: frontend rewrite to sveltekit with basic features (#13)
+4fb65074 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-11 | Fix media state (#12)
+d1ba82cf | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-10 | Fastapi migration (#8)
+e82d314d | Gaisberg <93206976+Gaisberg@users.noreply.github.com> | 2023-12-10 | Settings validation (#7)
+075b08cb | Gaisberg <none> | 2023-12-10 | Some more validation fixes and improvements
+62a44cb0 | Gaisberg <none> | 2023-12-10 | fix mdb setting api validation
+8bc421ca | Gaisberg <none> | 2023-12-09 | Drop changes to api file...
+1a87481f | Gaisberg <none> | 2023-12-09 | Setting validation for classes etc.
+f7e2a48b | Spoked <Spoked@localhost> | 2023-12-09 | removed pre-commit
+3a153fee | Spoked <Spoked@localhost> | 2023-12-09 | fix requirements file
+99ad6664 | Spoked <Spoked@localhost> | 2023-12-09 | migrate to fastapi. (wip)
+33c6387a | Spoked <Spoked@localhost> | 2023-12-08 | add missing pydantic package
+9bd01047 | Spoked <Spoked@localhost> | 2023-12-08 | initial commit
+6d27cc70 | Spoked <5782630+dreulavelle@users.noreply.github.com> | 2023-12-08 | Initial commit

@@ -1,0 +1,49 @@
+   181	Spoked <5782630+dreulavelle@users.noreply.github.com>
+   165	Spoked <dreu.lavelle@gmail.com>
+    82	Gaisberg <None>
+    69	Ayush Sehrawat <69469790+AyushSehrawat@users.noreply.github.com>
+    67	coldspirit <coldspirit@gmail.com>
+    53	dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+    42	Gaisberg <93206976+Gaisberg@users.noreply.github.com>
+    30	Davide Marcoli <69892203+davidemarcoli@users.noreply.github.com>
+    30	Dreu LaVelle <dreu.lavelle@gmail.com>
+    24	davidemarcoli <davide@marcoli.ch>
+    18	Joe McKie <4980618+joemckie@users.noreply.github.com>
+    18	Spoked <Spoked@localhost>
+    14	iPromKnight <156901906+iPromKnight@users.noreply.github.com>
+    12	Gaisberg <none>
+    12	github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+    10	S0lidByte <99444813+S0lidByte@users.noreply.github.com>
+     8	Goldy <153996346+g0ldyy@users.noreply.github.com>
+     7	Hank Bond <3474285+omnunum@users.noreply.github.com>
+     6	eversio <github@burninglava.com>
+     5	Filip Trplan <filip@trplan.si>
+     5	KingPin <KingPin@users.noreply.github.com>
+     4	Arrrrr <11490236+wolfemir@users.noreply.github.com>
+     4	PromKnight <promknight@proton.me>
+     4	iPromKnight <promknight@proton.me>
+     3	David Young <davidy@funkypenguin.co.nz>
+     3	Harm Jongedijk <harm@h-mail.nl>
+     2	Oliver Walton <38323818+olivertgwalton@users.noreply.github.com>
+     2	lostb1t <coding-mosses0z@icloud.com>
+     1	Andres <aamorin@gmail.com>
+     1	Christian <christbru@live.com>
+     1	DrMxrcy <58747968+DrMxrcy@users.noreply.github.com>
+     1	Dreu LaVelle <spoked@dev.bjorn.com>
+     1	Dustin Miller <1342542+spdustin@users.noreply.github.com>
+     1	Elvis Perconic <45233935+Wiz1991@users.noreply.github.com>
+     1	Filip Trplan <tg.trplan@gmail.com>
+     1	FlashLightning67 <98236663+FlashLightning67@users.noreply.github.com>
+     1	Jamie Isaksen <jamie@jamie.no>
+     1	JustHereToBreakThings <154031386+JustHereToBreakThings@users.noreply.github.com>
+     1	Matthew Adams <roguestar191@comcast.net>
+     1	Mohamed Zumair <mhdzumair@gmail.com>
+     1	Sam Xie <sam@samxie.me>
+     1	Wamy <25761442+Wamy-Dev@users.noreply.github.com>
+     1	Zombie <174158372+ZombieApps@users.noreply.github.com>
+     1	centerionware <roguestar191@comcast.net>
+     1	coderabbitai[bot] <136622811+coderabbitai[bot]@users.noreply.github.com>
+     1	equinox <Equinox@users.noreply.github.com>
+     1	g0ldyy <153996346+g0ldyy@users.noreply.github.com>
+     1	hjongedijk <harm@h-mail.nl>
+     1	the-eversio <github@burninglava.com>

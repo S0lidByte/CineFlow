@@ -34,10 +34,10 @@ class GetCollection200ResponseInner(BaseModel):
     GetCollection200ResponseInner
     """  # noqa: E501
 
-    last_collected_at: StrictStr
-    last_updated_at: StrictStr
-    show: GetShows200ResponseInnerShow
-    seasons: List[GetCollection200ResponseInnerSeasonsInner]
+    last_collected_at: Optional[StrictStr] = None
+    last_updated_at: Optional[StrictStr] = None
+    show: Optional[GetShows200ResponseInnerShow] = None
+    seasons: Optional[List[GetCollection200ResponseInnerSeasonsInner]] = None
     __properties: ClassVar[List[str]] = [
         "last_collected_at",
         "last_updated_at",
