@@ -1881,6 +1881,8 @@ class RivenVFS(pyfuse3.Operations):
                 original_filename=original_filename,
             )
 
+            is_fair_usage = False
+
             try:
                 return await stream.read(
                     request_start=request_start,
@@ -1910,7 +1912,7 @@ class RivenVFS(pyfuse3.Operations):
                         stream.build_log_message(f"{exc.__class__.__name__}: {exc}")
                     )
 
-                return b""
+                is_fair_usage = True
             except* DebridServiceForbiddenException as e:
                 for exc in e.exceptions:
                     logger.error(
@@ -1969,6 +1971,10 @@ class RivenVFS(pyfuse3.Operations):
                         logger.error(f"{exc.__class__.__name__}: {exc}")
 
                 raise pyfuse3.FUSEError(errno.EIO)
+
+            if is_fair_usage:
+                return b""
+
         except pyfuse3.FUSEError as e:
             raise
         except Exception:
