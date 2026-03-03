@@ -1610,7 +1610,7 @@ requires-dist = [
     { name = "kink", specifier = ">=0.8.1,<0.9" },
     { name = "lazy-imports", specifier = ">=1.1.0" },
     { name = "loguru", specifier = ">=0.7.2,<0.8" },
-    { name = "lxml", specifier = ">=5.1.0,<6" },
+    { name = "lxml", specifier = ">=5.1.0,<7" },
     { name = "opentelemetry-api", specifier = ">=1.25.0,<2" },
     { name = "opentelemetry-exporter-prometheus", specifier = ">=0.46b0,<0.47" },
     { name = "opentelemetry-sdk", specifier = ">=1.25.0,<2" },
