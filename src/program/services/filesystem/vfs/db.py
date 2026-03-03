@@ -133,18 +133,17 @@ class VFSDatabase:
 
                 if new_unrestricted:
                     entry.unrestricted_url = new_unrestricted.download
+                    
+                    # Always save the unrestricted URL so we don't spam the API on subsequent calls
+                    # if the CDN is temporarily returning 503s.
+                    session.merge(entry)
+                    session.commit()
 
-                    cdn_url = DebridCDNUrl(entry)
+                    logger.debug(
+                        f"Refreshed unrestricted URL for {entry.original_filename}"
+                    )
 
-                    if cdn_url.validate(attempt_refresh=False):
-                        session.merge(entry)
-                        session.commit()
-
-                        logger.debug(
-                            f"Refreshed unrestricted URL for {entry.original_filename}"
-                        )
-
-                        return entry.unrestricted_url
+                    return entry.unrestricted_url
             except DebridServiceFairUsageLimitException as e:
                 logger.warning(
                     f"Fair usage limit reached when unrestricting URL for {entry.original_filename}: {e}"
