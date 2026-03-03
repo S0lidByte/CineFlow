@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class FileMetadata:
     """Metadata about the file being streamed."""
 
