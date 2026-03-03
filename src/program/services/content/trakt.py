@@ -307,7 +307,9 @@ class TraktContent(Runner[TraktModel]):
 
         for item in items:
             if ItemWithShow.is_type_of(item):
-                assert item.show
+                if not item.show:
+                    logger.debug(f"Skipping collection item with no show data: {item}")
+                    continue
 
                 ids = item.show.ids
 
@@ -315,7 +317,9 @@ class TraktContent(Runner[TraktModel]):
                     _ids.append((int(ids.tvdb), "show"))
 
             elif ItemWithMovie.is_type_of(item):
-                assert item.movie
+                if not item.movie:
+                    logger.debug(f"Skipping collection item with no movie data: {item}")
+                    continue
 
                 ids = item.movie.ids
 
