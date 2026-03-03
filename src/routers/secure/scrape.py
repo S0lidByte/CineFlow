@@ -1092,8 +1092,8 @@ async def auto_scrape(
                 
                 try:
                     # Run indexer in a thread to avoid blocking event loop
-                    from program.services.indexers import IndexerService
-                    indexer = di[IndexerService]
+                    from program.program import riven
+                    indexer = riven.services.indexer
                     
                     async def run_sync():
                         # Consume the generator to perform indexing

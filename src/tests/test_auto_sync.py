@@ -27,8 +27,9 @@ async def test_auto_scrape_triggers_sync_when_seasons_missing():
     mock_indexer = MagicMock(spec=IndexerService)
     mock_indexer.run.return_value = iter([mock_show]) # Generator returns the item
     
-    # Setup DI
-    di[IndexerService] = mock_indexer
+    # Setup DI mock
+    with patch("program.program.riven.services") as mock_services:
+        mock_services.indexer = mock_indexer
     
     request = AutoScrapeRequest(
         media_type="tv",
@@ -74,9 +75,10 @@ async def test_auto_scrape_concurrency_returns_202():
     # indexer.run is called via asyncio.to_thread(run_sync)
     # where run_sync consumes the generator.
     
-    di[IndexerService] = mock_indexer
-
-    request = AutoScrapeRequest(
+    with patch("program.program.riven.services") as mock_services:
+        mock_services.indexer = mock_indexer
+    
+        request = AutoScrapeRequest(
         media_type="tv",
         tvdb_id="359913",
         season_numbers=[1]
@@ -110,9 +112,10 @@ async def test_auto_scrape_handles_sync_timeout():
     
     mock_session = MagicMock()
     
-    di[IndexerService] = MagicMock(spec=IndexerService)
-
-    request = AutoScrapeRequest(
+    with patch("program.program.riven.services") as mock_services:
+        mock_services.indexer = MagicMock(spec=IndexerService)
+    
+        request = AutoScrapeRequest(
         media_type="tv",
         tvdb_id="359913",
         season_numbers=[1]
