@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 
 # Trigger release-please re-evaluation
 from datetime import datetime
@@ -646,6 +647,13 @@ class RealDebridDownloader(DownloaderBase):
 
         try:
             assert self.api
+            
+            # Check if we are currently rate-limited by fair usage
+            if getattr(self, "_fair_usage_until", 0) > time.time():
+                logger.warning(
+                    f"Skipping unrestrict for {link}: Fair usage limit active until {datetime.fromtimestamp(self._fair_usage_until).isoformat()}"
+                )
+                raise DebridServiceFairUsageLimitException(provider=self.key)
 
             response = self.api.session.post(
                 f"{self.api.BASE_URL}/unrestrict/link",
@@ -662,6 +670,10 @@ class RealDebridDownloader(DownloaderBase):
                     logger.warning(
                         f"Fair usage limit reached for {self.key}: {data.error}"
                     )
+                    
+                    # Cache the fair usage limit for 5 minutes (300 seconds)
+                    self._fair_usage_until = time.time() + 300
+                    
                     raise DebridServiceFairUsageLimitException(provider=self.key)
                 elif data.error_code in (
                     RealDebridErrorCode.RESOURCE_UNREACHABLE,

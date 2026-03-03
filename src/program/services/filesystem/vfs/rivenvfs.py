@@ -74,6 +74,7 @@ from program.services.streaming.exceptions import (
     DebridServiceClosedConnectionException,
     DebridServiceRefusedRangeRequestException,
     DebridServiceLinkUnavailable,
+    DebridServiceFairUsageLimitException,
     MediaStreamKilledException,
 )
 from program.utils.debrid_cdn_url import DebridCDNUrl
@@ -1903,6 +1904,13 @@ class RivenVFS(pyfuse3.Operations):
                     )
 
                 raise pyfuse3.FUSEError(errno.ENOENT) from e
+            except* DebridServiceFairUsageLimitException as e:
+                for exc in e.exceptions:
+                    logger.error(
+                        stream.build_log_message(f"{exc.__class__.__name__}: {exc}")
+                    )
+
+                raise pyfuse3.FUSEError(errno.EACCES) from e
             except* DebridServiceForbiddenException as e:
                 for exc in e.exceptions:
                     logger.error(
