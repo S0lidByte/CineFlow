@@ -1639,7 +1639,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "black", specifier = ">=25.9.0,<26" },
+    { name = "black", specifier = ">=25.9.0,<27" },
     { name = "codecov", specifier = ">=2.1.13,<3" },
     { name = "isort", specifier = ">=5.10.1,<6" },
     { name = "mypy", specifier = ">=1.11.2,<2" },
