@@ -202,6 +202,7 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
     def store_state(
         self,
         given_state: States | None = None,
+        propagate_down: bool = False,
     ) -> tuple[States | None, States]:
         """Store the state of the item and notify about state changes."""
 
@@ -903,11 +904,13 @@ class Show(MediaItem):
     def store_state(
         self,
         given_state: States | None = None,
+        propagate_down: bool = False,
     ) -> tuple[States | None, States]:
-        for season in self.seasons:
-            season.store_state(given_state)
+        if given_state is not None or propagate_down:
+            for season in self.seasons:
+                season.store_state(given_state, propagate_down=propagate_down)
 
-        return super().store_state(given_state)
+        return super().store_state(given_state, propagate_down=propagate_down)
 
     def __repr__(self):
         return f"Show:{self.log_string}:{self.state.name}"
@@ -1008,11 +1011,13 @@ class Season(MediaItem):
     def store_state(
         self,
         given_state: States | None = None,
+        propagate_down: bool = False,
     ) -> tuple[States | None, States]:
-        for episode in self.episodes:
-            episode.store_state(given_state)
+        if given_state is not None or propagate_down:
+            for episode in self.episodes:
+                episode.store_state(given_state, propagate_down=propagate_down)
 
-        return super().store_state(given_state)
+        return super().store_state(given_state, propagate_down=propagate_down)
 
     def __init__(self, item: dict[str, Any] | None = None):
         self.type = "season"

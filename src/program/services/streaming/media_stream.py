@@ -232,6 +232,7 @@ class MediaStream:
             DebridServiceRateLimitedException,
             DebridServiceRefusedRangeRequestException,
             DebridServiceClosedConnectionException,
+            httpx.ReadError,
         ) as e:
             logger.exception(
                 self.build_log_message(

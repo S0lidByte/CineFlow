@@ -458,12 +458,17 @@ def run_thread_with_db_item(
 
                         if not cancellation_event.is_set():
                             # Update parent item based on type
+                            # Use propagate_down=False to prevent recursive show->season->episode updates
+                            # which cause Postgres deadlocks when many episodes finish concurrently
                             if isinstance(input_item, Episode):
-                                input_item.parent.parent.store_state()
+                                input_item.parent.parent.store_state(propagate_down=False)
+                                input_item.parent.store_state(propagate_down=False)
+                                item.store_state(propagate_down=False)
                             elif isinstance(input_item, Season):
-                                input_item.parent.store_state()
+                                input_item.parent.store_state(propagate_down=False)
+                                item.store_state(propagate_down=False)
                             else:
-                                item.store_state()
+                                item.store_state(propagate_down=False)
 
                             logger.debug(f"[TRACE] {_svc} item={event.item_id}: session.commit START")
                             _t4 = time.monotonic()
