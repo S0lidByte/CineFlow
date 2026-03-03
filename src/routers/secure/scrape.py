@@ -1091,44 +1091,40 @@ async def auto_scrape(
                     )
                 
                 try:
-                    # Run indexer in a separate thread with its own DB session
-                    # because SQLAlchemy sessions are not thread-safe
+                    # Use the TVDB indexer directly to update the show metadata
+                    # This calls the TVDB API, updates the Show in-place, and adds new seasons
                     from program.program import riven
-                    indexer = riven.services.indexer
-                    item_id = item.id
+                    tvdb_indexer = riven.services.indexer.tvdb_indexer
                     
-                    def run_sync():
-                        from program.db.db import db_session as sync_db_session
-                        from sqlalchemy.orm import selectinload as sync_selectinload
-                        with sync_db_session() as sync_session:
-                            # Re-load the item in this thread's own session
-                            sync_item = sync_session.execute(
-                                select(Show)
-                                .options(sync_selectinload(Show.seasons).selectinload(Season.episodes))
-                                .where(Show.id == item_id)
-                            ).scalar_one()
-                            
-                            # Use no_autoflush to prevent premature flush of transient Season objects
-                            with sync_session.no_autoflush:
-                                # Run the indexer — this modifies sync_item in-place,
-                                # adding new seasons via show.add_season() which appends
-                                # to the ORM relationship collection tracked by sync_session
-                                for result in indexer.run(sync_item):
-                                    pass
-                            
-                            # Commit — SQLAlchemy's dirty tracking will persist
-                            # all in-place modifications including new child objects
-                            sync_session.commit()
+                    # Track which seasons exist before sync
+                    existing_season_numbers_before = {s.number for s in item.seasons}
                     
-                    await asyncio.wait_for(asyncio.to_thread(run_sync), timeout=30)
+                    # Run the metadata update synchronously (TVDB API calls are fast ~1s)
+                    # Use no_autoflush to prevent premature flush of transient objects
+                    with session.no_autoflush:
+                        success = await asyncio.to_thread(tvdb_indexer._update_show_metadata, item)
                     
-                    # Refresh item in the main session to see new seasons
-                    session.expire(item)
-                    item = session.execute(
-                        select(Show)
-                        .options(selectinload(Show.seasons).selectinload(Season.episodes))
-                        .where(Show.id == item.id)
-                    ).scalar_one()
+                    if success:
+                        # Explicitly add any new seasons and their episodes to the session
+                        # because SQLAlchemy cascade may not reliably add transient children
+                        for season_obj in item.seasons:
+                            if season_obj.number not in existing_season_numbers_before:
+                                session.add(season_obj)
+                                for ep in season_obj.episodes:
+                                    session.add(ep)
+                        
+                        session.commit()
+                        logger.info(f"On-demand sync completed for {item.log_string}")
+                        
+                        # Re-query the item to pick up committed data
+                        item = session.execute(
+                            select(Show)
+                            .options(selectinload(Show.seasons).selectinload(Season.episodes))
+                            .where(Show.id == item.id)
+                        ).scalar_one()
+                    else:
+                        logger.warning(f"TVDB metadata update returned failure for {item.log_string}")
+                        
                 except asyncio.TimeoutError:
                     logger.warning(f"Metadata sync timed out for {item.log_string}")
                     raise HTTPException(status_code=504, detail="Metadata sync timed out")
