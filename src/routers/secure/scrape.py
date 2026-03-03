@@ -1095,7 +1095,7 @@ async def auto_scrape(
                     from program.program import riven
                     indexer = riven.services.indexer
                     
-                    async def run_sync():
+                    def run_sync():
                         # Consume the generator to perform indexing
                         for _ in indexer.run(item):
                             pass
