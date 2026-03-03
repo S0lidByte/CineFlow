@@ -1627,7 +1627,7 @@ requires-dist = [
     { name = "rank-torrent-name", specifier = ">=1.9.3,<2" },
     { name = "requests", extras = ["socks"], specifier = ">=2.32.5,<3" },
     { name = "requests-cache", specifier = ">=1.2.1,<2" },
-    { name = "requests-ratelimiter", specifier = ">=0.7.0,<0.8" },
+    { name = "requests-ratelimiter", specifier = ">=0.7.0,<0.10" },
     { name = "scalar-fastapi", specifier = ">=1.0.3,<2" },
     { name = "sqla-wrapper", specifier = ">=6.0.0,<7" },
     { name = "sqlalchemy", specifier = ">=2.0.31,<3" },
