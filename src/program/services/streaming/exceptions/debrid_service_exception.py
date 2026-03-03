@@ -64,6 +64,13 @@ class DebridServiceLinkUnavailable(DebridServiceException):
         self.link = link
 
 
+class DebridServiceFairUsageLimitException(DebridServiceException):
+    """Raised when the debrid service fair usage limit is reached."""
+
+    def __init__(self, provider: str) -> None:
+        super().__init__("Fair usage limit reached", provider=provider)
+
+
 class DebridServiceClosedConnectionException(DebridServiceException):
     """Raised when the debrid service closes the connection prematurely."""
 

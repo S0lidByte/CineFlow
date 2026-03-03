@@ -11,6 +11,7 @@ from program.db.db import db_session
 from program.media.media_entry import MediaEntry
 from program.services.streaming.exceptions import (
     DebridServiceLinkUnavailable,
+    DebridServiceFairUsageLimitException,
 )
 from program.media.item import MediaItem
 from program.types import Event
@@ -144,6 +145,11 @@ class VFSDatabase:
                         )
 
                         return entry.unrestricted_url
+            except DebridServiceFairUsageLimitException as e:
+                logger.warning(
+                    f"Fair usage limit reached when unrestricting URL for {entry.original_filename}: {e}"
+                )
+                raise
             except DebridServiceLinkUnavailable as e:
                 logger.warning(
                     f"Failed to unrestrict URL for {entry.original_filename}: {e}"
@@ -235,7 +241,7 @@ class VFSDatabase:
                     modified=(entry.updated_at.isoformat()),
                     entry_type="media",
                 )
-        except DebridServiceLinkUnavailable:
+        except (DebridServiceLinkUnavailable, DebridServiceFairUsageLimitException):
             raise
         except Exception as e:
             logger.error(

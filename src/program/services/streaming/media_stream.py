@@ -35,6 +35,7 @@ from .exceptions import (
     DebridServiceRefusedRangeRequestException,
     MediaStreamKilledException,
     DebridServiceLinkUnavailable,
+    DebridServiceFairUsageLimitException,
 )
 from .file_metadata import FileMetadata
 from .recent_reads import Read, RecentReads
@@ -243,6 +244,7 @@ class MediaStream:
             DebridServiceUnableToConnectException,
             DebridServiceForbiddenException,
             DebridServiceRangeNotSatisfiableException,
+            DebridServiceFairUsageLimitException,
         ) as e:
             logger.exception(
                 self.build_log_message(
@@ -1005,7 +1007,7 @@ class MediaStream:
                 raise DebridServiceClosedConnectionException(
                     provider=self.provider
                 ) from e
-            except DebridServiceLinkUnavailable:
+            except (DebridServiceLinkUnavailable, DebridServiceFairUsageLimitException):
                 raise
             except Exception as e:
                 logger.exception(

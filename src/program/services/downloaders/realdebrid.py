@@ -24,6 +24,7 @@ from program.settings import settings_manager
 from program.utils.request import CircuitBreakerOpen, SmartResponse, SmartSession
 from program.services.streaming.exceptions.debrid_service_exception import (
     DebridServiceLinkUnavailable,
+    DebridServiceFairUsageLimitException,
 )
 from program.media.item import ProcessedItemType
 
@@ -657,7 +658,12 @@ class RealDebridDownloader(DownloaderBase):
             if not response.ok:
                 data = RealDebridErrorResponse.model_validate(response.json())
 
-                if data.error_code in (
+                if data.error_code == RealDebridErrorCode.FAIR_USAGE_LIMIT:
+                    logger.warning(
+                        f"Fair usage limit reached for {self.key}: {data.error}"
+                    )
+                    raise DebridServiceFairUsageLimitException(provider=self.key)
+                elif data.error_code in (
                     RealDebridErrorCode.RESOURCE_UNREACHABLE,
                     RealDebridErrorCode.RESOURCE_NOT_FOUND,
                     RealDebridErrorCode.UNSUPPORTED_HOSTER,
@@ -683,6 +689,8 @@ class RealDebridDownloader(DownloaderBase):
 
             return UnrestrictedLink.model_validate(response.json())
         except DebridServiceLinkUnavailable:
+            raise
+        except DebridServiceFairUsageLimitException:
             raise
         except CircuitBreakerOpen as e:
             logger.warning(
