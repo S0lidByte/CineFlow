@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.6.0](https://github.com/S0lidByte/triven/compare/v1.5.0...v1.6.0) (2026-03-03)
+
+
+### Features
+
+* enhance release-please observability in backend ([335c732](https://github.com/S0lidByte/triven/commit/335c73296645c385244b1cb511572a0546e54678))
+* trigger release-please with real file changes in backend ([456daf4](https://github.com/S0lidByte/triven/commit/456daf48dfd2cef526e5fdbce39a88cccd244393))
+
+
+### Bug Fixes
+
+* **backend:** fix asyncio.to_thread coroutine warning in on-demand sync ([cc24cfe](https://github.com/S0lidByte/triven/commit/cc24cfe5ccd0e5788445c71962621d87ee31d782))
+* **backend:** implement on-demand sync and concurrency protection for season requests ([928a7e1](https://github.com/S0lidByte/triven/commit/928a7e148f3ddc2f077d97b168583ae1deb3def0))
+* **backend:** persist re-indexed seasons to DB and fix spurious 'Unknown item type' warning ([e7fa31f](https://github.com/S0lidByte/triven/commit/e7fa31fb9160eeb7a26893af4ddbb7e8c832aa3b))
+* **backend:** rewrite on-demand sync to use direct TVDB indexer with explicit session.add for new seasons ([f60b9da](https://github.com/S0lidByte/triven/commit/f60b9dacc41841d225949d365102b825d272a70e))
+* **backend:** use no_autoflush to properly persist new seasons during on-demand sync ([b33c5c0](https://github.com/S0lidByte/triven/commit/b33c5c0092c1a71dc34c1e27c3f9acadd20f98d3))
+* **backend:** use riven global instance instead of di for IndexerService to resolve 503 error ([77f9439](https://github.com/S0lidByte/triven/commit/77f943977aa9670ce4b0572b9853c4fbdb9d13b3))
+* **calendar:** ensure TV show links use parent Series ID ([555ed39](https://github.com/S0lidByte/triven/commit/555ed39167250baf551c241260a0a968b8acdf04))
+* harden Real-Debrid stream recovery and breaker observability ([f89fa0f](https://github.com/S0lidByte/triven/commit/f89fa0f2813681bd9cb2916c40e7ed698cfb55ef))
+* optimize MediaItem serialization and implement eager loading for items API ([8902f65](https://github.com/S0lidByte/triven/commit/8902f657548a0b7e36f2875febdd5f662461daa2))
+* trigger release-please to re-evaluate backend after stale branch reset ([3666d61](https://github.com/S0lidByte/triven/commit/3666d615db3a1de48b6c0fa46897f022e1793d82))
+* trigger release-please to update pull request ([e0d970c](https://github.com/S0lidByte/triven/commit/e0d970ccb0c6efe7973041d0958aca7259c9887a))
+
 ## [1.5.0](https://github.com/S0lidByte/triven/compare/v1.4.9...v1.5.0) (2026-03-01)
 
 
