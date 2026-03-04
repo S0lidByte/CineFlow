@@ -81,6 +81,33 @@ class ScrapeErrorResponse(BaseModel):
 
 ANIME_ONLY_INDEXERS = ("Nyaa.si", "SubsPlease", "Anidub", "Anidex")
 
+# File extensions that are definitely not video torrents. Entries whose
+# download_url filename ends with one of these are skipped during infohash
+# URL-fetching to avoid wasting threads on manga/comic indexers.
+_NON_VIDEO_EXTENSIONS = frozenset(
+    [".zip", ".cbz", ".cbr", ".rar", ".7z", ".epub", ".pdf"]
+)
+
+
+def _has_non_video_extension(url: str) -> bool:
+    """
+    Return True if *url* (or its ``file=`` query parameter) ends with a
+    non-video extension, indicating the entry is unlikely to be a video torrent.
+    """
+    from urllib.parse import urlparse, parse_qs, unquote
+
+    try:
+        parsed = urlparse(url)
+        # Prefer the ``file`` query parameter — Prowlarr proxy URLs expose the
+        # original filename there (e.g. ``?file=Some+Title.zip``).
+        filename = parse_qs(parsed.query).get("file", [""])[0]
+        if not filename:
+            filename = parsed.path
+        filename = unquote(filename).lower()
+        return any(filename.endswith(ext) for ext in _NON_VIDEO_EXTENSIONS)
+    except Exception:
+        return False
+
 
 class Prowlarr(ScraperService[ProwlarrConfig]):
     """Scraper for `Prowlarr`"""
@@ -533,9 +560,16 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
             if not infohash and torrent.guid:
                 infohash = extract_infohash(torrent.guid)
 
-            # Priority 3: Collect URLs that need fetching
+            # Priority 3: Collect URLs that need fetching, but skip entries
+            # whose filename clearly indicates a non-video archive (e.g. .zip
+            # from manga/comic indexers) — they will never yield a torrent infohash.
             if not infohash and torrent.download_url and title:
-                urls_to_fetch.append((torrent, title))
+                if _has_non_video_extension(torrent.download_url):
+                    logger.debug(
+                        f"Skipping infohash URL fetch for non-video entry: {title}"
+                    )
+                else:
+                    urls_to_fetch.append((torrent, title))
             elif infohash and title:
                 # We already have an infohash, add it directly
                 streams[infohash] = title
