@@ -258,7 +258,7 @@ def parse_results(
             torrents.add(torrent)
             processed_infohashes.add(infohash)
         except Exception as e:
-            logger.trace(f"GarbageTorrent: {e}")
+            logger.debug(f"RTN rejected '{raw_title[:60]}': {type(e).__name__}: {e}")
             processed_infohashes.add(infohash)
             continue
 
