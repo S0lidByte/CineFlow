@@ -276,10 +276,16 @@ class Downloader(Runner[None, DownloaderBase]):
                 )
                 # All streams exhausted: fall back to Indexed so the Scraper can
                 # search for new streams instead of looping in the Downloader forever.
+                # IMPORTANT: also clear blacklisted_streams — without this, the blacklist
+                # persists across the reset and the scraper can never re-add those hashes
+                # as "new" streams, causing the item to loop at Indexed indefinitely.
                 logger.debug(
-                    f"All streams exhausted for {item.log_string} ({item.id}), resetting to Indexed for re-scrape"
+                    f"All streams exhausted for {item.log_string} ({item.id}), "
+                    f"clearing {len(item.streams)} streams and "
+                    f"{len(item.blacklisted_streams)} blacklisted streams, resetting to Indexed"
                 )
                 item.streams.clear()
+                item.blacklisted_streams.clear()
                 item.scraped_at = None
                 item.scraped_times = 1
                 item.store_state(States.Indexed)
