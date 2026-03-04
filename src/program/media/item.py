@@ -715,6 +715,7 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
 
         # Clear streams using ORM relationship operations (database CASCADE handles orphans)
         self.streams.clear()
+        self.blacklisted_streams.clear()
         self.active_stream = None
 
         # Reset scraping metadata
