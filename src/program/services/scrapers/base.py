@@ -74,22 +74,36 @@ class ScraperService(Runner[T, "ScraperService", dict[str, str]]):
         return identifier, scrape_type, imdb_id
 
     @staticmethod
-    def get_infohash_from_url(url: str) -> str | None:
+    def get_infohash_from_url(
+        url: str,
+        session: SmartSession | None = None,
+        timeout: float = 10.0,
+    ) -> str | None:
         """
         Get infohash from a URL that could be:
         1. A direct torrent file download
         2. A redirect to a magnet link
         3. A URL containing the infohash
 
-        Returns the infohash or None if it cannot be extracted.
+        Args:
+            url: The download URL to resolve.
+            session: A pre-built SmartSession to reuse. If None, a temporary one is
+                created. Callers that dispatch many concurrent requests should share
+                a single session to avoid recreating an httpx.Client on every call.
+            timeout: Per-request timeout in seconds (default: 10). Should be set well
+                below the caller's overall batch-wait timeout so that cancelled futures
+                actually stop making network requests promptly.
+
+        Returns:
+            The infohash as a lowercase hex string, or None if it cannot be extracted.
         """
         if not url:
             return None
 
-        session = SmartSession()
+        _session = session or SmartSession()
         try:
             # Try to download with redirects disabled to check for magnet redirects
-            r = session.get(url, allow_redirects=False)
+            r = _session.get(url, allow_redirects=False, timeout=timeout)
 
             # If it's a redirect (3xx status code)
             if 300 <= r.status_code < 400:

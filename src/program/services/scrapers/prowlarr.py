@@ -97,6 +97,9 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
         }
         self.timeout = self.settings.timeout
         self.session = None
+        # Shared session for infohash URL resolution — avoids creating a new
+        # httpx.Client per URL when hundreds of torrents are fetched in parallel.
+        self._infohash_session: SmartSession | None = None
         self.last_indexer_scan = None
         self._initialize()
 
@@ -124,6 +127,10 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
                     return False
 
                 self.session = self._create_session()
+                # Dedicated lightweight session for resolving infohash from download URLs.
+                # Uses a short read timeout so individual URL fetches fail fast rather
+                # than blocking for the full 30 s SmartSession default.
+                self._infohash_session = SmartSession(retries=0)
                 self.indexers = self.get_indexers()
 
                 if not self.indexers:
@@ -539,7 +546,12 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
                 thread_name_prefix="ProwlarrHashExtract", max_workers=10
             ) as executor:
                 future_to_torrent = {
-                    executor.submit(self.get_infohash_from_url, torrent.download_url): (
+                    executor.submit(
+                        self.get_infohash_from_url,
+                        torrent.download_url,
+                        self._infohash_session,  # shared session — no new httpx.Client per URL
+                        10.0,  # short per-request timeout so futures abort promptly
+                    ): (
                         torrent,
                         title,
                     )
