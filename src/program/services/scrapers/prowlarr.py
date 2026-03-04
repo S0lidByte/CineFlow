@@ -584,7 +584,7 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
                         self.get_infohash_from_url,
                         torrent.download_url,
                         self._infohash_session,  # shared session — no new httpx.Client per URL
-                        10.0,  # short per-request timeout so futures abort promptly
+                        20.0,  # per-request timeout: Prowlarr proxies to external trackers which can be slow
                     ): (
                         torrent,
                         title,
