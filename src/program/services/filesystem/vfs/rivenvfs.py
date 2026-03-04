@@ -196,8 +196,10 @@ class RivenVFS(pyfuse3.Operations):
         # Set of paths currently being streamed
         self._active_streams = dict[str, MediaStream]()
 
-        # Lock for managing active streams dict
-        self._active_streams_lock = trio.Lock()
+        # Lock for managing active streams dict.
+        # NOTE: This is (re-)initialized inside _fuse_runner before each trio.run() call
+        # to avoid "AssertionError: task._runner is self" when the FUSE loop restarts.
+        self._active_streams_lock: trio.Lock
 
         # Open file handles: fh -> handle info
         self._file_handles = dict[pyfuse3.FileHandleT, FileHandle]()
@@ -210,10 +212,18 @@ class RivenVFS(pyfuse3.Operations):
         self.mounted = False
         self._mountpoint = os.path.abspath(mountpoint)
         self._thread = None
-        self._unmount_requested = trio_util.AsyncBool(False)
+        # NOTE: _unmount_requested is (re-)initialized inside _fuse_runner before each trio.run()
+        # to avoid stale Trio primitives from a dead runner causing AssertionError on restart.
+        self._unmount_requested: trio_util.AsyncBool
         self.stream_nursery: trio.Nursery
 
         def _fuse_runner():
+            # Track whether an unmount has been requested across restarts.
+            # We use a plain bool here (main thread sets it), and create fresh
+            # Trio primitives at the start of each trio.run() to avoid binding
+            # them to a dead runner (which causes AssertionError on restart).
+            unmount_requested = False
+
             async def _async_main() -> NoReturn:
                 async with self.mountpoint_lifecycle():
                     async with trio_util.move_on_when(
@@ -221,7 +231,11 @@ class RivenVFS(pyfuse3.Operations):
                     ):
                         await trio.sleep_forever()
 
-            while not self._unmount_requested.value:
+            while not unmount_requested:
+                # Re-create Trio primitives fresh for each new runner.
+                self._active_streams_lock = trio.Lock()
+                self._unmount_requested = trio_util.AsyncBool(False)
+
                 logger.trace("Starting FUSE main loop")
 
                 try:
@@ -229,6 +243,8 @@ class RivenVFS(pyfuse3.Operations):
                     trio.run(_async_main)
                 except Exception:
                     logger.exception("FUSE main loop error, restarting")
+
+                unmount_requested = self._unmount_requested.value
 
             logger.trace(f"FUSE main loop exited")
 
