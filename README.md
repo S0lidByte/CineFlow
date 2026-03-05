@@ -10,8 +10,8 @@
 <div align="center">
   <a href="https://github.com/S0lidByte/CineFlow">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/rivenmedia/riven/main/assets/riven-light.png">
-      <img alt="CineFlow" src="https://raw.githubusercontent.com/rivenmedia/riven/main/assets/riven-dark.png">
+      <source media="(prefers-color-scheme: dark)" srcset="https://github.com/S0lidByte/CineFlow/blob/main/assets/Cineflow-Logo.png">
+      <img alt="CineFlow" src="https://github.com/S0lidByte/CineFlow/blob/main/assets/Cineflow-Logo.png">
     </picture>
   </a>
 </div>
