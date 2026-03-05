@@ -1,22 +1,32 @@
+<p>
+  This project is a fork of
+  <a href="https://github.com/rivenmedia/riven" target="_blank" rel="noopener noreferrer">riven</a>.
+</p>
+
+<p>
+  Originally created by the riven contributors.<br />
+  This fork continues development with a different vision and feature set.
+</p>
 <div align="center">
-  <a href="https://github.com/rivenmedia/riven">
+  <a href="https://github.com/S0lidByte/CineFlow">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/rivenmedia/riven/main/assets/riven-light.png">
-      <img alt="riven" src="https://raw.githubusercontent.com/rivenmedia/riven/main/assets/riven-dark.png">
+      <img alt="CineFlow" src="https://raw.githubusercontent.com/rivenmedia/riven/main/assets/riven-dark.png">
     </picture>
   </a>
 </div>
 
 <div align="center">
-  <a href="https://github.com/rivenmedia/riven/stargazers"><img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/rivenmedia/riven"></a>
-  <a href="https://github.com/rivenmedia/riven/issues"><img alt="Issues" src="https://img.shields.io/github/issues/rivenmedia/riven" /></a>
-  <a href="https://github.com/rivenmedia/riven/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/rivenmedia/riven"></a>
-  <a href="https://github.com/rivenmedia/riven/graphs/contributors"><img alt="Contributors" src="https://img.shields.io/github/contributors/rivenmedia/riven" /></a>
-  <a href="https://discord.riven.tv"><img alt="Discord" src="https://img.shields.io/badge/Join%20discord-8A2BE2" /></a>
+  <a href="https://github.com/S0lidByte/CineFlow/stargazers"><img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/rivenmedia/riven"></a>
+  <a href="https://github.com/S0lidByte/CineFlow/issues"><img alt="Issues" src="https://img.shields.io/github/issues/rivenmedia/riven" /></a>
+  <a href="https://github.com/S0lidByte/CineFlow/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/rivenmedia/riven"></a>
+  <a href="https://github.com/S0lidByte/CineFlow/graphs/contributors"><img alt="Contributors" src="https://img.shields.io/github/contributors/rivenmedia/riven" /></a>
+  <a href="https://todo"><img alt="Discord" src="https://img.shields.io/badge/TODO" /></a>
 </div>
 
 <div align="center">
-  <p>Plex torrent streaming through Debrid and 3rd party services like Overseerr, Mdblist, etc.</p>
+  <p>Stream torrent-based media directly to your media server using Debrid providers and integrations with popular third-party services.</p>
+  
 </div>
 
 Services currently supported:
@@ -28,11 +38,9 @@ Services currently supported:
 | Scraping services | Comet, Jackett, Torrentio, Orionoid, Mediafusion, Prowlarr, Zilean, Rarbg         |
 | Media servers     | Plex, Jellyfin, Emby                                                              |
 
-and more to come!
+Check out out [Project Board](todo) to stay informed!
 
-Check out out [Project Board](https://github.com/users/dreulavelle/projects/2) to stay informed!
-
-Please add feature requests and issues over on our [Issue Tracker](https://github.com/rivenmedia/riven/issues) or join our [Discord](https://discord.riven.tv) to chat with us!
+Please add feature requests and issues over on our [Issue Tracker](https://github.com/S0lidByte/CineFlow/issues) or join our [Discord](https://todo) to chat with us!
 
 We are constantly adding features and improvements as we go along and squashing bugs as they arise.
 
