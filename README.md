@@ -35,11 +35,21 @@ Services currently supported:
 | Scraping services | Comet, Jackett, Torrentio, Orionoid, Mediafusion, Prowlarr, Zilean, Rarbg         |
 | Media servers     | Plex, Jellyfin, Emby                                                              |
 
-Check out out [Project Board](todo) to stay informed!
+<p align="center">
+  Stay up to date with development on our
+  <a href="todo">Project Board</a>.
+</p>
 
-Please add feature requests and issues over on our [Issue Tracker](https://github.com/S0lidByte/CineFlow/issues) or join our [Discord](https://todo) to chat with us!
+<p align="center">
+  Have a feature request or found a bug? Please open an issue on our
+  <a href="https://github.com/S0lidByte/CineFlow/issues">Issue Tracker</a>
+  or join the conversation on our
+  <a href="https://todo">Discord</a>.
+</p>
 
-We are constantly adding features and improvements as we go along and squashing bugs as they arise.
+<p align="center">
+  CineFlow is actively developed, with new features, improvements, and bug fixes being added continuously.
+</p>
 
 ---
 
