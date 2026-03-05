@@ -9,10 +9,7 @@
 </p>
 <div align="center">
   <a href="https://github.com/S0lidByte/CineFlow">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://github.com/S0lidByte/CineFlow/blob/main/assets/Cineflow-Logo.png">
-      <img alt="CineFlow" src="https://github.com/S0lidByte/CineFlow/blob/main/assets/Cineflow-Logo.png">
-    </picture>
+    <img src="https://github.com/S0lidByte/CineFlow/blob/main/assets/Cineflow-Logo.png" alt="CineFlow" width="300">
   </a>
 </div>
 
