@@ -9,9 +9,9 @@ from requests import ReadTimeout
 from program.media.item import MediaItem, Movie
 from program.services.scrapers.base import ScraperService
 from program.settings import settings_manager
+from program.settings.models import JackettConfig
 from program.utils.request import SmartSession, get_hostname_from_url
 from program.utils.torrent import extract_infohash, normalize_infohash
-from program.settings.models import JackettConfig
 
 
 class JackettScrapeResponse(BaseModel):
@@ -94,15 +94,20 @@ class Jackett(ScraperService[JackettConfig]):
             return self.scrape(item)
         except Exception as e:
             from requests import HTTPError
+
             if isinstance(e, HTTPError) and e.response.status_code == 429:
                 from program.utils.exceptions import RateLimitError
+
                 retry_after = e.response.headers.get("Retry-After")
-                raise RateLimitError("Jackett rate limit exceeded", retry_after=int(retry_after) if retry_after else None)
-            elif "rate limit" in str(e).lower() or "429" in str(e):
+                raise RateLimitError(
+                    "Jackett rate limit exceeded",
+                    retry_after=int(retry_after) if retry_after else None,
+                )
+            if "rate limit" in str(e).lower() or "429" in str(e):
                 from program.utils.exceptions import RateLimitError
+
                 raise RateLimitError("Jackett rate limit exceeded")
-            else:
-                logger.error(f"Jackett failed to scrape item with error: {e}")
+            logger.error(f"Jackett failed to scrape item with error: {e}")
 
         return {}
 
@@ -153,8 +158,9 @@ class Jackett(ScraperService[JackettConfig]):
 
             # Fetch URLs in parallel
             if urls_to_fetch:
+                workers = min(30, max(5, len(urls_to_fetch) // 2))
                 with concurrent.futures.ThreadPoolExecutor(
-                    thread_name_prefix="JackettHashExtract", max_workers=10
+                    thread_name_prefix="JackettHashExtract", max_workers=workers
                 ) as executor:
                     future_to_result = {
                         executor.submit(self.get_infohash_from_url, result.link): (

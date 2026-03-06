@@ -11,17 +11,16 @@ from requests import ReadTimeout, RequestException
 from program.media.item import Episode, MediaItem, Movie, Season, Show
 from program.services.scrapers.base import ScraperService
 from program.settings import settings_manager
+from program.settings.models import ProwlarrConfig
 from program.utils.request import SmartSession
 from program.utils.torrent import extract_infohash, normalize_infohash
-from program.settings.models import ProwlarrConfig
-
 from schemas.prowlarr import (
     IndexerResource,
     IndexerStatusResource,
-    SearchParam,
-    TvSearchParam,
     MovieSearchParam,
     ReleaseResource,
+    SearchParam,
+    TvSearchParam,
 )
 
 
@@ -94,7 +93,7 @@ def _has_non_video_extension(url: str) -> bool:
     Return True if *url* (or its ``file=`` query parameter) ends with a
     non-video extension, indicating the entry is unlikely to be a video torrent.
     """
-    from urllib.parse import urlparse, parse_qs, unquote
+    from urllib.parse import parse_qs, unquote, urlparse
 
     try:
         parsed = urlparse(url)
@@ -348,14 +347,20 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
             return self.scrape(item)
         except Exception as e:
             from requests import HTTPError
+
             if isinstance(e, HTTPError) and e.response.status_code == 429:
                 from program.utils.exceptions import RateLimitError
+
                 retry_after = e.response.headers.get("Retry-After")
-                raise RateLimitError("Prowlarr rate limit exceeded", retry_after=int(retry_after) if retry_after else None)
-            elif "rate limit" in str(e).lower() or "429" in str(e):
+                raise RateLimitError(
+                    "Prowlarr rate limit exceeded",
+                    retry_after=int(retry_after) if retry_after else None,
+                )
+            if "rate limit" in str(e).lower() or "429" in str(e):
                 from program.utils.exceptions import RateLimitError
+
                 raise RateLimitError("Prowlarr rate limit exceeded")
-            elif isinstance(e, RequestException):
+            if isinstance(e, RequestException):
                 logger.error(f"Prowlarr request exception: {e}")
             else:
                 logger.exception(f"Prowlarr failed to scrape item with error: {e}")
@@ -377,8 +382,7 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
                 for indexer in self.indexers
             }
 
-            for future in future_to_indexer:
-                indexer = future_to_indexer[future]
+            for future, indexer in future_to_indexer.items():
 
                 try:
                     result = future.result(timeout=self.timeout)
@@ -576,8 +580,9 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
 
         # Fetch URLs in parallel
         if urls_to_fetch:
+            workers = min(30, max(5, len(urls_to_fetch) // 2))
             with concurrent.futures.ThreadPoolExecutor(
-                thread_name_prefix="ProwlarrHashExtract", max_workers=10
+                thread_name_prefix="ProwlarrHashExtract", max_workers=workers
             ) as executor:
                 future_to_torrent = {
                     executor.submit(

@@ -2,14 +2,14 @@
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal, Annotated
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     Field,
     field_validator,
     model_validator,
-    BeforeValidator,
 )
 from pydantic.networks import PostgresDsn
 from RTN.models import SettingsModel
@@ -339,7 +339,7 @@ class FilesystemModel(Observable):
         """Validate library profile keys and paths"""
         import re
 
-        for key in v.keys():
+        for key in v:
             # Profile keys must be lowercase alphanumeric with underscores
             if not re.match(r"^[a-z0-9_]+$", key):
                 raise ValueError(
@@ -712,7 +712,7 @@ class JackettConfig(Observable):
         default=1, ge=0, description="Number of retries for failed requests"
     )
     infohash_fetch_timeout: int = Field(
-        default=30,
+        default=120,
         ge=1,
         description="Timeout in seconds for parallel infohash fetching from URLs",
     )
@@ -728,7 +728,7 @@ class ProwlarrConfig(Observable):
         default=1, ge=0, description="Number of retries for failed requests"
     )
     infohash_fetch_timeout: int = Field(
-        default=30,
+        default=120,
         ge=1,
         description="Timeout in seconds for parallel infohash fetching from URLs",
     )
@@ -758,9 +758,13 @@ class AIOStreamsConfig(Observable):
         default=1, ge=0, description="Number of retries for failed requests"
     )
     ratelimit: bool = Field(default=True, description="Enable rate limiting")
-    proxy_url: EmptyOrUrl = Field(default="", description="Proxy URL for AIOStreams requests")
+    proxy_url: EmptyOrUrl = Field(
+        default="", description="Proxy URL for AIOStreams requests"
+    )
     uuid: str = Field(default="", description="User UUID for AIOStreams authentication")
-    password: str = Field(default="", description="User password for AIOStreams authentication")
+    password: str = Field(
+        default="", description="User password for AIOStreams authentication"
+    )
 
 
 class ScraperModel(Observable):
@@ -814,7 +818,8 @@ class ScraperModel(Observable):
         default_factory=lambda: RarbgConfig(), description="RARBG configuration"
     )
     aiostreams: AIOStreamsConfig = Field(
-        default_factory=lambda: AIOStreamsConfig(), description="AIOStreams configuration"
+        default_factory=lambda: AIOStreamsConfig(),
+        description="AIOStreams configuration",
     )
 
 
