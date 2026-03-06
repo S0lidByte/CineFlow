@@ -80,6 +80,10 @@ async def get_settings_schema_for_keys(
         if "$defs" in field_schema:
             all_defs.update(field_schema.pop("$defs"))
 
+        # Inject original field description if it exists
+        if field_info.description:
+            field_schema["description"] = field_info.description
+
         properties[key] = field_schema
 
         if field_info.is_required():

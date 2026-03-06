@@ -148,7 +148,7 @@ server = Server(config=config)
 with server.run_in_thread():
     try:
         di[Program].start()
-        di[Program].run()
+        di[Program].join()
     except Exception:
         logger.exception("Error in main thread")
     finally:

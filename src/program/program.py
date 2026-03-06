@@ -265,9 +265,9 @@ class Program(threading.Thread):
 
         self.scheduler_manager.start()
 
+        self.initialized = True
         super().start()
         logger.success("Riven is running!")
-        self.initialized = True
 
     def display_top_allocators(
         self,
@@ -336,47 +336,50 @@ class Program(threading.Thread):
                 time.sleep(0.1)
                 continue
 
-            if event.item_id:
-                existing_item = db_functions.get_item_by_id(event.item_id)
-            else:
-                existing_item = None
+            try:
+                if event.item_id:
+                    existing_item = db_functions.get_item_by_id(event.item_id)
+                else:
+                    existing_item = None
 
-            processed_event = process_event(
-                event.emitted_by,
-                existing_item,
-                event.content_item,
-                event.overrides,
-            )
+                processed_event = process_event(
+                    event.emitted_by,
+                    existing_item,
+                    event.content_item,
+                    event.overrides,
+                )
 
-            next_service = processed_event.service
-            items_to_submit = processed_event.related_media_items
+                next_service = processed_event.service
+                items_to_submit = processed_event.related_media_items
 
-            if items_to_submit:
-                for item_to_submit in items_to_submit:
-                    if not next_service:
-                        self.em.add_event_to_queue(
-                            Event(
-                                emitted_by="StateTransition", item_id=item_to_submit.id
+                if items_to_submit:
+                    for item_to_submit in items_to_submit:
+                        if not next_service:
+                            self.em.add_event_to_queue(
+                                Event(
+                                    emitted_by="StateTransition", item_id=item_to_submit.id
+                                )
                             )
-                        )
-                    else:
-                        # We are in the database, pass on id.
-                        if item_to_submit.id:
-                            event = Event(
-                                next_service,
-                                item_id=item_to_submit.id,
-                                overrides=processed_event.overrides,
-                            )
-                        # We are not, lets pass the MediaItem
                         else:
-                            event = Event(
-                                next_service,
-                                content_item=item_to_submit,
-                                overrides=processed_event.overrides,
-                            )
+                            # We are in the database, pass on id.
+                            if item_to_submit.id:
+                                event = Event(
+                                    next_service,
+                                    item_id=item_to_submit.id,
+                                    overrides=processed_event.overrides,
+                                )
+                            # We are not, lets pass the MediaItem
+                            else:
+                                event = Event(
+                                    next_service,
+                                    content_item=item_to_submit,
+                                    overrides=processed_event.overrides,
+                                )
 
-                        # Event will be added to running when job actually starts in submit_job
-                        self.em.submit_job(next_service, self, event)
+                            # Event will be added to running when job actually starts in submit_job
+                            self.em.submit_job(next_service, self, event)
+            except Exception:
+                logger.exception("Unhandled exception in main event loop; continuing")
 
     def stop(self):
         if not self.initialized:

@@ -1,0 +1,681 @@
+PLC0415 `import` should be at the top-level of a file
+  --> src\program\services\scrapers\jackett.py:96:13
+   |
+94 |             return self.scrape(item)
+95 |         except Exception as e:
+96 |             from requests import HTTPError
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+97 |
+98 |             if isinstance(e, HTTPError) and e.response.status_code == 429:
+   |
+
+PLC0415 `import` should be at the top-level of a file
+   --> src\program\services\scrapers\jackett.py:99:17
+    |
+ 98 |             if isinstance(e, HTTPError) and e.response.status_code == 429:
+ 99 |                 from program.utils.exceptions import RateLimitError
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+100 |
+101 |                 retry_after = e.response.headers.get("Retry-After")
+    |
+
+PLC0415 `import` should be at the top-level of a file
+   --> src\program\services\scrapers\jackett.py:107:17
+    |
+105 |                 )
+106 |             if "rate limit" in str(e).lower() or "429" in str(e):
+107 |                 from program.utils.exceptions import RateLimitError
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+108 |
+109 |                 raise RateLimitError("Jackett rate limit exceeded")
+    |
+
+C901 `scrape` is too complex (15 > 10)
+   --> src\program\services\scrapers\jackett.py:114:9
+    |
+112 |         return {}
+113 |
+114 |     def scrape(self, item: MediaItem) -> dict[str, str]:
+    |         ^^^^^^
+115 |         """Scrape the given media item"""
+    |
+
+PLR0912 Too many branches (15 > 12)
+   --> src\program\services\scrapers\jackett.py:114:9
+    |
+112 |         return {}
+113 |
+114 |     def scrape(self, item: MediaItem) -> dict[str, str]:
+    |         ^^^^^^
+115 |         """Scrape the given media item"""
+    |
+
+PLC0415 `import` should be at the top-level of a file
+  --> src\program\services\scrapers\prowlarr.py:96:5
+   |
+94 |     non-video extension, indicating the entry is unlikely to be a video torrent.
+95 |     """
+96 |     from urllib.parse import parse_qs, unquote, urlparse
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+97 |
+98 |     try:
+   |
+
+C901 `get_indexers` is too complex (20 > 10)
+   --> src\program\services\scrapers\prowlarr.py:178:9
+    |
+176 |         return False
+177 |
+178 |     def get_indexers(self) -> list[Indexer]:
+    |         ^^^^^^^^^^^^
+179 |         assert self.session
+    |
+
+PLR0912 Too many branches (22 > 12)
+   --> src\program\services\scrapers\prowlarr.py:178:9
+    |
+176 |         return False
+177 |
+178 |     def get_indexers(self) -> list[Indexer]:
+    |         ^^^^^^^^^^^^
+179 |         assert self.session
+    |
+
+PLR0915 Too many statements (56 > 50)
+   --> src\program\services\scrapers\prowlarr.py:178:9
+    |
+176 |         return False
+177 |
+178 |     def get_indexers(self) -> list[Indexer]:
+    |         ^^^^^^^^^^^^
+179 |         assert self.session
+    |
+
+PLC0415 `import` should be at the top-level of a file
+   --> src\program\services\scrapers\prowlarr.py:349:13
+    |
+347 |             return self.scrape(item)
+348 |         except Exception as e:
+349 |             from requests import HTTPError
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+350 |
+351 |             if isinstance(e, HTTPError) and e.response.status_code == 429:
+    |
+
+PLC0415 `import` should be at the top-level of a file
+   --> src\program\services\scrapers\prowlarr.py:352:17
+    |
+351 |             if isinstance(e, HTTPError) and e.response.status_code == 429:
+352 |                 from program.utils.exceptions import RateLimitError
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+353 |
+354 |                 retry_after = e.response.headers.get("Retry-After")
+    |
+
+PLC0415 `import` should be at the top-level of a file
+   --> src\program\services\scrapers\prowlarr.py:360:17
+    |
+358 |                 )
+359 |             if "rate limit" in str(e).lower() or "429" in str(e):
+360 |                 from program.utils.exceptions import RateLimitError
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+361 |
+362 |                 raise RateLimitError("Prowlarr rate limit exceeded")
+    |
+
+PLC0206 Extracting value from dictionary without calling `.items()`
+   --> src\program\services\scrapers\prowlarr.py:385:17
+    |
+383 |             }
+384 |
+385 |             for future in future_to_indexer:
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+386 |                 indexer = future_to_indexer[future]
+    |                           -------------------------
+387 |
+388 |                 try:
+    |
+help: Use `for future, value in future_to_indexer.items()` instead
+
+C901 `build_search_params` is too complex (18 > 10)
+   --> src\program\services\scrapers\prowlarr.py:409:9
+    |
+407 |         return torrents
+408 |
+409 |     def build_search_params(self, indexer: Indexer, item: MediaItem) -> Params:
+    |         ^^^^^^^^^^^^^^^^^^^
+410 |         """Build a search query for a single indexer."""
+    |
+
+PLR0912 Too many branches (21 > 12)
+   --> src\program\services\scrapers\prowlarr.py:409:9
+    |
+407 |         return torrents
+408 |
+409 |     def build_search_params(self, indexer: Indexer, item: MediaItem) -> Params:
+    |         ^^^^^^^^^^^^^^^^^^^
+410 |         """Build a search query for a single indexer."""
+    |
+
+PLR0915 Too many statements (56 > 50)
+   --> src\program\services\scrapers\prowlarr.py:409:9
+    |
+407 |         return torrents
+408 |
+409 |     def build_search_params(self, indexer: Indexer, item: MediaItem) -> Params:
+    |         ^^^^^^^^^^^^^^^^^^^
+410 |         """Build a search query for a single indexer."""
+    |
+
+C901 `scrape_indexer` is too complex (16 > 10)
+   --> src\program\services\scrapers\prowlarr.py:504:9
+    |
+502 |         )
+503 |
+504 |     def scrape_indexer(self, indexer: Indexer, item: MediaItem) -> dict[str, str]:
+    |         ^^^^^^^^^^^^^^
+505 |         """Scrape from a single indexer"""
+    |
+
+PLR0912 Too many branches (16 > 12)
+   --> src\program\services\scrapers\prowlarr.py:504:9
+    |
+502 |         )
+503 |
+504 |     def scrape_indexer(self, indexer: Indexer, item: MediaItem) -> dict[str, str]:
+    |         ^^^^^^^^^^^^^^
+505 |         """Scrape from a single indexer"""
+    |
+
+SIM102 Use a single `if` statement instead of nested `if` statements
+   --> src\program\services\scrapers\prowlarr.py:507:9
+    |
+505 |           """Scrape from a single indexer"""
+506 |
+507 | /         if (
+508 | |             indexer.name in ANIME_ONLY_INDEXERS
+509 | |             or "anime" in (indexer.name or "").lower()
+510 | |         ):
+511 | |             if not item.is_anime:
+    | |_________________________________^
+512 |                   logger.debug(f"Indexer {indexer.name} is anime only, skipping")
+513 |                   return {}
+    |
+help: Combine `if` statements using `and`
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:98:25
+    |
+ 96 |     )
+ 97 |     real_debrid: RealDebridModel = Field(
+ 98 |         default_factory=lambda: RealDebridModel(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^
+ 99 |         description="Real-Debrid downloader configuration",
+100 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:102:25
+    |
+100 |     )
+101 |     debrid_link: DebridLinkModel = Field(
+102 |         default_factory=lambda: DebridLinkModel(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^
+103 |         description="Debrid-Link downloader configuration",
+104 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:106:25
+    |
+104 |     )
+105 |     all_debrid: AllDebridModel = Field(
+106 |         default_factory=lambda: AllDebridModel(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^
+107 |         description="AllDebrid downloader configuration",
+108 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:205:25
+    |
+203 |     enabled: bool = Field(default=True, description="Enable this profile")
+204 |     filter_rules: LibraryProfileFilterRules = Field(
+205 |         default_factory=lambda: LibraryProfileFilterRules(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+206 |         description="Metadata filter rules for matching items",
+207 |     )
+    |
+help: Inline function call
+
+PLC0415 `import` should be at the top-level of a file
+   --> src\program\settings\models.py:221:9
+    |
+219 |             )
+220 |         # Check for valid characters (alphanumeric, dash, underscore, slash)
+221 |         import re
+    |         ^^^^^^^^^
+222 |
+223 |         if not re.match(r"^/[a-zA-Z0-9_\-/]+$", v):
+    |
+
+PLC0415 `import` should be at the top-level of a file
+   --> src\program\settings\models.py:340:9
+    |
+338 |     def validate_library_profiles(cls, v: dict[str, LibraryProfile]):
+339 |         """Validate library profile keys and paths"""
+340 |         import re
+    |         ^^^^^^^^^
+341 |
+342 |         for key in v:
+    |
+
+PLC0415 `import` should be at the top-level of a file
+   --> src\program\settings\models.py:393:9
+    |
+391 |         """Validate that naming template string is syntactically valid."""
+392 |
+393 |         from program.utils.safe_formatter import SafeFormatter
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+394 |
+395 |         try:
+    |
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:602:25
+    |
+600 |     )
+601 |     oauth: TraktOauthModel = Field(
+602 |         default_factory=lambda: TraktOauthModel(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^
+603 |         description="Trakt OAuth configuration",
+604 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:612:25
+    |
+610 | class ContentModel(Observable):
+611 |     overseerr: OverseerrModel = Field(
+612 |         default_factory=lambda: OverseerrModel(), description="Overseerr configuration"
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^
+613 |     )
+614 |     plex_watchlist: PlexWatchlistModel = Field(
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:615:25
+    |
+613 |     )
+614 |     plex_watchlist: PlexWatchlistModel = Field(
+615 |         default_factory=lambda: PlexWatchlistModel(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+616 |         description="Plex Watchlist configuration",
+617 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:619:25
+    |
+617 |     )
+618 |     mdblist: MdblistModel = Field(
+619 |         default_factory=lambda: MdblistModel(), description="MDBList configuration"
+    |                         ^^^^^^^^^^^^^^^^^^^^^^
+620 |     )
+621 |     listrr: ListrrModel = Field(
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:622:25
+    |
+620 |     )
+621 |     listrr: ListrrModel = Field(
+622 |         default_factory=lambda: ListrrModel(), description="Listrr configuration"
+    |                         ^^^^^^^^^^^^^^^^^^^^^
+623 |     )
+624 |     trakt: TraktModel = Field(
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:625:25
+    |
+623 |     )
+624 |     trakt: TraktModel = Field(
+625 |         default_factory=lambda: TraktModel(), description="Trakt configuration"
+    |                         ^^^^^^^^^^^^^^^^^^^^
+626 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:696:25
+    |
+694 |     )
+695 |     parameters: OrionoidConfigParametersDict = Field(
+696 |         default_factory=lambda: OrionoidConfigParametersDict(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+697 |         description="Additional Orionoid parameters",
+698 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:796:25
+    |
+794 |     )
+795 |     torrentio: TorrentioConfig = Field(
+796 |         default_factory=lambda: TorrentioConfig(), description="Torrentio configuration"
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^
+797 |     )
+798 |     jackett: JackettConfig = Field(
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:799:25
+    |
+797 |     )
+798 |     jackett: JackettConfig = Field(
+799 |         default_factory=lambda: JackettConfig(), description="Jackett configuration"
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^
+800 |     )
+801 |     prowlarr: ProwlarrConfig = Field(
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:802:25
+    |
+800 |     )
+801 |     prowlarr: ProwlarrConfig = Field(
+802 |         default_factory=lambda: ProwlarrConfig(), description="Prowlarr configuration"
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^
+803 |     )
+804 |     orionoid: OrionoidConfig = Field(
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:805:25
+    |
+803 |     )
+804 |     orionoid: OrionoidConfig = Field(
+805 |         default_factory=lambda: OrionoidConfig(), description="Orionoid configuration"
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^
+806 |     )
+807 |     mediafusion: MediafusionConfig = Field(
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:808:25
+    |
+806 |     )
+807 |     mediafusion: MediafusionConfig = Field(
+808 |         default_factory=lambda: MediafusionConfig(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+809 |         description="Mediafusion configuration",
+810 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:812:25
+    |
+810 |     )
+811 |     zilean: ZileanConfig = Field(
+812 |         default_factory=lambda: ZileanConfig(), description="Zilean configuration"
+    |                         ^^^^^^^^^^^^^^^^^^^^^^
+813 |     )
+814 |     comet: CometConfig = Field(
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:815:25
+    |
+813 |     )
+814 |     comet: CometConfig = Field(
+815 |         default_factory=lambda: CometConfig(), description="Comet configuration"
+    |                         ^^^^^^^^^^^^^^^^^^^^^
+816 |     )
+817 |     rarbg: RarbgConfig = Field(
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:818:25
+    |
+816 |     )
+817 |     rarbg: RarbgConfig = Field(
+818 |         default_factory=lambda: RarbgConfig(), description="RARBG configuration"
+    |                         ^^^^^^^^^^^^^^^^^^^^^
+819 |     )
+820 |     aiostreams: AIOStreamsConfig = Field(
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:821:25
+    |
+819 |     )
+820 |     aiostreams: AIOStreamsConfig = Field(
+821 |         default_factory=lambda: AIOStreamsConfig(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+822 |         description="AIOStreams configuration",
+823 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:870:25
+    |
+868 | class SubtitleProvidersDict(Observable):
+869 |     opensubtitles: SubtitleProviderConfig = Field(
+870 |         default_factory=lambda: SubtitleProviderConfig(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+871 |         description="OpenSubtitles provider configuration",
+872 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:882:25
+    |
+880 |     )
+881 |     providers: SubtitleProvidersDict = Field(
+882 |         default_factory=lambda: SubtitleProvidersDict(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+883 |         description="Subtitle provider configurations",
+884 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:889:25
+    |
+887 | class PostProcessing(Observable):
+888 |     subtitle: SubtitleConfig = Field(
+889 |         default_factory=lambda: SubtitleConfig(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^
+890 |         description="Subtitle post-processing configuration",
+891 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:962:25
+    |
+960 |     )
+961 |     filesystem: FilesystemModel = Field(
+962 |         default_factory=lambda: FilesystemModel(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^
+963 |         description="Filesystem configuration",
+964 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:966:25
+    |
+964 |     )
+965 |     updaters: UpdatersModel = Field(
+966 |         default_factory=lambda: UpdatersModel(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^
+967 |         description="Library updaters configuration",
+968 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:970:25
+    |
+968 |     )
+969 |     downloaders: DownloadersModel = Field(
+970 |         default_factory=lambda: DownloadersModel(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+971 |         description="Downloader services configuration",
+972 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:974:25
+    |
+972 |     )
+973 |     content: ContentModel = Field(
+974 |         default_factory=lambda: ContentModel(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^
+975 |         description="Content services configuration",
+976 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:978:25
+    |
+976 |     )
+977 |     scraping: ScraperModel = Field(
+978 |         default_factory=lambda: ScraperModel(), description="Scraper configuration"
+    |                         ^^^^^^^^^^^^^^^^^^^^^^
+979 |     )
+980 |     ranking: RTNSettingsModel = Field(
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:981:25
+    |
+979 |     )
+980 |     ranking: RTNSettingsModel = Field(
+981 |         default_factory=lambda: RTNSettingsModel(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+982 |         description="Result ranking configuration",
+983 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:985:25
+    |
+983 |     )
+984 |     indexer: IndexerModel = Field(
+985 |         default_factory=lambda: IndexerModel(), description="Indexer configuration"
+    |                         ^^^^^^^^^^^^^^^^^^^^^^
+986 |     )
+987 |     database: DatabaseModel = Field(
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:988:25
+    |
+986 |     )
+987 |     database: DatabaseModel = Field(
+988 |         default_factory=lambda: DatabaseModel(), description="Database configuration"
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^
+989 |     )
+990 |     notifications: NotificationsModel = Field(
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:991:25
+    |
+989 |     )
+990 |     notifications: NotificationsModel = Field(
+991 |         default_factory=lambda: NotificationsModel(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+992 |         description="Notifications configuration",
+993 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+   --> src\program\settings\models.py:995:25
+    |
+993 |     )
+994 |     post_processing: PostProcessing = Field(
+995 |         default_factory=lambda: PostProcessing(),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^
+996 |         description="Post-processing configuration",
+997 |     )
+    |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+    --> src\program\settings\models.py:999:25
+     |
+ 997 |     )
+ 998 |     logging: LoggingModel = Field(
+ 999 |         default_factory=lambda: LoggingModel(), description="Logging configuration"
+     |                         ^^^^^^^^^^^^^^^^^^^^^^
+1000 |     )
+1001 |     stream: StreamModel = Field(
+     |
+help: Inline function call
+
+PLW0108 Lambda may be unnecessary; consider inlining inner function
+    --> src\program\settings\models.py:1002:25
+     |
+1000 |     )
+1001 |     stream: StreamModel = Field(
+1002 |         default_factory=lambda: StreamModel(), description="Stream configuration"
+     |                         ^^^^^^^^^^^^^^^^^^^^^
+1003 |     )
+     |
+help: Inline function call
+
+E712 Avoid equality comparisons to `True`; use `v:` for truth checks
+    --> src\program\settings\models.py:1007:12
+     |
+1005 |     @field_validator("log_level", mode="before")
+1006 |     def check_debug(cls, v: str | bool):
+1007 |         if v == True:
+     |            ^^^^^^^^^
+1008 |             return "DEBUG"
+1009 |         elif v == False:
+     |
+help: Replace with `v`
+
+E712 Avoid equality comparisons to `False`; use `not v:` for false checks
+    --> src\program\settings\models.py:1009:14
+     |
+1007 |         if v == True:
+1008 |             return "DEBUG"
+1009 |         elif v == False:
+     |              ^^^^^^^^^^
+1010 |             return "INFO"
+     |
+help: Replace with `not v`
+
+Found 59 errors.
+No fixes available (38 hidden fixes can be enabled with the `--unsafe-fixes` option).

@@ -1,0 +1,143 @@
+commit e3daba0286bf213e7df724a5e7db57fdd6aeca61
+Author: coldspirit <coldspirit@gmail.com>
+Date:   Tue Mar 3 21:51:45 2026 +0000
+
+    fix(streaming): handle Real-Debrid fair usage limit gracefully
+    
+    Ensure fair usage limits don't result in ByteLengthMismatchException by detecting Real-Debrid error code 36 and terminating the stream.
+
+diff --git a/src/program/services/downloaders/realdebrid.py b/src/program/services/downloaders/realdebrid.py
+index c3bc9b62..3b78342c 100644
+--- a/src/program/services/downloaders/realdebrid.py
++++ b/src/program/services/downloaders/realdebrid.py
+@@ -24,6 +24,7 @@ from program.settings import settings_manager
+ from program.utils.request import CircuitBreakerOpen, SmartResponse, SmartSession
+ from program.services.streaming.exceptions.debrid_service_exception import (
+     DebridServiceLinkUnavailable,
++    DebridServiceFairUsageLimitException,
+ )
+ from program.media.item import ProcessedItemType
+ 
+@@ -657,7 +658,12 @@ class RealDebridDownloader(DownloaderBase):
+             if not response.ok:
+                 data = RealDebridErrorResponse.model_validate(response.json())
+ 
+-                if data.error_code in (
++                if data.error_code == RealDebridErrorCode.FAIR_USAGE_LIMIT:
++                    logger.warning(
++                        f"Fair usage limit reached for {self.key}: {data.error}"
++                    )
++                    raise DebridServiceFairUsageLimitException(provider=self.key)
++                elif data.error_code in (
+                     RealDebridErrorCode.RESOURCE_UNREACHABLE,
+                     RealDebridErrorCode.RESOURCE_NOT_FOUND,
+                     RealDebridErrorCode.UNSUPPORTED_HOSTER,
+@@ -684,6 +690,8 @@ class RealDebridDownloader(DownloaderBase):
+             return UnrestrictedLink.model_validate(response.json())
+         except DebridServiceLinkUnavailable:
+             raise
++        except DebridServiceFairUsageLimitException:
++            raise
+         except CircuitBreakerOpen as e:
+             logger.warning(
+                 f"Real-Debrid unrestrict skipped: circuit breaker OPEN ({e})"
+diff --git a/src/program/services/filesystem/vfs/db.py b/src/program/services/filesystem/vfs/db.py
+index ecf5e1c0..5d1b673f 100644
+--- a/src/program/services/filesystem/vfs/db.py
++++ b/src/program/services/filesystem/vfs/db.py
+@@ -11,6 +11,7 @@ from program.db.db import db_session
+ from program.media.media_entry import MediaEntry
+ from program.services.streaming.exceptions import (
+     DebridServiceLinkUnavailable,
++    DebridServiceFairUsageLimitException,
+ )
+ from program.media.item import MediaItem
+ from program.types import Event
+@@ -144,6 +145,11 @@ class VFSDatabase:
+                         )
+ 
+                         return entry.unrestricted_url
++            except DebridServiceFairUsageLimitException as e:
++                logger.warning(
++                    f"Fair usage limit reached when unrestricting URL for {entry.original_filename}: {e}"
++                )
++                raise
+             except DebridServiceLinkUnavailable as e:
+                 logger.warning(
+                     f"Failed to unrestrict URL for {entry.original_filename}: {e}"
+@@ -235,7 +241,7 @@ class VFSDatabase:
+                     modified=(entry.updated_at.isoformat()),
+                     entry_type="media",
+                 )
+-        except DebridServiceLinkUnavailable:
++        except (DebridServiceLinkUnavailable, DebridServiceFairUsageLimitException):
+             raise
+         except Exception as e:
+             logger.error(
+diff --git a/src/program/services/streaming/exceptions/__init__.py b/src/program/services/streaming/exceptions/__init__.py
+index b4dac42a..c114e279 100644
+--- a/src/program/services/streaming/exceptions/__init__.py
++++ b/src/program/services/streaming/exceptions/__init__.py
+@@ -22,6 +22,7 @@ from .debrid_service_exception import (
+     DebridServiceRateLimitedException,
+     DebridServiceServiceUnavailableException,
+     DebridServiceLinkUnavailable,
++    DebridServiceFairUsageLimitException,
+     DebridServiceClosedConnectionException,
+     DebridServiceRangeNotSatisfiableException,
+ )
+@@ -34,6 +35,7 @@ __all__ = [
+     "DebridServiceRateLimitedException",
+     "DebridServiceServiceUnavailableException",
+     "DebridServiceLinkUnavailable",
++    "DebridServiceFairUsageLimitException",
+     "DebridServiceClosedConnectionException",
+     "DebridServiceRangeNotSatisfiableException",
+     "MediaStreamException",
+diff --git a/src/program/services/streaming/exceptions/debrid_service_exception.py b/src/program/services/streaming/exceptions/debrid_service_exception.py
+index fb701440..22c4b7fa 100644
+--- a/src/program/services/streaming/exceptions/debrid_service_exception.py
++++ b/src/program/services/streaming/exceptions/debrid_service_exception.py
+@@ -64,6 +64,13 @@ class DebridServiceLinkUnavailable(DebridServiceException):
+         self.link = link
+ 
+ 
++class DebridServiceFairUsageLimitException(DebridServiceException):
++    """Raised when the debrid service fair usage limit is reached."""
++
++    def __init__(self, provider: str) -> None:
++        super().__init__("Fair usage limit reached", provider=provider)
++
++
+ class DebridServiceClosedConnectionException(DebridServiceException):
+     """Raised when the debrid service closes the connection prematurely."""
+ 
+diff --git a/src/program/services/streaming/media_stream.py b/src/program/services/streaming/media_stream.py
+index 071091bb..2f713c7f 100644
+--- a/src/program/services/streaming/media_stream.py
++++ b/src/program/services/streaming/media_stream.py
+@@ -35,6 +35,7 @@ from .exceptions import (
+     DebridServiceRefusedRangeRequestException,
+     MediaStreamKilledException,
+     DebridServiceLinkUnavailable,
++    DebridServiceFairUsageLimitException,
+ )
+ from .file_metadata import FileMetadata
+ from .recent_reads import Read, RecentReads
+@@ -243,6 +244,7 @@ class MediaStream:
+             DebridServiceUnableToConnectException,
+             DebridServiceForbiddenException,
+             DebridServiceRangeNotSatisfiableException,
++            DebridServiceFairUsageLimitException,
+         ) as e:
+             logger.exception(
+                 self.build_log_message(
+@@ -1005,7 +1007,7 @@ class MediaStream:
+                 raise DebridServiceClosedConnectionException(
+                     provider=self.provider
+                 ) from e
+-            except DebridServiceLinkUnavailable:
++            except (DebridServiceLinkUnavailable, DebridServiceFairUsageLimitException):
+                 raise
+             except Exception as e:
+                 logger.exception(

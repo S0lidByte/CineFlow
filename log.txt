@@ -1,0 +1,20 @@
+999a30b1 fix(media): clear blacklisted_streams when item is reset
+3f190240 fix(downloaders): clear blacklisted_streams when falling back to Indexed
+027288d5 perf(prowlarr): increase per-URL infohash timeout to 20s for slow Prowlarr proxies
+e0020c9d perf(prowlarr): skip infohash URL fetch for non-video file extensions
+84a113d3 perf(prowlarr): reuse infohash session and add per-URL timeout
+71c6a315 fix(vfs): re-initialize Trio primitives on FUSE loop restart to prevent AssertionError
+5b833c97 fix(backend): resolve stream loop, deadlocks, stream exhaustion and connection reset
+544b965d Potential fix for code scanning alert no. 1: Workflow does not contain permissions
+833e5dc0 fix(vfs): resolve SyntaxError by avoiding return inside except* block
+c3190305 fix(vfs): handle fair usage limit without terminating stream
+4eb0f36f fix(vfs): resolve fair usage loop by persisting unrestricted URLs immediately and properly refreshing on 401/403
+20f7a833 fix(trakt): replace assert item.show/movie with graceful None check to handle optional collection fields
+07fc8205 fix(realdebrid): stop unrestrict spam when hitting fair usage limits by caching the timeout for 5 minutes and returning EACCES to OS
+d032cd21 fix(trakt): set GetCollection200Response model fields to Optional to fix pydantic validation parser errors
+e3daba02 fix(streaming): handle Real-Debrid fair usage limit gracefully
+b0a86bc1 Potential fix for code scanning alert no. 2: Workflow does not contain permissions
+b9e8699e chore(deps): widen dependency upper bounds
+7477e1b1 chore: update uv.lock for platform markers
+907d392c chore(deps): update cachetools requirement from <6,>=5.3.3 to >=5.3.3,<8
+86cb07d9 chore: update uv.lock for platform markers

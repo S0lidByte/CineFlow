@@ -54,6 +54,7 @@ COPY src/ ./src
 COPY pyproject.toml uv.lock* ./
 COPY entrypoint.sh ./
 
-RUN chmod +x ./entrypoint.sh
+# Fix Windows CRLF line endings and grant execution permissions
+RUN sed -i 's/\r$//' ./entrypoint.sh && chmod +x ./entrypoint.sh
 
 ENTRYPOINT ["./entrypoint.sh"]

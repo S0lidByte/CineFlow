@@ -1,0 +1,38 @@
+commit 4eb0f36faac6a5345a3de4bc0daa92d2e8418f63
+Author: coldspirit <coldspirit@gmail.com>
+Date:   Tue Mar 3 22:50:27 2026 +0000
+
+    fix(vfs): resolve fair usage loop by persisting unrestricted URLs immediately and properly refreshing on 401/403
+
+diff --git a/src/program/services/filesystem/vfs/db.py b/src/program/services/filesystem/vfs/db.py
+index 5d1b673f..a6fb242c 100644
+--- a/src/program/services/filesystem/vfs/db.py
++++ b/src/program/services/filesystem/vfs/db.py
+@@ -133,18 +133,17 @@ class VFSDatabase:
+ 
+                 if new_unrestricted:
+                     entry.unrestricted_url = new_unrestricted.download
++                    
++                    # Always save the unrestricted URL so we don't spam the API on subsequent calls
++                    # if the CDN is temporarily returning 503s.
++                    session.merge(entry)
++                    session.commit()
+ 
+-                    cdn_url = DebridCDNUrl(entry)
+-
+-                    if cdn_url.validate(attempt_refresh=False):
+-                        session.merge(entry)
+-                        session.commit()
+-
+-                        logger.debug(
+-                            f"Refreshed unrestricted URL for {entry.original_filename}"
+-                        )
++                    logger.debug(
++                        f"Refreshed unrestricted URL for {entry.original_filename}"
++                    )
+ 
+-                        return entry.unrestricted_url
++                    return entry.unrestricted_url
+             except DebridServiceFairUsageLimitException as e:
+                 logger.warning(
+                     f"Fair usage limit reached when unrestricting URL for {entry.original_filename}: {e}"
