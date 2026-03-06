@@ -48,7 +48,14 @@ class Observable(MigratableBaseModel):
     def __setattr__(self, name: str, value: Any):
         super().__setattr__(name, value)
 
-        if self.__class__._notify_observers:
+        # Only fire observers for actual public model fields. Skip notifications during
+        # pydantic model construction (model_fields_set not yet populated) and for
+        # private/dunder attributes (e.g., Pydantic internals, __pydantic_fields_set__).
+        if (
+            self.__class__._notify_observers
+            and not name.startswith("_")
+            and name in self.model_fields
+        ):
             self.__class__._notify_observers()
 
 

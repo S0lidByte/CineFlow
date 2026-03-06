@@ -1,6 +1,5 @@
 ﻿import os
 import re
-
 from collections.abc import Callable
 from typing import Any, Generic, Literal, TypeVar
 from urllib.parse import urlencode
@@ -454,8 +453,11 @@ class TraktAPI:
 
             token_data = OAuthTokenResponse.model_validate(response.json())
 
-            self.settings.access_token = token_data.access_token
-            self.settings.refresh_token = token_data.refresh_token
+            # Write tokens directly to Pydantic model internals to bypass Observable.__setattr__,
+            # which would fire notify_observers() → initialize_services() and destroy any
+            # in-flight downloads. settings_manager.save() persists the values to disk.
+            object.__setattr__(self.settings, "access_token", token_data.access_token)
+            object.__setattr__(self.settings, "refresh_token", token_data.refresh_token)
 
             settings_manager.save()  # Save the tokens to settings
 
