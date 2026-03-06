@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
+
 from loguru import logger
 from RTN import ParsedData
 
+from program.core.runner import MediaItemGenerator, Runner, RunnerResult
 from program.media.item import (
     Episode,
     MediaItem,
@@ -10,10 +12,10 @@ from program.media.item import (
     Season,
     Show,
 )
-from program.media.state import States
-from program.media.stream import Stream
 from program.media.media_entry import MediaEntry
 from program.media.models import ActiveStream, MediaMetadata
+from program.media.state import States
+from program.media.stream import Stream
 from program.services.downloaders.models import (
     DebridFile,
     DownloadedTorrent,
@@ -25,16 +27,15 @@ from program.services.downloaders.models import (
 )
 from program.services.downloaders.shared import (
     DownloaderBase,
-    sort_streams_by_quality,
     parse_filename,
+    sort_streams_by_quality,
 )
 from program.settings import settings_manager
 from program.utils.request import CircuitBreakerOpen
-from program.core.runner import MediaItemGenerator, Runner, RunnerResult
 
-from .realdebrid import RealDebridDownloader
-from .debridlink import DebridLinkDownloader
 from .alldebrid import AllDebridDownloader
+from .debridlink import DebridLinkDownloader
+from .realdebrid import RealDebridDownloader
 
 
 class Downloader(Runner[None, DownloaderBase]):
@@ -84,7 +85,6 @@ class Downloader(Runner[None, DownloaderBase]):
         item: MediaItem,
     ) -> MediaItemGenerator:
         logger.debug(f"Starting download process for {item.log_string} ({item.id})")
-
 
         # Check if all services are in cooldown due to circuit breaker
         now = datetime.now()
@@ -171,7 +171,10 @@ class Downloader(Runner[None, DownloaderBase]):
                             )
                     except CircuitBreakerOpen as e:
                         # This specific service hit circuit breaker, set cooldown and try next service
-                        cooldown_duration = timedelta(minutes=1)
+                        cooldown_seconds = (
+                            e.retry_after_seconds if e.retry_after_seconds else 60
+                        )
+                        cooldown_duration = timedelta(seconds=cooldown_seconds)
                         self._service_cooldowns[service.key] = (
                             datetime.now() + cooldown_duration
                         )
@@ -185,7 +188,8 @@ class Downloader(Runner[None, DownloaderBase]):
                         # We want to retry this stream after cooldown
                         if len(self.initialized_services) == 1:
                             stream_failed_on_all_services = False
-                        continue
+                        # Break out of service loop — all subsequent streams will also fail on this service
+                        break
 
                     except Exception as e:
                         logger.debug(
@@ -251,6 +255,14 @@ class Downloader(Runner[None, DownloaderBase]):
                     # The next Downloader run will skip blacklisted streams and try the next one.
                     yield RunnerResult(media_items=[item])
                     return
+
+                # If all services hit circuit breaker, stop trying more streams
+                if hit_circuit_breaker and not any(
+                    s.key not in self._service_cooldowns
+                    or self._service_cooldowns[s.key] <= datetime.now()
+                    for s in self.initialized_services
+                ):
+                    break
 
         except Exception as e:
             logger.error(
@@ -373,7 +385,7 @@ class Downloader(Runner[None, DownloaderBase]):
                         method_2 = show.seasons[-2].episodes[-1].number
 
                     episode_cap = max([method_1, method_2])
-                except Exception as e:
+                except Exception:
                     pass
 
             found = False
@@ -387,15 +399,17 @@ class Downloader(Runner[None, DownloaderBase]):
                     assert file.filename
 
                     file_data = parse_filename(file.filename)
-                except Exception as e:
+                except Exception:
                     continue
 
                 if isinstance(item, (Show, Season, Episode)):
-                    if not file_data.episodes:
-                        continue
-                    elif 0 in file_data.episodes and len(file_data.episodes) == 1:
-                        continue
-                    elif file_data.seasons and file_data.seasons[0] == 0:
+                    if (
+                        not file_data.episodes
+                        or 0 in file_data.episodes
+                        and len(file_data.episodes) == 1
+                        or file_data.seasons
+                        and file_data.seasons[0] == 0
+                    ):
                         continue
 
                 if self.match_file_to_item(
@@ -730,46 +744,58 @@ class Downloader(Runner[None, DownloaderBase]):
         2. download_cached_stream_on_service (adds torrent and gets info)
         3. update_item_attributes (matches files and sets active_stream)
         """
-        
+
         # 1. Ensure stream is persisted on item (relationship)
         if stream not in item.streams:
             item.streams.append(stream)
             # Session commit is expected to be handled by caller
-        
+
         # 2. Validate stream and get container (same as standard flow)
         container = self.validate_stream_on_service(
-            stream, 
-            item, 
-            service, 
+            stream,
+            item,
+            service,
         )
-        
+
         if not container:
-            logger.warning(f"START_MANUAL_DOWNLOAD: Stream {stream.infohash} not available on {service.key}")
+            logger.warning(
+                f"START_MANUAL_DOWNLOAD: Stream {stream.infohash} not available on {service.key}"
+            )
             return False
-        
+
         if container and file_ids and container.files:
             # Filter the container.files list to only include selected files
             container.files = [f for f in container.files if f.file_id in file_ids]
 
-        logger.info(f"START_MANUAL_DOWNLOAD: Validated stream {stream.infohash} on {service.key}")
-        
+        logger.info(
+            f"START_MANUAL_DOWNLOAD: Validated stream {stream.infohash} on {service.key}"
+        )
+
         # 3. Download using standard method (same as standard flow)
         try:
             result = self.download_cached_stream_on_service(stream, container, service)
         except Exception as e:
-            logger.error(f"START_MANUAL_DOWNLOAD: download_cached_stream_on_service raised: {e}")
+            logger.error(
+                f"START_MANUAL_DOWNLOAD: download_cached_stream_on_service raised: {e}"
+            )
             return False
-        
+
         if not result:
-            logger.warning(f"START_MANUAL_DOWNLOAD: download_cached_stream_on_service returned None")
+            logger.warning(
+                "START_MANUAL_DOWNLOAD: download_cached_stream_on_service returned None"
+            )
             return False
-        
+
         # 4. Update item attributes (same as standard flow)
         if self.update_item_attributes(item, result, service):
             # Store state - Manual download completes the 'Downloader' phase, so we are now Downloaded
             item.store_state(States.Downloaded)
-            logger.info(f"START_MANUAL_DOWNLOAD: Successfully downloaded {item.log_string} from '{stream.raw_title}'")
+            logger.info(
+                f"START_MANUAL_DOWNLOAD: Successfully downloaded {item.log_string} from '{stream.raw_title}'"
+            )
             return True
         else:
-            logger.warning(f"START_MANUAL_DOWNLOAD: update_item_attributes failed for {item.log_string}")
+            logger.warning(
+                f"START_MANUAL_DOWNLOAD: update_item_attributes failed for {item.log_string}"
+            )
             return False

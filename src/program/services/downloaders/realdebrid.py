@@ -1,16 +1,17 @@
 from __future__ import annotations
+
 import time
 
 # Trigger release-please re-evaluation
 from datetime import datetime
+from enum import IntEnum
 from typing import Literal
 
-from pydantic import BaseModel
 from loguru import logger
+from pydantic import BaseModel
 from requests import exceptions
 
-from enum import IntEnum
-
+from program.media.item import ProcessedItemType
 from program.services.downloaders.models import (
     VALID_VIDEO_EXTENSIONS,
     DebridFile,
@@ -18,16 +19,15 @@ from program.services.downloaders.models import (
     TorrentContainer,
     TorrentFile,
     TorrentInfo,
-    UserInfo,
     UnrestrictedLink,
+    UserInfo,
+)
+from program.services.streaming.exceptions.debrid_service_exception import (
+    DebridServiceFairUsageLimitException,
+    DebridServiceLinkUnavailable,
 )
 from program.settings import settings_manager
 from program.utils.request import CircuitBreakerOpen, SmartResponse, SmartSession
-from program.services.streaming.exceptions.debrid_service_exception import (
-    DebridServiceLinkUnavailable,
-    DebridServiceFairUsageLimitException,
-)
-from program.media.item import ProcessedItemType
 
 from .shared import DownloaderBase, premium_days_left
 
@@ -581,14 +581,19 @@ class RealDebridDownloader(DownloaderBase):
 
     def _maybe_backoff(self, response: SmartResponse) -> None:
         """
-        Promote Real-Debrid 429/5xx responses to a service-level backoff signal.
+        Raise on Real-Debrid 429/5xx so the caller surfaces the error.
+
+        Note: SmartSession's circuit breaker already tracks 429/5xx failures
+        via after_request(success=False) and will trip OPEN after
+        failure_threshold (default 5) consecutive failures. We must NOT
+        raise CircuitBreakerOpen here because that bypasses the breaker's
+        failure counting, causing it to never enter OPEN state properly.
         """
 
         code = response.status_code
 
         if code == 429 or (500 <= code < 600):
-            # Name matches the breaker key in SmartSession rate_limits/breakers
-            raise CircuitBreakerOpen("api.real-debrid.com")
+            raise RealDebridError(self._handle_error(response))
 
     def _handle_error(self, response: SmartResponse) -> str:
         """
@@ -622,7 +627,7 @@ class RealDebridDownloader(DownloaderBase):
 
         assert self.api
 
-        response = self.api.session.get(f"downloads")
+        response = self.api.session.get("downloads")
         self._maybe_backoff(response)
 
         if not response.ok:
@@ -647,7 +652,7 @@ class RealDebridDownloader(DownloaderBase):
 
         try:
             assert self.api
-            
+
             # Check if we are currently rate-limited by fair usage
             if getattr(self, "_fair_usage_until", 0) > time.time():
                 logger.warning(
@@ -670,12 +675,12 @@ class RealDebridDownloader(DownloaderBase):
                     logger.warning(
                         f"Fair usage limit reached for {self.key}: {data.error}"
                     )
-                    
+
                     # Cache the fair usage limit for 5 minutes (300 seconds)
                     self._fair_usage_until = time.time() + 300
-                    
+
                     raise DebridServiceFairUsageLimitException(provider=self.key)
-                elif data.error_code in (
+                if data.error_code in (
                     RealDebridErrorCode.RESOURCE_UNREACHABLE,
                     RealDebridErrorCode.RESOURCE_NOT_FOUND,
                     RealDebridErrorCode.UNSUPPORTED_HOSTER,
@@ -692,12 +697,11 @@ class RealDebridDownloader(DownloaderBase):
                     )
 
                     raise DebridServiceLinkUnavailable(provider=self.key, link=link)
-                else:
-                    logger.warning(
-                        f"Direct unrestrict failed with status {response.status_code}: {data.error} [{data.error_code}]"
-                    )
+                logger.warning(
+                    f"Direct unrestrict failed with status {response.status_code}: {data.error} [{data.error_code}]"
+                )
 
-                    return None
+                return None
 
             return UnrestrictedLink.model_validate(response.json())
         except DebridServiceLinkUnavailable:
