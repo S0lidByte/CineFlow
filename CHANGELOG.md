@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.7.0](https://github.com/S0lidByte/CineFlow/compare/v1.6.0...v1.7.0) (2026-03-06)
+
+
+### Features
+
+* **settings:** preserve field descriptions in JSON schema and enable live-coding volume mapping ([3578f45](https://github.com/S0lidByte/CineFlow/commit/3578f45de6c32043b8cc22eaf120a212c0a01874))
+
+
+### Bug Fixes
+
+* **backend:** resolve stream loop, deadlocks, stream exhaustion and connection reset ([5b833c9](https://github.com/S0lidByte/CineFlow/commit/5b833c97fa3765d95dc97e2688d9d8944e0c7625))
+* **downloaders:** clear blacklisted_streams when falling back to Indexed ([3f19024](https://github.com/S0lidByte/CineFlow/commit/3f19024095da8f34b0d20084969d7d476bb66890))
+* **downloaders:** resolve circuit breaker cascade failure on real-debrid ([c495c0a](https://github.com/S0lidByte/CineFlow/commit/c495c0a922d63e2ce1a920b778c0c13fcb411b9f))
+* **media:** clear blacklisted_streams when item is reset ([999a30b](https://github.com/S0lidByte/CineFlow/commit/999a30b17089b568c76192502cbb57bddcbba430))
+* **realdebrid:** stop unrestrict spam when hitting fair usage limits by caching the timeout for 5 minutes and returning EACCES to OS ([07fc820](https://github.com/S0lidByte/CineFlow/commit/07fc82053bccca4b9bc19198e12cea9cefae7a9f))
+* **scrapers:** dynamic infohash extraction concurrency and timeout ([e464b42](https://github.com/S0lidByte/CineFlow/commit/e464b42bfcf3ffb9a262b5439bdb11587d256f49))
+* **settings:** prevent service reinit when Trakt OAuth tokens are refreshed ([ec9f681](https://github.com/S0lidByte/CineFlow/commit/ec9f681e21c49b9940292b40ebf2bbed05883e47))
+* **streaming:** handle Real-Debrid fair usage limit gracefully ([e3daba0](https://github.com/S0lidByte/CineFlow/commit/e3daba0286bf213e7df724a5e7db57fdd6aeca61))
+* **trakt:** replace assert item.show/movie with graceful None check to handle optional collection fields ([20f7a83](https://github.com/S0lidByte/CineFlow/commit/20f7a8331be935d158f7b16cee1758d1127b9129))
+* **trakt:** set GetCollection200Response model fields to Optional to fix pydantic validation parser errors ([d032cd2](https://github.com/S0lidByte/CineFlow/commit/d032cd218460d23251d57da2ceffecb9ee3849b8))
+* **vfs:** handle fair usage limit without terminating stream ([c319030](https://github.com/S0lidByte/CineFlow/commit/c3190305667dc6631055f082d52c25c27af5d269))
+* **vfs:** re-initialize Trio primitives on FUSE loop restart to prevent AssertionError ([71c6a31](https://github.com/S0lidByte/CineFlow/commit/71c6a31507e03e1e7c82a6932437c8d071915fcc))
+* **vfs:** resolve fair usage loop by persisting unrestricted URLs immediately and properly refreshing on 401/403 ([4eb0f36](https://github.com/S0lidByte/CineFlow/commit/4eb0f36faac6a5345a3de4bc0daa92d2e8418f63))
+* **vfs:** resolve SyntaxError by avoiding return inside except* block ([833e5dc](https://github.com/S0lidByte/CineFlow/commit/833e5dc05ffb9efe983b5340a1a1c715b687f43d))
+
+
+### Performance Improvements
+
+* **prowlarr:** increase per-URL infohash timeout to 20s for slow Prowlarr proxies ([027288d](https://github.com/S0lidByte/CineFlow/commit/027288d5190698547fc2fc8ee41627ecbad8964f))
+* **prowlarr:** reuse infohash session and add per-URL timeout ([84a113d](https://github.com/S0lidByte/CineFlow/commit/84a113d3af5fd017c84ffd3aecc09d1bd6f8f90d))
+* **prowlarr:** skip infohash URL fetch for non-video file extensions ([e0020c9](https://github.com/S0lidByte/CineFlow/commit/e0020c9d056a2c9235c21c8601dc68c5281a71fc))
+
 ## [1.6.0](https://github.com/S0lidByte/triven/compare/v1.5.0...v1.6.0) (2026-03-03)
 
 
