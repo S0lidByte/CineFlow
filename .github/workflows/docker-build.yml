@@ -3,7 +3,7 @@ name: Docker Build and Push
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
   workflow_dispatch:
 
 jobs:
@@ -47,8 +47,8 @@ jobs:
       uses: docker/metadata-action@v5
       with:
         images: |
-          ghcr.io/${{ github.repository_owner }}/riven
-          docker.io/${{ secrets.DOCKER_HUB_USERNAME }}/triven
+          ghcr.io/${{ github.repository_owner }}/cineflow
+          docker.io/${{ secrets.DOCKER_HUB_USERNAME }}/cineflow
         flavor: |
           latest=auto
         tags: |
