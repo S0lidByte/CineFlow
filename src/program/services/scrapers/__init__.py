@@ -2,8 +2,7 @@ import threading
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from queue import Queue, Empty
-
+from queue import Empty, Queue
 
 from loguru import logger
 
@@ -79,8 +78,9 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
             item.streams.extend(new_streams)
             item.updated = False
 
-            if item.failed_attempts > 0:
-                item.failed_attempts = 0  # Reset failed attempts on success
+            item.failed_attempts = min(
+                item.failed_attempts, 0
+            )  # Reset failed attempts on success
 
             logger.log(
                 "SCRAPER", f"Added {len(new_streams)} new streams to {item.log_string}"

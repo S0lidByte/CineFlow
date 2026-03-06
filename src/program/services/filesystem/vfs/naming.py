@@ -8,16 +8,15 @@ Supports flexible naming templates configured in settings.
 import os
 from re import Match
 from typing import Any, Generic, TypeVar, cast
+
 from loguru import logger
+from PTT import parse_title  # pyright: ignore[reportUnknownVariableType]
 from pydantic import BaseModel, computed_field
 
-from program.media.item import MediaItem, Movie, Show, Season, Episode
-from program.settings import settings_manager
-from PTT import parse_title  # pyright: ignore[reportUnknownVariableType]
-
+from program.media.item import Episode, MediaItem, Movie, Season, Show
 from program.media.media_entry import MediaEntry
+from program.settings import settings_manager
 from program.utils.safe_formatter import SafeFormatter
-
 
 T = TypeVar("T", bound=MediaItem)
 

@@ -5,8 +5,8 @@ from sqlalchemy import engine_from_config, pool, text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from alembic import context
+from program.db.base_model import get_base_metadata
 from program.db.db import db
-from program.db.base_model import Base, get_base_metadata
 from program.settings import settings_manager
 
 
@@ -43,16 +43,12 @@ def reset_database(connection) -> bool:
     try:
         # Drop and recreate schema
         if db.engine.name == "postgresql":
-            connection.execute(
-                text(
-                    """
+            connection.execute(text("""
                             SELECT pg_terminate_backend(pid)
                             FROM pg_stat_activity
                             WHERE datname = current_database()
                             AND pid <> pg_backend_pid()
-                        """
-                )
-            )
+                        """))
             connection.execute(text("DROP SCHEMA public CASCADE"))
             connection.execute(text("CREATE SCHEMA public"))
             connection.execute(text("GRANT ALL ON SCHEMA public TO public"))

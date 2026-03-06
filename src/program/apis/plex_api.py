@@ -1,12 +1,13 @@
 ﻿from typing import Literal, cast
-from pydantic import BaseModel, field_validator
+
 import regex
 from loguru import logger
 from plexapi.library import LibrarySection
+from plexapi.media import Guid
 from plexapi.myplex import MyPlexAccount
 from plexapi.server import PlexServer
 from plexapi.video import Movie, Show
-from plexapi.media import Guid
+from pydantic import BaseModel, field_validator
 
 from program.settings import settings_manager
 from program.utils.request import SmartSession

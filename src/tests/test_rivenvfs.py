@@ -1,33 +1,38 @@
-import pytest
-import trio
-import pyfuse3
 import errno
-from unittest.mock import MagicMock, AsyncMock, patch
-
-from program.services.filesystem.vfs.rivenvfs import RivenVFS
-from program.services.filesystem.vfs.vfs_node import VFSFile, VFSDirectory
-from cachetools import Cache
 
 # We need to ensure settings_manager does not crash when imported
-from unittest.mock import Mock
-import sys
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pyfuse3
+import pytest
+import trio
+
+from program.services.filesystem.vfs.rivenvfs import RivenVFS
+from program.services.filesystem.vfs.vfs_node import VFSDirectory, VFSFile
 
 
 @pytest.fixture
 def mock_vfs():
-    with patch("pyfuse3.init"), patch("threading.Thread"), patch("kink.di"), patch("program.services.filesystem.vfs.rivenvfs.settings_manager") as mock_settings:
+    with (
+        patch("pyfuse3.init"),
+        patch("threading.Thread"),
+        patch("kink.di"),
+        patch(
+            "program.services.filesystem.vfs.rivenvfs.settings_manager"
+        ) as mock_settings,
+    ):
         mock_settings.settings.filesystem.cache_dir.exists.return_value = True
         mock_settings.settings.filesystem.cache_max_size_mb = 100
-        
+
         mock_downloader = MagicMock()
-        
+
         # We catch potential kink DI errors just in case
         vfs = RivenVFS(mountpoint="/tmp/mock_mtpt", downloader=mock_downloader)
-        
+
         # Inject mock DB
         vfs.vfs_db = MagicMock()
         vfs.vfs_db.get_subtitle_content = MagicMock(return_value=b"subtitle data")
-        
+
         yield vfs
 
 
@@ -40,23 +45,25 @@ async def test_subtitle_caching(mock_vfs):
         "last_read_end": 0,
         "subtitle_content": None,
     }
-    
-    mock_node = VFSFile(name="sub.srt", original_filename="subtitle:parent:en", file_size=100)
+
+    mock_node = VFSFile(
+        name="sub.srt", original_filename="subtitle:parent:en", file_size=100
+    )
     mock_node.inode = 100
     mock_vfs._inode_to_node[100] = mock_node
-    
+
     # Mocking Cache object
     with patch("program.services.filesystem.vfs.rivenvfs.di") as di_mock:
         di_mock.__getitem__.return_value = AsyncMock()
-        
+
         # Read chunk 1
         data1 = await mock_vfs.read(fh, 0, 5)
         assert data1 == b"subti"
-        
+
         # Read chunk 2
         data2 = await mock_vfs.read(fh, 5, 4)
         assert data2 == b"tle "
-        
+
         # Assert DB was only hit once
         mock_vfs.vfs_db.get_subtitle_content.assert_called_once_with("parent", "en")
 
@@ -65,17 +72,17 @@ async def test_subtitle_caching(mock_vfs):
 async def test_readdir_empty_directory(mock_vfs):
     """Test that readdir on an empty directory returns . and .. without ENOENT."""
     fh = pyfuse3.FileHandleT(2)
-    
+
     mock_node = VFSDirectory(name="empty_dir")
     mock_node.inode = 200
-    mock_node.parent = mock_node # Mock parent
+    mock_node.parent = mock_node  # Mock parent
     mock_vfs._inode_to_node[200] = mock_node
-    
+
     mock_vfs._get_path_from_inode = MagicMock(return_value="/empty_dir")
     mock_vfs._list_directory_cached = MagicMock(return_value=[])
-    
-    mock_vfs.getattr = AsyncMock() # to avoid errors if it tries to stat children
-    
+
+    mock_vfs.getattr = AsyncMock()  # to avoid errors if it tries to stat children
+
     try:
         await mock_vfs.readdir(fh, 0, MagicMock())
     except pyfuse3.FUSEError as e:
@@ -86,16 +93,17 @@ async def test_readdir_empty_directory(mock_vfs):
 @pytest.mark.trio
 async def test_stream_timeout_concurrency(mock_vfs):
     """Test that _monitor_stream_timeouts and release() do not encounter race conditions on _active_streams."""
+
     class MockStream:
         def __init__(self):
             self.is_timed_out = True
-            
+
         async def close(self):
             # Simulate slight delay during close to widen race window
             await trio.sleep(0.01)
 
     mock_vfs._active_streams["test_path:1"] = MockStream()
-    
+
     async def run_monitor():
         # Let it run for just one cycle
         try:
@@ -108,10 +116,10 @@ async def test_stream_timeout_concurrency(mock_vfs):
         # Attempt to release the exact same stream concurrently
         mock_vfs._inode_to_node[300] = MagicMock(path="test_path")
         mock_vfs._file_handles[1] = {"inode": 300}
-        
+
         # Delay slightly to ensure monitor starts its iteration first
         await trio.sleep(0.005)
-        
+
         await mock_vfs.release(1)
 
     try:

@@ -3,13 +3,13 @@
 from loguru import logger
 from sqlalchemy import select
 
+from program.core.runner import MediaItemGenerator
 from program.db.db import db_session
 from program.media.item import Episode, MediaItem, Movie, Season, Show
 from program.media.state import States
 from program.services.indexers.base import BaseIndexer
 from program.services.indexers.tmdb_indexer import TMDBIndexer
 from program.services.indexers.tvdb_indexer import TVDBIndexer
-from program.core.runner import MediaItemGenerator
 
 
 class IndexerService(BaseIndexer):

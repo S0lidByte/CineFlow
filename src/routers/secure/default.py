@@ -1,8 +1,8 @@
 import platform
-import psutil
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
+import psutil
 import requests
 from fastapi import APIRouter, HTTPException, Query
 from kink import di
@@ -84,7 +84,11 @@ async def download_user_info() -> DownloaderUserInfoResponse:
             logger.debug("Downloader user info: program/services not available: %s", e)
             return DownloaderUserInfoResponse(services=[])
 
-        if not services or not services.downloader or not services.downloader.initialized:
+        if (
+            not services
+            or not services.downloader
+            or not services.downloader.initialized
+        ):
             return DownloaderUserInfoResponse(services=[])
 
         downloader = services.downloader
@@ -103,11 +107,15 @@ async def download_user_info() -> DownloaderUserInfoResponse:
                     premium_expires_at_val: str | None = None
                     if getattr(user_info, "premium_expires_at", None):
                         dt = user_info.premium_expires_at
-                        premium_expires_at_val = dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+                        premium_expires_at_val = (
+                            dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+                        )
                     cooldown_until_val: str | None = None
                     if getattr(user_info, "cooldown_until", None):
                         dt = user_info.cooldown_until
-                        cooldown_until_val = dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+                        cooldown_until_val = (
+                            dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+                        )
                     services_info.append(
                         DownloaderUserInfo(
                             service=user_info.service,
@@ -140,7 +148,11 @@ async def download_user_info() -> DownloaderUserInfoResponse:
     except HTTPException:
         raise
     except Exception as e:
-        err_msg = (str(e).strip() or None) or getattr(type(e), "__name__", None) or "Unknown error"
+        err_msg = (
+            (str(e).strip() or None)
+            or getattr(type(e), "__name__", None)
+            or "Unknown error"
+        )
         logger.error("Downloader user info failed: %s", err_msg, exc_info=True)
         # Return 200 with empty list so dashboard still loads; do not 500
         return DownloaderUserInfoResponse(services=[])

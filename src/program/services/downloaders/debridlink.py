@@ -7,18 +7,18 @@ from typing import Generic, Literal, TypeVar
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from program.media.item import ProcessedItemType
 from program.services.downloaders.models import (
     DebridFile,
     InvalidDebridFileException,
     TorrentContainer,
     TorrentFile,
     TorrentInfo,
-    UserInfo,
     UnrestrictedLink,
+    UserInfo,
 )
 from program.settings import settings_manager
 from program.utils.request import CircuitBreakerOpen, SmartResponse, SmartSession
-from program.media.item import ProcessedItemType
 
 from .shared import DownloaderBase, premium_days_left
 
@@ -424,8 +424,6 @@ class DebridLinkDownloader(DownloaderBase):
         Files are automatically available once the torrent is added.
         """
 
-        pass
-
     def get_torrent_info(self, torrent_id: int | str) -> TorrentInfo:
         """
         Get information about a specific torrent using its ID.
@@ -443,7 +441,7 @@ class DebridLinkDownloader(DownloaderBase):
 
         assert self.api
 
-        response = self.api.session.get(f"seedbox/list")
+        response = self.api.session.get("seedbox/list")
         self._maybe_backoff(response)
 
         if not response.ok:

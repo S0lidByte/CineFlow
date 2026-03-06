@@ -7,9 +7,9 @@ from loguru import logger
 
 from program.apis.tmdb_api import TMDBApi
 from program.apis.trakt_api import TraktAPI
+from program.core.runner import MediaItemGenerator, RunnerResult
 from program.media.item import MediaItem, Movie
 from program.services.indexers.base import BaseIndexer
-from program.core.runner import MediaItemGenerator, RunnerResult
 
 
 class TMDBIndexer(BaseIndexer):

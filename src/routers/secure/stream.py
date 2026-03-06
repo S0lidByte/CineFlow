@@ -1,14 +1,13 @@
 import asyncio
 import json
 import logging
-from datetime import datetime
-import mimetypes
-from typing import Annotated
 import math
+import mimetypes
 import subprocess
+from datetime import datetime
+from typing import Annotated
 
 import httpx
-
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from kink import di
@@ -235,7 +234,6 @@ def _get_video_duration(path: str) -> float:
 
 
 # ... imports ...
-from fastapi import Query
 
 
 # 1. Playlist: Defaults are now None (Original Quality)
@@ -308,13 +306,18 @@ async def get_hls_segment(
     start_time = seq * segment_duration
 
     args = [
-        "-analyzeduration", "0",
-        "-probesize", "5000000",
-        "-ss", str(start_time),
-        "-t", str(segment_duration),
-        "-i", url
+        "-analyzeduration",
+        "0",
+        "-probesize",
+        "5000000",
+        "-ss",
+        str(start_time),
+        "-t",
+        str(segment_duration),
+        "-i",
+        url,
     ]
-    
+
     if resolution:
         if "x" in resolution:
             width, height = resolution.split("x")
@@ -331,16 +334,11 @@ async def get_hls_segment(
     if level:
         args.extend(["-level", level])
 
-    args.extend([
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-muxdelay", "0",
-        "-f", "mpegts",
-        "-"
-    ])
+    args.extend(["-c:a", "aac", "-b:a", "128k", "-muxdelay", "0", "-f", "mpegts", "-"])
 
     process = await asyncio.create_subprocess_exec(
-        "ffmpeg", *args,
+        "ffmpeg",
+        *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )

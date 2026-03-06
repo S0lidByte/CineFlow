@@ -1,8 +1,8 @@
-from functools import cached_property
-import pyfuse3
-
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Literal
+
+import pyfuse3
 
 
 @dataclass

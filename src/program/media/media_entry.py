@@ -1,9 +1,9 @@
-import sqlalchemy
-
 from typing import Any
-from sqlalchemy.types import TypeDecorator
-from sqlalchemy.orm import Mapped, mapped_column
+
+import sqlalchemy
 from sqlalchemy.engine import Dialect
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import TypeDecorator
 
 from program.media.filesystem_entry import FilesystemEntry
 from program.media.models import MediaMetadata

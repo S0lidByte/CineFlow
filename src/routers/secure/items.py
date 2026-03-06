@@ -1,10 +1,10 @@
 import os
-
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal, Self
-from fastapi import APIRouter, Body, HTTPException, Path, status, Query
+
+from fastapi import APIRouter, Body, HTTPException, Path, Query, status
 from kink import di
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
@@ -14,10 +14,10 @@ from sqlalchemy.orm import Session, object_session, selectinload
 from program.db import db_functions
 from program.db.db import db_session
 from program.media.item import Episode, MediaItem, Movie, Season, Show
-from program.media.state import States
-from program.types import Event
-from program.program import Program
 from program.media.models import MediaMetadata
+from program.media.state import States
+from program.program import Program
+from program.types import Event
 
 from ..models.shared import IdListPayload, MessageResponse
 
@@ -41,8 +41,9 @@ class SortOrderEnum(str, Enum):
         return "title" if self.value.startswith("title") else "date"
 
 
-from cachetools import TTLCache
 import hashlib
+
+from cachetools import TTLCache
 
 router = APIRouter(
     prefix="/items",
@@ -230,15 +231,21 @@ async def get_items(
     ] = False,
 ) -> ItemsResponse:
     query = select(MediaItem)
-    
+
     if extended:
         query = query.options(
             selectinload(MediaItem.filesystem_entries),
             selectinload(MediaItem.streams),
             selectinload(MediaItem.subtitles),
-            selectinload(Show.seasons).selectinload(Season.episodes).selectinload(Episode.filesystem_entries),
-            selectinload(Show.seasons).selectinload(Season.episodes).selectinload(Episode.streams),
-            selectinload(Show.seasons).selectinload(Season.episodes).selectinload(Episode.subtitles),
+            selectinload(Show.seasons)
+            .selectinload(Season.episodes)
+            .selectinload(Episode.filesystem_entries),
+            selectinload(Show.seasons)
+            .selectinload(Season.episodes)
+            .selectinload(Episode.streams),
+            selectinload(Show.seasons)
+            .selectinload(Season.episodes)
+            .selectinload(Episode.subtitles),
             selectinload(Season.episodes).selectinload(Episode.filesystem_entries),
             selectinload(Season.episodes).selectinload(Episode.streams),
             selectinload(Season.episodes).selectinload(Episode.subtitles),
@@ -317,13 +324,15 @@ async def get_items(
         # Use a safe hash of the query string representation as cache key
         # (literal_binds=True crashes on bound parameter lists)
         cache_key = hashlib.md5(str(query.whereclause).encode()).hexdigest()
-        
+
         if cache_key in _get_items_count_cache:
             total_items = _get_items_count_cache[cache_key]
         else:
-            total_items = int(session.execute(
-                select(func.count()).select_from(query.subquery())
-            ).scalar_one())
+            total_items = int(
+                session.execute(
+                    select(func.count()).select_from(query.subquery())
+                ).scalar_one()
+            )
             _get_items_count_cache[cache_key] = total_items
 
         items = (
@@ -428,14 +437,15 @@ async def add_items(
 
         if all_tvdb_ids:
             import asyncio
+
             from program.apis.tvdb_api import TVDBApi
-            
+
             try:
                 tvdb_api = di[TVDBApi]
             except Exception:
                 tvdb_api = None
                 logger.warning("TVDBApi not available via DI, skipping TVDB validation")
-            
+
             for id in all_tvdb_ids:
                 # Check if item exists using ORM
                 existing = session.execute(
@@ -447,14 +457,20 @@ async def add_items(
                     if tvdb_api:
                         try:
                             loop = asyncio.get_event_loop()
-                            valid = await loop.run_in_executor(None, tvdb_api.get_series, id)
+                            valid = await loop.run_in_executor(
+                                None, tvdb_api.get_series, id
+                            )
                             if not valid:
-                                logger.warning(f"TVDB ID {id} not found (404), skipping")
+                                logger.warning(
+                                    f"TVDB ID {id} not found (404), skipping"
+                                )
                                 failed_ids.append(id)
                                 continue
                         except Exception as e:
-                            logger.warning(f"Could not validate TVDB ID {id}: {e}. Adding anyway.")
-                    
+                            logger.warning(
+                                f"Could not validate TVDB ID {id}: {e}. Adding anyway."
+                            )
+
                     item = MediaItem(
                         {
                             "tvdb_id": id,
@@ -473,7 +489,9 @@ async def add_items(
                 added_count += 1
 
     if failed_ids:
-        return MessageResponse(message=f"Added {added_count} item(s). {len(failed_ids)} TVDB ID(s) not found: {', '.join(failed_ids)}")
+        return MessageResponse(
+            message=f"Added {added_count} item(s). {len(failed_ids)} TVDB ID(s) not found: {', '.join(failed_ids)}"
+        )
     return MessageResponse(message=f"Added {added_count} item(s) to the queue")
 
 
@@ -529,9 +547,15 @@ async def get_item(
                 selectinload(MediaItem.filesystem_entries),
                 selectinload(MediaItem.streams),
                 selectinload(MediaItem.subtitles),
-                selectinload(Show.seasons).selectinload(Season.episodes).selectinload(Episode.filesystem_entries),
-                selectinload(Show.seasons).selectinload(Season.episodes).selectinload(Episode.streams),
-                selectinload(Show.seasons).selectinload(Season.episodes).selectinload(Episode.subtitles),
+                selectinload(Show.seasons)
+                .selectinload(Season.episodes)
+                .selectinload(Episode.filesystem_entries),
+                selectinload(Show.seasons)
+                .selectinload(Season.episodes)
+                .selectinload(Episode.streams),
+                selectinload(Show.seasons)
+                .selectinload(Season.episodes)
+                .selectinload(Episode.subtitles),
                 selectinload(Season.episodes).selectinload(Episode.filesystem_entries),
                 selectinload(Season.episodes).selectinload(Episode.streams),
                 selectinload(Season.episodes).selectinload(Episode.subtitles),
@@ -716,11 +740,15 @@ async def retry_items(
 
     parsed_ids = handle_ids(payload.ids)
 
-    _SKIP_RESET_STATES = frozenset({
-        States.Completed, States.Unreleased,
-        States.Downloaded, States.Symlinked,
-        States.Paused,
-    })
+    _SKIP_RESET_STATES = frozenset(
+        {
+            States.Completed,
+            States.Unreleased,
+            States.Downloaded,
+            States.Symlinked,
+            States.Paused,
+        }
+    )
 
     def _reset_scrape_state(i: MediaItem) -> None:
         """Reset all scraping blockers on item and eligible children recursively.

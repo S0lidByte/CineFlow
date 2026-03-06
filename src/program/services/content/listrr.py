@@ -4,11 +4,11 @@ from kink import di
 from loguru import logger
 
 from program.apis.listrr_api import ListrrAPI
+from program.core.runner import MediaItemGenerator, Runner, RunnerResult
 from program.db.db_functions import item_exists_by_any_id
 from program.media.item import MediaItem
 from program.settings import settings_manager
 from program.settings.models import ListrrModel
-from program.core.runner import MediaItemGenerator, Runner, RunnerResult
 
 
 class Listrr(Runner[ListrrModel]):

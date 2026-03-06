@@ -1,7 +1,8 @@
 import subprocess
-from typing import Literal
-import orjson
 from fractions import Fraction
+from typing import Literal
+
+import orjson
 from pydantic import BaseModel, Field
 
 

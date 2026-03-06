@@ -6,17 +6,17 @@ from typing import Generic, Literal, TypeVar
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
 
+from program.media.item import ProcessedItemType
 from program.services.downloaders.models import (
     DebridFile,
     InvalidDebridFileException,
     TorrentContainer,
     TorrentInfo,
-    UserInfo,
     UnrestrictedLink,
+    UserInfo,
 )
 from program.settings import settings_manager
 from program.utils.request import CircuitBreakerOpen, SmartResponse, SmartSession
-from program.media.item import ProcessedItemType
 
 from .shared import DownloaderBase, premium_days_left
 
@@ -540,8 +540,6 @@ class AllDebridDownloader(DownloaderBase):
         Note: AllDebrid doesn't require explicit file selection.
         Files are automatically available once the magnet is ready.
         """
-
-        pass
 
     def _get_magnet_files(
         self,

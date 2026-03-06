@@ -1,8 +1,6 @@
 class MediaStreamException(Exception):
     """Base class for streaming-related exceptions."""
 
-    pass
-
 
 class FatalMediaStreamException(MediaStreamException):
     """Raised when a fatal error occurs in the media stream."""

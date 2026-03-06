@@ -318,7 +318,7 @@ class TVDBApi:
         data = LoginPost200ResponseData.model_validate(response.json()["data"])
 
         if not data.token:
-            logger.error(f"Failed to obtain TVDB token: No token in response")
+            logger.error("Failed to obtain TVDB token: No token in response")
             return None
 
         expires_at = now + timedelta(days=25)

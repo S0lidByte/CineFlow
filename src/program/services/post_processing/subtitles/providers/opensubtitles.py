@@ -5,12 +5,13 @@ OpenSubtitles provider for Riven.
 import base64
 import time
 import zlib
-
 from collections.abc import Iterable
 from http import HTTPStatus
-from xmlrpc.client import ServerProxy
 from typing import Any, Generic, Self, TypeVar, cast
-from babelfish import Language, Error as BabelfishError
+from xmlrpc.client import ServerProxy
+
+from babelfish import Error as BabelfishError
+from babelfish import Language
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -36,13 +37,13 @@ class StatusMixin(BaseModel):
 
         if status_code == HTTPStatus.UNAUTHORIZED:
             raise Exception("Unauthorized - Invalid credentials")
-        elif status_code == HTTPStatus.NOT_ACCEPTABLE:
+        if status_code == HTTPStatus.NOT_ACCEPTABLE:
             raise Exception("No session - Please login again")
-        elif status_code == HTTPStatus.PROXY_AUTHENTICATION_REQUIRED:
+        if status_code == HTTPStatus.PROXY_AUTHENTICATION_REQUIRED:
             raise Exception("Download limit reached")
-        elif status_code == HTTPStatus.SERVICE_UNAVAILABLE:
+        if status_code == HTTPStatus.SERVICE_UNAVAILABLE:
             raise Exception("Service unavailable")
-        elif not status_code.is_success:
+        if not status_code.is_success:
             raise Exception(f"OpenSubtitles error: {status_code}")
 
         return self
@@ -416,7 +417,7 @@ class OpenSubtitlesProvider(SubtitleProvider):
             if content and "opensubtitles vip" in content.lower():
                 logger.debug("Received VIP-only content")
 
-            logger.debug(f"Downloaded subtitle successfully")
+            logger.debug("Downloaded subtitle successfully")
 
             return content
 

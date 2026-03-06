@@ -1,6 +1,8 @@
-﻿from loguru import logger
-from typing import Literal
+﻿from typing import Literal
+
+from loguru import logger
 from pydantic import BaseModel, StrictInt, StrictStr
+
 from program.utils.request import SmartSession
 
 
@@ -79,7 +81,7 @@ class MdblistAPI:
         )
 
         if not response.ok:
-            return
+            return None
 
         data = GetListItemsByName200Response.from_dict(response.json())
 

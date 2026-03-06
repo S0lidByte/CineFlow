@@ -1,7 +1,6 @@
-import httpx
-
 from collections.abc import AsyncIterator
 
+import httpx
 import trio_util
 
 from program.services.streaming.chunker import ChunkRange

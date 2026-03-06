@@ -1,7 +1,7 @@
-from collections.abc import Callable, Generator
+import contextvars
 import json
 import os
-import contextvars
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from typing import Any, cast
 
@@ -139,7 +139,9 @@ class SettingsManager:
                 self._overrides_ctx.reset(token)
             except ValueError:
                 # Handle cases where the context has changed (e.g., across thread/task boundaries)
-                logger.trace("Context mismatch during override reset, manually restoring old overrides")
+                logger.trace(
+                    "Context mismatch during override reset, manually restoring old overrides"
+                )
                 self._overrides_ctx.set(old_overrides)
 
     def get_setting(self, key: str, default: Any) -> Any:
@@ -155,16 +157,15 @@ class SettingsManager:
 
         # Start with global settings
         ranking_settings = self.settings.ranking.model_dump()
-        
+
         # Apply overrides
         overrides = self._overrides_ctx.get()
         if overrides:
             valid_keys = SettingsModel.model_fields.keys()
             filtered_overrides = {k: v for k, v in overrides.items() if k in valid_keys}
             ranking_settings.update(filtered_overrides)
-            
-        return SettingsModel(**ranking_settings)
 
+        return SettingsModel(**ranking_settings)
 
 
 def format_validation_error(e: ValidationError) -> str:

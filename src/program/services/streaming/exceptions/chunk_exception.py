@@ -1,11 +1,10 @@
 from ordered_set import OrderedSet
+
 from ..chunker import Chunk
 
 
 class ChunkException(Exception):
     """Base class for chunk-related exceptions."""
-
-    pass
 
 
 class ChunksTooSlowException(ChunkException):

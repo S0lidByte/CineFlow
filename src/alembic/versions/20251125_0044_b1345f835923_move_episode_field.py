@@ -8,9 +8,9 @@ Create Date: 2025-11-25 00:44:29.233896
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "b1345f835923"
@@ -29,9 +29,7 @@ def upgrade() -> None:
 
     # Step 2: Migrate data from MediaItem.number to Episode.number and Season.number
     connection = op.get_bind()
-    connection.execute(
-        sa.text(
-            """
+    connection.execute(sa.text("""
             UPDATE "Episode" 
             SET number = (
                 SELECT number 
@@ -39,12 +37,8 @@ def upgrade() -> None:
                 WHERE "MediaItem".id = "Episode".id
             )
             WHERE "Episode".number IS NULL
-            """
-        )
-    )
-    connection.execute(
-        sa.text(
-            """
+            """))
+    connection.execute(sa.text("""
             UPDATE "Season" 
             SET number = (
                 SELECT number 
@@ -52,29 +46,19 @@ def upgrade() -> None:
                 WHERE "MediaItem".id = "Season".id
             )
             WHERE "Season".number IS NULL
-            """
-        )
-    )
+            """))
 
-    connection.execute(
-        sa.text(
-            """
+    connection.execute(sa.text("""
             UPDATE "MediaItem" 
             SET active_stream = NULL
             WHERE active_stream::text = '{}'::text
-            """
-        )
-    )
+            """))
 
-    connection.execute(
-        sa.text(
-            """
+    connection.execute(sa.text("""
             UPDATE "MediaItem" 
             SET aliases = NULL
             WHERE aliases::text = '{}'::text
-            """
-        )
-    )
+            """))
 
     # Delete invalid episodes/seasons and their linked MediaItem records
     connection.execute(
@@ -122,9 +106,7 @@ def downgrade() -> None:
 
     # Migrate data back from Episode and Season to MediaItem
     connection = op.get_bind()
-    connection.execute(
-        sa.text(
-            """
+    connection.execute(sa.text("""
             UPDATE "MediaItem" 
             SET number = (
                 SELECT number 
@@ -132,13 +114,9 @@ def downgrade() -> None:
                 WHERE "Episode".id = "MediaItem".id
             )
             WHERE "MediaItem".id IN (SELECT id FROM "Episode")
-            """
-        )
-    )
+            """))
 
-    connection.execute(
-        sa.text(
-            """
+    connection.execute(sa.text("""
             UPDATE "MediaItem" 
             SET number = (
                 SELECT number 
@@ -146,29 +124,19 @@ def downgrade() -> None:
                 WHERE "Season".id = "MediaItem".id
             )
             WHERE "MediaItem".id IN (SELECT id FROM "Season")
-            """
-        )
-    )
+            """))
 
-    connection.execute(
-        sa.text(
-            """
+    connection.execute(sa.text("""
             UPDATE "MediaItem" 
             SET active_stream = '{}'::text
             WHERE active_stream IS NULL
-            """
-        )
-    )
+            """))
 
-    connection.execute(
-        sa.text(
-            """
+    connection.execute(sa.text("""
             UPDATE "MediaItem" 
             SET aliases = '{}'::text
             WHERE aliases IS NULL
-            """
-        )
-    )
+            """))
 
     # Drop the child table columns
     with op.batch_alter_table("Season", schema=None) as batch_op:

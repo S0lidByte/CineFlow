@@ -2,12 +2,12 @@ import os
 import re
 import secrets
 import string
-
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from time import time
-from loguru import logger
 from pathlib import Path
+from time import time
+
+from loguru import logger
 
 root_dir = Path(__file__).resolve().parents[3]
 

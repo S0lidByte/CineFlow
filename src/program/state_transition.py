@@ -1,10 +1,11 @@
 from typing import Any, Literal
+
 from kink import di
 from loguru import logger
 
 from program.media import MediaItem, States
-from program.types import ProcessedEvent, Service
 from program.media.item import Season, Show
+from program.types import ProcessedEvent, Service
 
 
 def process_event(
@@ -66,9 +67,7 @@ def process_event(
             ]
 
             for season in incomplete_seasons:
-                processed_event = process_event(
-                    emitted_by, season, None, overrides
-                )
+                processed_event = process_event(emitted_by, season, None, overrides)
 
                 if processed_event.related_media_items:
                     items_to_submit += processed_event.related_media_items
@@ -78,9 +77,7 @@ def process_event(
             ]
 
             for episode in incomplete_episodes:
-                processed_event = process_event(
-                    emitted_by, episode, None, overrides
-                )
+                processed_event = process_event(emitted_by, episode, None, overrides)
 
                 if processed_event.related_media_items:
                     items_to_submit += processed_event.related_media_items
@@ -89,8 +86,7 @@ def process_event(
         next_service = services.scraping
 
         if emitted_by != services.scraping and (
-            overrides is not None
-            or services.scraping.should_submit(existing_item)
+            overrides is not None or services.scraping.should_submit(existing_item)
         ):
             items_to_submit = [existing_item]
         elif isinstance(existing_item, Show):
@@ -99,20 +95,14 @@ def process_event(
                 for s in existing_item.seasons
                 if s.last_state
                 in [States.Indexed, States.PartiallyCompleted, States.Unknown]
-                and (
-                    overrides is not None
-                    or services.scraping.should_submit(s)
-                )
+                and (overrides is not None or services.scraping.should_submit(s))
             ]
         elif isinstance(existing_item, Season):
             items_to_submit = [
                 e
                 for e in existing_item.episodes
                 if e.last_state in [States.Indexed, States.Unknown]
-                and (
-                    overrides is not None
-                    or services.scraping.should_submit(e)
-                )
+                and (overrides is not None or services.scraping.should_submit(e))
             ]
 
     elif existing_item and existing_item.last_state == States.Scraped:

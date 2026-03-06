@@ -86,13 +86,13 @@ class Torrentio(ScraperService[TorrentioConfig]):
         except HTTPError as http_err:
             if http_err.response.status_code == 429:
                 from program.utils.exceptions import RateLimitError
-                
+
                 retry_after = http_err.response.headers.get("Retry-After")
-                raise RateLimitError("Torrentio rate limit exceeded", retry_after=int(retry_after) if retry_after else None)
-            else:
-                logger.error(
-                    f"Torrentio HTTP error for {item.log_string}: {str(http_err)}"
+                raise RateLimitError(
+                    "Torrentio rate limit exceeded",
+                    retry_after=int(retry_after) if retry_after else None,
                 )
+            logger.error(f"Torrentio HTTP error for {item.log_string}: {str(http_err)}")
         except Exception as e:
             logger.exception(f"Torrentio exception thrown: {str(e)}")
 

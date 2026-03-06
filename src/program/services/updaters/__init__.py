@@ -4,13 +4,13 @@ import os
 
 from loguru import logger
 
+from program.core.runner import MediaItemGenerator, Runner, RunnerResult
 from program.media.item import Episode, MediaItem, Movie, Season, Show
+from program.services.updaters.base import BaseUpdater
 from program.services.updaters.emby import EmbyUpdater
 from program.services.updaters.jellyfin import JellyfinUpdater
 from program.services.updaters.plex import PlexUpdater
 from program.settings import settings_manager
-from program.core.runner import MediaItemGenerator, Runner, RunnerResult
-from program.services.updaters.base import BaseUpdater
 
 
 class Updater(Runner[None, BaseUpdater]):

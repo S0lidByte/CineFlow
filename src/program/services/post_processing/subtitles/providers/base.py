@@ -51,15 +51,12 @@ class SubtitleProvider(ABC):
         Returns:
             list of subtitle results
         """
-        pass
 
     @abstractmethod
     def download_subtitle(self, subtitle_info: SubtitleItem) -> str | None:
         """Download subtitle content."""
-        pass
 
     @property
     @abstractmethod
     def name(self) -> str:
         """Provider name."""
-        pass

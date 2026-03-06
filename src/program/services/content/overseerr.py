@@ -4,11 +4,11 @@ from kink import di
 from loguru import logger
 
 from program.apis.overseerr_api import OverseerrAPI
+from program.core.runner import MediaItemGenerator, Runner, RunnerResult
 from program.db.db_functions import item_exists_by_any_id
+from program.media.item import MediaItem
 from program.settings import settings_manager
 from program.settings.models import OverseerrModel
-from program.core.runner import MediaItemGenerator, Runner, RunnerResult
-from program.media.item import MediaItem
 
 
 class Overseerr(Runner[OverseerrModel]):

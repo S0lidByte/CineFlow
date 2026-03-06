@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from program.apis.tvdb_api import SeriesRelease
 from program.db import db_functions
 from program.db.db import db_session, vacuum_and_analyze_index_maintenance
 from program.media.item import Episode, MediaItem, Movie, Show
@@ -24,7 +25,6 @@ from program.scheduling.models import ScheduledStatus, ScheduledTask
 from program.settings import settings_manager
 from program.types import Event
 from program.utils.logging import log_cleaner, logger
-from program.apis.tvdb_api import SeriesRelease
 from schemas.tvdb.models.series_airs_days import SeriesAirsDays
 
 if TYPE_CHECKING:
@@ -563,7 +563,7 @@ class ProgramScheduler:
             return None
 
         # Find next occurrence >= ref within 3 weeks
-        for i in range(0, 21):
+        for i in range(21):
             candidate = ref + timedelta(days=i)
 
             if candidate.weekday() in valid_days:

@@ -4,8 +4,8 @@ from typing import Any, Literal
 import regex
 from pydantic import BaseModel, Field
 
-from program.settings import settings_manager
 from program.media.item import ProcessedItemType
+from program.settings import settings_manager
 
 DEFAULT_VIDEO_EXTENSIONS = ["mp4", "mkv", "avi"]
 ALLOWED_VIDEO_EXTENSIONS = [
@@ -41,12 +41,12 @@ episode_min_filesize = settings_manager.settings.downloaders.episode_filesize_mb
 episode_max_filesize = settings_manager.settings.downloaders.episode_filesize_mb_max
 
 # constraints for filesizes, follows the format tuple(min, max)
-(MOVIE_MIN_FILESIZE, MOVIE_MAX_FILESIZE) = (
+MOVIE_MIN_FILESIZE, MOVIE_MAX_FILESIZE = (
     movie_min_filesize if movie_min_filesize >= 0 else 0,
     movie_max_filesize if movie_max_filesize > 0 else float("inf"),
 )
 
-(EPISODE_MIN_FILESIZE, EPISODE_MAX_FILESIZE) = (
+EPISODE_MIN_FILESIZE, EPISODE_MAX_FILESIZE = (
     episode_min_filesize if episode_min_filesize >= 0 else 0,
     episode_max_filesize if episode_max_filesize > 0 else float("inf"),
 )
@@ -104,22 +104,32 @@ class DebridFile(BaseModel):
 
             # Determine limits dynamically, respecting overrides if present
             if filetype == "movie":
-                 min_default = settings_manager.settings.downloaders.movie_filesize_mb_min
-                 max_default = settings_manager.settings.downloaders.movie_filesize_mb_max
-                 min_limit = settings_manager.get_setting("min_filesize", min_default)
-                 max_limit = settings_manager.get_setting("max_filesize", max_default)
+                min_default = (
+                    settings_manager.settings.downloaders.movie_filesize_mb_min
+                )
+                max_default = (
+                    settings_manager.settings.downloaders.movie_filesize_mb_max
+                )
+                min_limit = settings_manager.get_setting("min_filesize", min_default)
+                max_limit = settings_manager.get_setting("max_filesize", max_default)
             elif filetype in ["show", "season", "episode"]:
-                 min_default = settings_manager.settings.downloaders.episode_filesize_mb_min
-                 max_default = settings_manager.settings.downloaders.episode_filesize_mb_max
-                 min_limit = settings_manager.get_setting("min_filesize", min_default)
-                 max_limit = settings_manager.get_setting("max_filesize", max_default)
+                min_default = (
+                    settings_manager.settings.downloaders.episode_filesize_mb_min
+                )
+                max_default = (
+                    settings_manager.settings.downloaders.episode_filesize_mb_max
+                )
+                min_limit = settings_manager.get_setting("min_filesize", min_default)
+                max_limit = settings_manager.get_setting("max_filesize", max_default)
             else:
-                 min_limit = 0
-                 max_limit = float("inf")
-                 
+                min_limit = 0
+                max_limit = float("inf")
+
             # Ensure safe values
             min_limit = min_limit if min_limit is not None and min_limit >= 0 else 0
-            max_limit = max_limit if max_limit is not None and max_limit > 0 else float("inf")
+            max_limit = (
+                max_limit if max_limit is not None and max_limit > 0 else float("inf")
+            )
 
             if not (min_limit <= filesize_mb <= max_limit):
                 raise InvalidDebridFileException(

@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 from program.media.item import MediaItem
 from program.services.scrapers.base import ScraperService
 from program.settings import settings_manager
-from program.utils.request import SmartSession, get_hostname_from_url
 from program.settings.models import CometConfig
+from program.utils.request import SmartSession, get_hostname_from_url
 
 
 class CometScrapeResponse(BaseModel):
@@ -109,14 +109,20 @@ class Comet(ScraperService[CometConfig]):
             return self.scrape(item)
         except Exception as e:
             from requests import HTTPError
+
             if isinstance(e, HTTPError) and e.response.status_code == 429:
                 from program.utils.exceptions import RateLimitError
+
                 retry_after = e.response.headers.get("Retry-After")
-                raise RateLimitError("Comet rate limit exceeded", retry_after=int(retry_after) if retry_after else None)
-            elif "rate limit" in str(e).lower() or "429" in str(e):
+                raise RateLimitError(
+                    "Comet rate limit exceeded",
+                    retry_after=int(retry_after) if retry_after else None,
+                )
+            if "rate limit" in str(e).lower() or "429" in str(e):
                 from program.utils.exceptions import RateLimitError
+
                 raise RateLimitError("Comet rate limit exceeded")
-            elif "timeout" in str(e).lower():
+            if "timeout" in str(e).lower():
                 logger.warning(f"Comet timeout for item: {item.log_string}")
             else:
                 logger.error(f"Comet exception thrown: {str(e)}")

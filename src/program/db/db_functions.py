@@ -1,30 +1,28 @@
 from __future__ import annotations
 
-import threading
 import os
+import threading
 import time
-
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from program.utils.logging import logger
 from sqlalchemy import func, inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from program.media.state import States
 from program.core.runner import MediaItemGenerator
 from program.db.base_model import get_base_metadata
+from program.media.state import States
+from program.utils.logging import logger
 
 from .db import db, db_session
 
 if TYPE_CHECKING:
-    from program.types import Service
-    from program.program import Program
-    from program.types import Event
     from program.media.item import MediaItem
+    from program.program import Program
+    from program.types import Event, Service
 
 
 @contextmanager
@@ -280,8 +278,9 @@ def create_calendar(
     - WARNING-level logging for malformed release_data dates
     """
 
-    from program.media.item import MediaItem, Season, Show, Episode
     from datetime import datetime, timedelta
+
+    from program.media.item import Episode, MediaItem, Season, Show
 
     start = start_date if start_date else datetime.now() - timedelta(days=30)
     end = end_date if end_date else datetime.now() + timedelta(days=30)
@@ -376,12 +375,18 @@ def create_calendar(
             continue
 
         try:
-            next_aired_date = datetime.fromisoformat(next_aired_str.replace('Z', '+00:00')).replace(tzinfo=None)
+            next_aired_date = datetime.fromisoformat(
+                next_aired_str.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
         except Exception:
             try:
-                next_aired_date = datetime.strptime(next_aired_str.split("T")[0], "%Y-%m-%d").replace(tzinfo=None)
+                next_aired_date = datetime.strptime(
+                    next_aired_str.split("T")[0], "%Y-%m-%d"
+                ).replace(tzinfo=None)
             except Exception:
-                logger.warning(f"Calendar: Skipping show id={show.id} — malformed release_data date fields")
+                logger.warning(
+                    f"Calendar: Skipping show id={show.id} — malformed release_data date fields"
+                )
                 continue
 
         if start <= next_aired_date <= end:
@@ -430,22 +435,28 @@ def run_thread_with_db_item(
                 input_item = session.get(MediaItemModel, event.item_id)
 
                 _t1 = time.monotonic()
-                logger.debug(f"[TRACE] {_svc} item={event.item_id}: session.get END ({_t1 - _t0:.2f}s) found={input_item is not None}")
+                logger.debug(
+                    f"[TRACE] {_svc} item={event.item_id}: session.get END ({_t1 - _t0:.2f}s) found={input_item is not None}"
+                )
 
                 if input_item:
 
                     from program.settings import settings_manager
-                    
+
                     # Execute service within the settings context if overrides exist
                     overrides = event.overrides or {}
-                    logger.debug(f"[TRACE] {_svc} item={event.item_id}: next(fn()) START")
+                    logger.debug(
+                        f"[TRACE] {_svc} item={event.item_id}: next(fn()) START"
+                    )
                     _t2 = time.monotonic()
 
                     with settings_manager.override(**overrides):
                         runner_result = next(fn(input_item), None)
 
                     _t3 = time.monotonic()
-                    logger.debug(f"[TRACE] {_svc} item={event.item_id}: next(fn()) END ({_t3 - _t2:.2f}s) result={runner_result is not None}")
+                    logger.debug(
+                        f"[TRACE] {_svc} item={event.item_id}: next(fn()) END ({_t3 - _t2:.2f}s) result={runner_result is not None}"
+                    )
 
                     if runner_result:
                         if len(runner_result.media_items) > 1:
@@ -461,7 +472,9 @@ def run_thread_with_db_item(
                             # Use propagate_down=False to prevent recursive show->season->episode updates
                             # which cause Postgres deadlocks when many episodes finish concurrently
                             if isinstance(input_item, Episode):
-                                input_item.parent.parent.store_state(propagate_down=False)
+                                input_item.parent.parent.store_state(
+                                    propagate_down=False
+                                )
                                 input_item.parent.store_state(propagate_down=False)
                                 item.store_state(propagate_down=False)
                             elif isinstance(input_item, Season):
@@ -470,11 +483,15 @@ def run_thread_with_db_item(
                             else:
                                 item.store_state(propagate_down=False)
 
-                            logger.debug(f"[TRACE] {_svc} item={event.item_id}: session.commit START")
+                            logger.debug(
+                                f"[TRACE] {_svc} item={event.item_id}: session.commit START"
+                            )
                             _t4 = time.monotonic()
                             session.commit()
                             _t5 = time.monotonic()
-                            logger.debug(f"[TRACE] {_svc} item={event.item_id}: session.commit END ({_t5 - _t4:.2f}s)")
+                            logger.debug(
+                                f"[TRACE] {_svc} item={event.item_id}: session.commit END ({_t5 - _t4:.2f}s)"
+                            )
 
                         if run_at:
                             return (item.id, run_at)
@@ -565,16 +582,12 @@ def hard_reset_database() -> None:
         try:
             # Terminate existing connections for PostgreSQL
             if db.engine.name == "postgresql":
-                connection.execute(
-                    text(
-                        """
+                connection.execute(text("""
                             SELECT pg_terminate_backend(pid)
                             FROM pg_stat_activity
                             WHERE datname = current_database()
                             AND pid <> pg_backend_pid()
-                        """
-                    )
-                )
+                        """))
 
                 # Drop and recreate schema
                 connection.execute(text("DROP SCHEMA public CASCADE"))
@@ -621,9 +634,9 @@ def hard_reset_database() -> None:
                 )
             else:
                 # Stamp with head version if no previous version
-                from program.utils import root_dir
-                import alembic.config
                 import alembic.command
+                import alembic.config
+                from program.utils import root_dir
 
                 alembic_cfg = alembic.config.Config(root_dir / "src" / "alembic.ini")
                 alembic.command.stamp(alembic_cfg, "head")

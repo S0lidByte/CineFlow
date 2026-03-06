@@ -57,7 +57,8 @@ class AIOStreams(ScraperService[AIOStreamsConfig]):
                 {
                     get_hostname_from_url(self.settings.url): {
                         # taken from official defaults https://github.com/Viren070/AIOStreams/blob/main/.env.sample
-                        "rate": 10 / 5,  # 10 requests per 5 seconds (Stream API default)
+                        "rate": 10
+                        / 5,  # 10 requests per 5 seconds (Stream API default)
                         "capacity": 10,
                     }
                 }
@@ -109,7 +110,9 @@ class AIOStreams(ScraperService[AIOStreamsConfig]):
             )
 
             if not response.ok:
-                logger.error(f"AIOStreams validation failed with status {response.status_code}")
+                logger.error(
+                    f"AIOStreams validation failed with status {response.status_code}"
+                )
                 return False
 
             try:
@@ -136,11 +139,13 @@ class AIOStreams(ScraperService[AIOStreamsConfig]):
         except HTTPError as http_err:
             if http_err.response.status_code == 429:
                 from program.utils.exceptions import RateLimitError
-                
+
                 retry_after = http_err.response.headers.get("Retry-After")
-                raise RateLimitError("AIOStreams rate limit exceeded", retry_after=int(retry_after) if retry_after else None)
-            else:
-                logger.error(f"AIO HTTP error for {item.log_string}: {http_err!s}")
+                raise RateLimitError(
+                    "AIOStreams rate limit exceeded",
+                    retry_after=int(retry_after) if retry_after else None,
+                )
+            logger.error(f"AIO HTTP error for {item.log_string}: {http_err!s}")
         except Exception as e:
             logger.exception(f"AIO exception thrown: {e!s}")
 
@@ -168,7 +173,9 @@ class AIOStreams(ScraperService[AIOStreamsConfig]):
         else:
             return {}
 
-        logger.trace(f"Scraping AIOStreams for {item.log_string}, imdb_id: {imdb_id}, search_id: {search_id}, aio_type: {aio_type}")
+        logger.trace(
+            f"Scraping AIOStreams for {item.log_string}, imdb_id: {imdb_id}, search_id: {search_id}, aio_type: {aio_type}"
+        )
 
         if not imdb_id:
             return {}
@@ -190,13 +197,17 @@ class AIOStreams(ScraperService[AIOStreamsConfig]):
         )
 
         if not response.ok:
-            logger.error(f"AIOStreams request failed for {item.log_string}: {response.text}")
+            logger.error(
+                f"AIOStreams request failed for {item.log_string}: {response.text}"
+            )
             response.raise_for_status()
 
         try:
             data = AIOStreamsSearchResponse.model_validate(response.json())
         except ValidationError as e:
-            logger.error(f"AIOStreams failed to parse response for {item.log_string}: {e}")
+            logger.error(
+                f"AIOStreams failed to parse response for {item.log_string}: {e}"
+            )
             return {}
 
         if not data.success or not data.data:

@@ -18,10 +18,10 @@ Create Date: 2025-10-31 08:08:05.872007
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import Table, MetaData
+from sqlalchemy import MetaData, Table
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "f109995eb51e"

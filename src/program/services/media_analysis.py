@@ -15,11 +15,11 @@ import traceback
 
 from loguru import logger
 
+from program.core.analysis_service import AnalysisService
 from program.media.item import Episode, MediaItem, Movie
 from program.media.models import DataSource, MediaMetadata
-from program.utils.ffprobe import parse_media_url
-from program.core.analysis_service import AnalysisService
 from program.utils.debrid_cdn_url import DebridCDNUrl
+from program.utils.ffprobe import parse_media_url
 
 
 class MediaAnalysisService(AnalysisService):

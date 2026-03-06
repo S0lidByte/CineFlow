@@ -5,11 +5,11 @@ from loguru import logger
 from requests import HTTPError
 
 from program.apis.plex_api import PlexAPI
+from program.core.runner import MediaItemGenerator, Runner, RunnerResult
 from program.db.db_functions import item_exists_by_any_id
 from program.media.item import MediaItem
 from program.settings import settings_manager
 from program.settings.models import PlexWatchlistModel
-from program.core.runner import MediaItemGenerator, Runner, RunnerResult
 
 
 class PlexWatchlist(Runner[PlexWatchlistModel]):

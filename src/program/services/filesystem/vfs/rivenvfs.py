@@ -31,15 +31,14 @@ Usage:
 """
 
 from __future__ import annotations
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 
-import pyfuse3
-import trio
+import errno
 import os
 import shutil
-import errno
 import subprocess
+import threading
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -47,50 +46,49 @@ from typing import (
     NoReturn,
     TypedDict,
 )
-import threading
-import trio_util
 
+import pyfuse3
+import trio
+import trio_util
 from kink import di
 
+from program.db.db import db_session
 from program.services.downloaders import Downloader
-
+from program.services.filesystem.vfs.db import VFSDatabase
 from program.services.filesystem.vfs.vfs_node import (
     VFSDirectory,
     VFSFile,
     VFSNode,
     VFSRoot,
 )
-
-from program.utils.logging import logger
-from program.settings import settings_manager
-from program.services.filesystem.vfs.db import VFSDatabase
 from program.services.streaming.exceptions import (
-    MediaStreamDataException,
+    DebridServiceClosedConnectionException,
     DebridServiceException,
+    DebridServiceFairUsageLimitException,
     DebridServiceForbiddenException,
+    DebridServiceLinkUnavailable,
     DebridServiceRangeNotSatisfiableException,
     DebridServiceRateLimitedException,
-    DebridServiceUnableToConnectException,
-    DebridServiceClosedConnectionException,
     DebridServiceRefusedRangeRequestException,
-    DebridServiceLinkUnavailable,
-    DebridServiceFairUsageLimitException,
+    DebridServiceUnableToConnectException,
+    MediaStreamDataException,
     MediaStreamKilledException,
 )
+from program.settings import settings_manager
 from program.utils.debrid_cdn_url import DebridCDNUrl
-from program.db.db import db_session
+from program.utils.logging import logger
 
 from ...streaming import (
     Cache,
     CacheConfig,
-    MediaStream,
-    ChunksTooSlowException,
     ChunkCacheNotifier,
+    ChunksTooSlowException,
+    MediaStream,
 )
 
 if TYPE_CHECKING:
-    from program.media.item import MediaItem
     from program.media.filesystem_entry import FilesystemEntry
+    from program.media.item import MediaItem
 
 
 class FileHandle(TypedDict):
@@ -246,7 +244,7 @@ class RivenVFS(pyfuse3.Operations):
 
                 unmount_requested = self._unmount_requested.value
 
-            logger.trace(f"FUSE main loop exited")
+            logger.trace("FUSE main loop exited")
 
         self._thread = threading.Thread(target=_fuse_runner, daemon=True)
         self._thread.start()
@@ -584,8 +582,8 @@ class RivenVFS(pyfuse3.Operations):
             True if successfully removed, False otherwise
         """
 
-        from program.media.media_entry import MediaEntry
         from program.media.item import Season, Show
+        from program.media.media_entry import MediaEntry
 
         if isinstance(item, Show):
             for season in item.seasons:
@@ -869,7 +867,7 @@ class RivenVFS(pyfuse3.Operations):
         if registered_count > 0:
             try:
                 pyfuse3.invalidate_inode(pyfuse3.ROOT_INODE, attr_only=False)
-                logger.debug(f"Invalidated root directory cache after sync")
+                logger.debug("Invalidated root directory cache after sync")
             except Exception as e:
                 logger.trace(f"Could not invalidate root directory: {e}")
 
@@ -887,6 +885,7 @@ class RivenVFS(pyfuse3.Operations):
         """
 
         from sqlalchemy.orm import object_session
+
         from program.db.db import db_session
 
         logger.debug(f"Individual sync: re-registering item {item.id}")
@@ -991,9 +990,10 @@ class RivenVFS(pyfuse3.Operations):
             List of registered VFS paths
         """
 
+        import os
+
         from program.media.media_entry import MediaEntry
         from program.media.subtitle_entry import SubtitleEntry
-        import os
 
         if isinstance(entry, MediaEntry):
             # Register MediaEntry (video file)
@@ -1067,9 +1067,10 @@ class RivenVFS(pyfuse3.Operations):
         Returns:
             List of unregistered VFS paths
         """
+        import os
+
         from program.media.media_entry import MediaEntry
         from program.media.subtitle_entry import SubtitleEntry
-        import os
 
         if isinstance(entry, MediaEntry):
             # Unregister MediaEntry (video file) by original_filename
@@ -1719,8 +1720,8 @@ class RivenVFS(pyfuse3.Operations):
                                     for candidate in self._get_nodes_by_original_filename(
                                         node.original_filename
                                     )
-                                    # _get_nodes_by_original_filename can yield multiple distinct 
-                                    # stream source nodes with the exact same original_filename but 
+                                    # _get_nodes_by_original_filename can yield multiple distinct
+                                    # stream source nodes with the exact same original_filename but
                                     # uniquely identified by their inode.
                                     if candidate.inode != original_inode
                                 ]
@@ -1991,7 +1992,7 @@ class RivenVFS(pyfuse3.Operations):
             if is_fair_usage:
                 return b""
 
-        except pyfuse3.FUSEError as e:
+        except pyfuse3.FUSEError:
             raise
         except Exception:
             logger.exception(f"read error fh={fh} off={off} size={size}")
@@ -2033,11 +2034,11 @@ class RivenVFS(pyfuse3.Operations):
 
     async def flush(self, fh: int) -> None:
         """Flush file data (no-op for read-only filesystem)."""
-        return None
+        return
 
     async def fsync(self, fh: int, datasync: bool) -> None:
         """Sync file data (no-op for read-only filesystem)."""
-        return None
+        return
 
     async def access(
         self, inode: pyfuse3.InodeT, mode: int, ctx: pyfuse3.RequestContext

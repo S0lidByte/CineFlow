@@ -1,13 +1,13 @@
-from .item import Episode, MediaItem, Movie, Season, Show
-from .state import States
 from .filesystem_entry import FilesystemEntry
+from .item import Episode, MediaItem, Movie, Season, Show
 from .media_entry import MediaEntry
-from .subtitle_entry import SubtitleEntry
+from .state import States
 from .stream import (
-    StreamBlacklistRelation,
     Stream,
+    StreamBlacklistRelation,
     StreamRelation,
 )
+from .subtitle_entry import SubtitleEntry
 
 __all__ = [
     "Episode",

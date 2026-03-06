@@ -10,8 +10,6 @@ class DebridServiceException(Exception):
 class DebridServiceHTTPException(DebridServiceException):
     """Raised when there is a network error with the debrid service."""
 
-    pass
-
 
 class DebridServiceRefusedRangeRequestException(DebridServiceHTTPException):
     """Raised when the debrid service refuses a range request."""

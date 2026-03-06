@@ -1,15 +1,15 @@
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
+from functools import cached_property
+from http import HTTPStatus
+from typing import Any, Literal
+
+import httpx
+import pyfuse3
 import trio
 import trio_util
-import pyfuse3
-import httpx
-
-from functools import cached_property
-from contextlib import asynccontextmanager
-from loguru import logger
-from typing import Any, Literal
-from http import HTTPStatus
 from kink import di
-from collections.abc import AsyncGenerator, AsyncIterator
+from loguru import logger
 from ordered_set import OrderedSet
 
 from program.settings import settings_manager
@@ -17,31 +17,30 @@ from program.utils import benchmark
 from program.utils.async_client import AsyncClient
 from program.utils.proxy_client import ProxyClient
 
-from .chunker import Chunk, ChunkCacheNotifier, ChunkRange, Chunker
+from .chunker import Chunk, ChunkCacheNotifier, Chunker, ChunkRange
 from .config import Config
 from .exceptions import (
+    ByteLengthMismatchException,
     CacheDataNotFoundException,
     ChunksTooSlowException,
-    EmptyDataException,
-    FatalMediaStreamException,
-    ByteLengthMismatchException,
-    RecoverableMediaStreamException,
     DebridServiceClosedConnectionException,
     DebridServiceException,
+    DebridServiceFairUsageLimitException,
     DebridServiceForbiddenException,
+    DebridServiceLinkUnavailable,
     DebridServiceRangeNotSatisfiableException,
-    DebridServiceUnableToConnectException,
     DebridServiceRateLimitedException,
     DebridServiceRefusedRangeRequestException,
+    DebridServiceUnableToConnectException,
+    EmptyDataException,
+    FatalMediaStreamException,
     MediaStreamKilledException,
-    DebridServiceLinkUnavailable,
-    DebridServiceFairUsageLimitException,
+    RecoverableMediaStreamException,
 )
 from .file_metadata import FileMetadata
 from .recent_reads import Read, RecentReads
 from .session_statistics import SessionStatistics
 from .stream_connection import StreamConnection
-
 
 # Providers that require proxy connections for streaming
 PROXY_REQUIRED_PROVIDERS = {"alldebrid"}
@@ -495,10 +494,9 @@ class MediaStream:
                             attempt_count += 1
 
                             continue
-                        else:
-                            self._stream_error.value = e.original_exception
+                        self._stream_error.value = e.original_exception
 
-                            break
+                        break
                     except FatalMediaStreamException as e:
                         logger.exception(
                             self.build_log_message(
@@ -842,7 +840,10 @@ class MediaStream:
                     else:
                         range_bytes = self.file_metadata.file_size - start
 
-                    if stream.status_code == HTTPStatus.OK and content_length is not None:
+                    if (
+                        stream.status_code == HTTPStatus.OK
+                        and content_length is not None
+                    ):
                         try:
                             parsed_content_length = int(content_length)
                         except ValueError:
@@ -898,7 +899,11 @@ class MediaStream:
                         continue
 
                     raise DebridServiceForbiddenException(provider=self.provider) from e
-                elif status_code in (HTTPStatus.NOT_FOUND, HTTPStatus.GONE, HTTPStatus.SERVICE_UNAVAILABLE):
+                elif status_code in (
+                    HTTPStatus.NOT_FOUND,
+                    HTTPStatus.GONE,
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                ):
                     # File can't be found at this URL; try refreshing the URL once
                     if attempt == 0:
                         has_fresh_url = await self._refresh_download_url()
@@ -1156,7 +1161,9 @@ class MediaStream:
 
                 return verified_data
 
-        raise RuntimeError("Failed to fetch discrete byte range after integrity retries")
+        raise RuntimeError(
+            "Failed to fetch discrete byte range after integrity retries"
+        )
 
     async def _wait_until_chunks_ready(
         self,

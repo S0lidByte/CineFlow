@@ -5,11 +5,12 @@ using the RivenVFS implementation.
 """
 
 from typing import TYPE_CHECKING
+
 from loguru import logger
 
-from program.services.filesystem.common_utils import get_items_to_update
-from program.services.downloaders import Downloader
 from program.core.runner import MediaItemGenerator, Runner, RunnerResult
+from program.services.downloaders import Downloader
+from program.services.filesystem.common_utils import get_items_to_update
 from program.settings.models import FilesystemModel
 
 if TYPE_CHECKING:

@@ -4,8 +4,6 @@ from .media_stream_exception import MediaStreamException
 class MediaStreamDataException(MediaStreamException):
     """Base class for streaming-related exceptions."""
 
-    pass
-
 
 class ByteLengthMismatchException(MediaStreamDataException):
     """Raised when the byte length of a stream does not match the expected length."""

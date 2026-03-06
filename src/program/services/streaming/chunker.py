@@ -1,9 +1,10 @@
-import cachetools
 from dataclasses import dataclass, field
 from functools import cached_property
+
+import cachetools
+import trio_util
 from kink import di
 from ordered_set import OrderedSet
-import trio_util
 
 
 class ChunkCacheNotifier:

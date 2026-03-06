@@ -6,8 +6,8 @@ from pydantic import BaseModel, ValidationError
 from program.media.item import Episode, MediaItem, Movie, Season, Show
 from program.services.scrapers.base import ScraperService
 from program.settings import settings_manager
-from program.utils.request import CircuitBreakerOpen, SmartSession
 from program.settings.models import OrionoidConfig
+from program.utils.request import CircuitBreakerOpen, SmartSession
 
 KEY_APP = "D3CH6HMX9KD9EMD68RXRCDUNBDJV5HRR"
 
@@ -230,17 +230,22 @@ class Orionoid(ScraperService[OrionoidConfig]):
             )
         except Exception as e:
             from requests import HTTPError
+
             if isinstance(e, HTTPError) and e.response.status_code == 429:
                 from program.utils.exceptions import RateLimitError
+
                 retry_after = e.response.headers.get("Retry-After")
-                raise RateLimitError("Orionoid rate limit exceeded", retry_after=int(retry_after) if retry_after else None)
-            elif "rate limit" in str(e).lower() or "429" in str(e):
-                from program.utils.exceptions import RateLimitError
-                raise RateLimitError("Orionoid rate limit exceeded")
-            else:
-                logger.debug(
-                    f"Orionoid exception for item: {item.log_string} - Exception: {str(e)}"
+                raise RateLimitError(
+                    "Orionoid rate limit exceeded",
+                    retry_after=int(retry_after) if retry_after else None,
                 )
+            if "rate limit" in str(e).lower() or "429" in str(e):
+                from program.utils.exceptions import RateLimitError
+
+                raise RateLimitError("Orionoid rate limit exceeded")
+            logger.debug(
+                f"Orionoid exception for item: {item.log_string} - Exception: {str(e)}"
+            )
 
         return {}
 

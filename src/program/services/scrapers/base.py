@@ -4,11 +4,12 @@ from typing import Literal, TypeVar, cast
 
 import bencodepy
 from loguru import logger
+
+from program.core.runner import Runner
 from program.media.item import Episode, MediaItem, Movie, Season, Show
+from program.settings.models import Observable
 from program.utils.request import SmartSession
 from program.utils.torrent import extract_infohash
-from program.core.runner import Runner
-from program.settings.models import Observable
 
 T = TypeVar("T", bound=Observable, covariant=True)
 

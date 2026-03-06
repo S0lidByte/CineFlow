@@ -4,16 +4,15 @@ from enum import Enum
 
 from RTN import ParsedData, parse
 
+from program.media.item import ProcessedItemType
 from program.media.stream import Stream
 from program.services.downloaders.models import (
     TorrentContainer,
     TorrentInfo,
-    UserInfo,
     UnrestrictedLink,
+    UserInfo,
 )
 from program.settings import settings_manager
-
-from program.media.item import ProcessedItemType
 
 
 class DownloaderBase(ABC):
@@ -117,7 +116,7 @@ class DownloaderBase(ABC):
             UnrestrictedLink | None: The unrestricted download URL, or None if unrestricting failed
         """
 
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 def parse_filename(filename: str) -> ParsedData:

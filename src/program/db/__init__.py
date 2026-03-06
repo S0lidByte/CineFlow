@@ -1,6 +1,6 @@
 from sqla_wrapper import SQLAlchemy
-from program.settings import settings_manager
 
+from program.settings import settings_manager
 
 engine_options = {
     "pool_size": 25,  # Prom: Set to 1 when debugging sql queries

@@ -8,11 +8,11 @@ from loguru import logger
 from requests import RequestException
 
 from program.apis.trakt_api import TraktAPI, Watchlist
+from program.core.runner import MediaItemGenerator, Runner, RunnerResult
 from program.db.db_functions import item_exists_by_any_id
 from program.media.item import MediaItem
 from program.settings import settings_manager
 from program.settings.models import TraktModel
-
 from schemas.trakt import (
     GetCollection200ResponseInner,
     GetMovies200ResponseInnerMovie,
@@ -26,7 +26,6 @@ from schemas.trakt import (
     GetTrendingMovies200ResponseInner,
     GetTrendingShows200ResponseInner,
 )
-from program.core.runner import MediaItemGenerator, Runner, RunnerResult
 
 
 class TraktContent(Runner[TraktModel]):

@@ -12,6 +12,7 @@ Do not edit the class manually.
 """  # noqa: E501
 
 from typing import Any, Optional
+
 from typing_extensions import Self
 
 
@@ -200,13 +201,9 @@ class ServiceException(ApiException):
 class ConflictException(ApiException):
     """Exception for HTTP 409 Conflict."""
 
-    pass
-
 
 class UnprocessableEntityException(ApiException):
     """Exception for HTTP 422 Unprocessable Entity."""
-
-    pass
 
 
 def render_path(path_to_item):

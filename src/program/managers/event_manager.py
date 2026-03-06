@@ -1,10 +1,10 @@
-from dataclasses import dataclass
-from enum import Enum
 import json
 import threading
 import traceback
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from queue import Empty
 from threading import Lock
 from typing import TYPE_CHECKING
@@ -17,8 +17,8 @@ from program.db import db_functions
 from program.db.db import db_session
 from program.managers.sse_manager import sse_manager
 from program.media.item import MediaItem
-from program.types import Event, Service
 from program.media.state import States
+from program.types import Event, Service
 
 if TYPE_CHECKING:
     from program.program import Program
@@ -118,19 +118,28 @@ class EventManager:
                 result = future_with_event.future.result()
             except Exception as e:
                 import httpx
+
                 from program.utils.exceptions import RateLimitError
-                
-                is_transient = isinstance(e, (httpx.TimeoutException, ConnectionError, RateLimitError))
-                
-                if is_transient and future_with_event.event and future_with_event.event.item_id:
+
+                is_transient = isinstance(
+                    e, (httpx.TimeoutException, ConnectionError, RateLimitError)
+                )
+
+                if (
+                    is_transient
+                    and future_with_event.event
+                    and future_with_event.event.item_id
+                ):
                     event = future_with_event.event
                     event.failure_count += 1
-                    
+
                     if event.failure_count >= 5:
-                        logger.error(f"Item ID {event.item_id} failed 5 times. Marking as Failed.")
-                        from program.media.item import MediaItem as MediaItemModel
+                        logger.error(
+                            f"Item ID {event.item_id} failed 5 times. Marking as Failed."
+                        )
                         from program.db.db import db_session
-                        
+                        from program.media.item import MediaItem as MediaItemModel
+
                         with db_session() as session:
                             item = session.get(MediaItemModel, event.item_id)
                             if item:
@@ -138,34 +147,35 @@ class EventManager:
                                 session.commit()
                     else:
                         base_delay = 60  # 1 minute base
-                        
+
                         if isinstance(e, RateLimitError) and e.retry_after:
                             delay = e.retry_after
                         else:
                             # Exponential backoff: 1m, 2m, 4m, 8m
                             delay = base_delay * (2 ** (event.failure_count - 1))
-                            
+
                         logger.warning(
                             f"Transient error for {event.log_message}: {e.__class__.__name__}. "
                             f"Retry {event.failure_count}/5 in {delay}s."
                         )
-                        
+
                         from datetime import timedelta
+
                         retry_event = Event(
                             emitted_by=event.emitted_by,
                             item_id=event.item_id,
                             content_item=event.content_item,
                             run_at=datetime.now() + timedelta(seconds=delay),
                             overrides=event.overrides,
-                            failure_count=event.failure_count
+                            failure_count=event.failure_count,
                         )
-                        
+
                         # Re-queue using the proper API (handles dedup + state caching)
                         self.add_event_to_queue(retry_event, log_message=False)
                 else:
                     logger.error(f"Error in future for {future_with_event}: {e}")
                     logger.exception(traceback.format_exc())
-                    
+
                 return  # finally still runs
 
             if isinstance(result, tuple):
@@ -181,14 +191,18 @@ class EventManager:
                     return  # finally still runs
 
                 # Propagate overrides to the new event to maintain setting context across service transitions
-                event_overrides = future_with_event.event.overrides if future_with_event.event else None
+                event_overrides = (
+                    future_with_event.event.overrides
+                    if future_with_event.event
+                    else None
+                )
 
                 self.add_event(
                     Event(
                         emitted_by=service,
                         item_id=item_id,
                         run_at=timestamp,
-                        overrides=event_overrides
+                        overrides=event_overrides,
                     )
                 )
 
@@ -215,7 +229,6 @@ class EventManager:
             sse_manager.publish_event(
                 "event_update", json.dumps(self.get_event_updates())
             )
-
 
     def add_event_to_queue(self, event: Event, log_message: bool = True):
         """
@@ -652,7 +665,7 @@ class EventManager:
             else:
                 key = event.emitted_by.__class__.__name__
 
-            table = updates.get(key, None)
+            table = updates.get(key)
 
             if table is not None and event.item_id:
                 table.append(event.item_id)

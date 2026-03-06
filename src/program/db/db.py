@@ -1,8 +1,9 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
+
 from loguru import logger
-from sqla_wrapper import SQLAlchemy, Session
+from sqla_wrapper import Session, SQLAlchemy
 from sqlalchemy import text
 
 from alembic import command
@@ -12,7 +13,6 @@ from alembic.script import ScriptDirectory
 from program.utils import root_dir
 
 from . import db, db_host, engine_options
-
 
 # Prom: This is a good place to set the statement timeout for the database when debugging.
 # @event.listens_for(Engine, "connect")

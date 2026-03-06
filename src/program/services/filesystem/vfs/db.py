@@ -4,19 +4,18 @@ from typing import TYPE_CHECKING, Literal, TypedDict
 
 from kink import di
 from loguru import logger
-
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
 from program.db.db import db_session
+from program.media.item import MediaItem
 from program.media.media_entry import MediaEntry
 from program.services.streaming.exceptions import (
-    DebridServiceLinkUnavailable,
     DebridServiceFairUsageLimitException,
+    DebridServiceLinkUnavailable,
 )
-from program.media.item import MediaItem
 from program.types import Event
 from routers.secure.items import apply_item_mutation
-from program.utils.debrid_cdn_url import DebridCDNUrl
 
 if TYPE_CHECKING:
     from program.services.downloaders import Downloader
@@ -133,7 +132,7 @@ class VFSDatabase:
 
                 if new_unrestricted:
                     entry.unrestricted_url = new_unrestricted.download
-                    
+
                     # Always save the unrestricted URL so we don't spam the API on subsequent calls
                     # if the CDN is temporarily returning 503s.
                     session.merge(entry)

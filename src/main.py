@@ -1,19 +1,16 @@
-from collections.abc import Awaitable, Callable
 import contextlib
 import signal
 import sys
 import threading
 import time
+from collections.abc import Awaitable, Callable
 from types import FrameType
 
-from kink import di
 import uvicorn
 from dotenv import load_dotenv
+from kink import di
 
 load_dotenv()  # import required here to support SETTINGS_FILENAME
-
-from program.utils.proxy_client import ProxyClient
-from program.utils.async_client import AsyncClient
 
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,9 +22,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from program.program import Program, riven
-from program.settings.models import get_version
 from program.settings import settings_manager
+from program.settings.models import get_version
+from program.utils.async_client import AsyncClient
 from program.utils.cli import handle_args
+from program.utils.proxy_client import ProxyClient
 from routers import app_router
 
 

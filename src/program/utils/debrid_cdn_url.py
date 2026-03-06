@@ -1,24 +1,22 @@
-from typing import Self
 import time
+from http import HTTPStatus
+from typing import Self
+
 import httpx
+from kink import di
 from loguru import logger
 
-from http import HTTPStatus
-from kink import di
-
-from program.settings import settings_manager
-from program.services.streaming.media_stream import PROXY_REQUIRED_PROVIDERS
+from program.db.db import db_session
+from program.media.media_entry import MediaEntry
 from program.services.streaming.exceptions import (
     DebridServiceLinkUnavailable,
 )
-from program.media.media_entry import MediaEntry
-from program.db.db import db_session
+from program.services.streaming.media_stream import PROXY_REQUIRED_PROVIDERS
+from program.settings import settings_manager
 
 
 class RefreshedURLIdenticalException(Exception):
     """Exception raised when a refreshed URL is identical to the previous URL."""
-
-    pass
 
 
 class DebridCDNUrl:
@@ -140,11 +138,12 @@ class DebridCDNUrl:
                 status_code = e.response.status_code
 
                 if (
-                    status_code in (
-                        HTTPStatus.NOT_FOUND, 
+                    status_code
+                    in (
+                        HTTPStatus.NOT_FOUND,
                         HTTPStatus.GONE,
                         HTTPStatus.FORBIDDEN,
-                        HTTPStatus.UNAUTHORIZED
+                        HTTPStatus.UNAUTHORIZED,
                     )
                     and attempt == 1
                 ):
@@ -200,7 +199,7 @@ class DebridCDNUrl:
                 return None
 
             if url == self.url:
-                raise RefreshedURLIdenticalException()
+                raise RefreshedURLIdenticalException
 
             self.url = url
 

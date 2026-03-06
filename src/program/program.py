@@ -1,15 +1,25 @@
-from dataclasses import dataclass
 import linecache
 import os
 import threading
 import time
+from dataclasses import dataclass
 from queue import Empty
 from tracemalloc import Snapshot
 
+from sqlalchemy import func, select, text
+
 from program.apis import bootstrap_apis
+from program.core.runner import Runner
+from program.db import db_functions
+from program.db.db import (
+    create_database_if_not_exists,
+    db_session,
+    run_migrations,
+)
 from program.managers.event_manager import EventManager
-from program.media.item import Episode, MediaItem, Movie, Season, Show
 from program.media.filesystem_entry import FilesystemEntry
+from program.media.item import Episode, MediaItem, Movie, Season, Show
+from program.scheduling import ProgramScheduler
 from program.services.content import (
     Listrr,
     Mdblist,
@@ -27,21 +37,10 @@ from program.settings import settings_manager
 from program.settings.models import get_version
 from program.utils import data_dir_path
 from program.utils.logging import logger
-from program.scheduling import ProgramScheduler
-from program.core.runner import Runner
 
-from .state_transition import process_event
 from .services.filesystem import FilesystemService
+from .state_transition import process_event
 from .types import Event
-
-from sqlalchemy import func, select, text
-
-from program.db import db_functions
-from program.db.db import (
-    create_database_if_not_exists,
-    db_session,
-    run_migrations,
-)
 
 
 @dataclass
@@ -357,7 +356,8 @@ class Program(threading.Thread):
                         if not next_service:
                             self.em.add_event_to_queue(
                                 Event(
-                                    emitted_by="StateTransition", item_id=item_to_submit.id
+                                    emitted_by="StateTransition",
+                                    item_id=item_to_submit.id,
                                 )
                             )
                         else:

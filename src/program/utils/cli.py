@@ -1,14 +1,14 @@
 import argparse
+import contextlib
 import os
 import subprocess
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 from program.db.db_functions import (
     hard_reset_database,
 )
 from program.utils.logging import log_cleaner, logger
-import contextlib
 
 
 def _parse_db_connection(db_url: str) -> tuple[str, str, str, str, str] | None:

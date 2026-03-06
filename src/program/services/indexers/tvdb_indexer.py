@@ -6,12 +6,12 @@ import regex
 from kink import di
 from loguru import logger
 
-from program.apis.tvdb_api import SeriesRelease, TVDBApi
 from program.apis.trakt_api import TraktAPI
+from program.apis.tvdb_api import SeriesRelease, TVDBApi
+from program.core.runner import MediaItemGenerator, RunnerResult
 from program.media.item import Episode, MediaItem, Season, Show
 from program.services.indexers.base import BaseIndexer
-from program.core.runner import MediaItemGenerator, RunnerResult
-from schemas.tvdb import SeasonExtendedRecord, EpisodeBaseRecord
+from schemas.tvdb import EpisodeBaseRecord, SeasonExtendedRecord
 
 
 class TVDBIndexer(BaseIndexer):
@@ -47,7 +47,9 @@ class TVDBIndexer(BaseIndexer):
         # Scenario 1: Fresh indexing - create new Show from API data
         if item.type == "mediaitem":
             if item.tvdb_id == "359913" or item.tvdb_id == 359913:
-                logger.info(f"On-demand indexing triggered for Formula 1: Drive to Survive (TVDB: 359913)")
+                logger.info(
+                    "On-demand indexing triggered for Formula 1: Drive to Survive (TVDB: 359913)"
+                )
 
             if indexed_item := self._create_show_from_id(item.imdb_id, item.tvdb_id):
                 indexed_item = self.copy_items(item, indexed_item)

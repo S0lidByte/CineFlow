@@ -1,29 +1,29 @@
 """MediaItem class"""
 
 from datetime import datetime
-from typing import Any, Literal, TYPE_CHECKING, Self, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, Self, TypeVar, cast
 
-from kink import di
 import sqlalchemy
+from kink import di
 from loguru import logger
 from sqlalchemy import Dialect, Index, TypeDecorator
 from sqlalchemy.orm import (
     Mapped,
+    MappedAsDataclass,
     mapped_column,
     object_session,
     relationship,
     validates,
-    MappedAsDataclass,
 )
 from sqlalchemy.orm.exc import DetachedInstanceError
 
+from program.apis.tvdb_api import SeriesRelease
+from program.db.base_model import Base
+from program.db.db import db_session
+from program.media.media_entry import MediaEntry
+from program.media.models import ActiveStream
 from program.media.state import States
 from program.media.subtitle_entry import SubtitleEntry
-from program.db.db import db_session
-from program.db.base_model import Base
-from program.media.media_entry import MediaEntry
-from program.apis.tvdb_api import SeriesRelease
-from program.media.models import ActiveStream
 
 from .stream import Stream
 
@@ -322,7 +322,8 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
         """
 
         from sqlalchemy.exc import IntegrityError
-        from program.scheduling.models import ScheduledTask, ScheduledStatus
+
+        from program.scheduling.models import ScheduledStatus, ScheduledTask
 
         if not self.id:
             logger.error("Cannot schedule task for unsaved item (missing id)")
@@ -416,7 +417,6 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
         except Exception:
             return False
 
-
     def to_dict(self) -> dict[str, Any]:
         """Convert item to dictionary (API response)"""
 
@@ -425,12 +425,12 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
         parent_title = self.title
         season_number = None
         episode_number = None
-        
+
         # Avoid repeated attribute access by taking locals
         imdb_id = self.imdb_id
         tvdb_id = self.tvdb_id
         tmdb_id = self.tmdb_id
-        
+
         parent_ids = {
             "imdb_id": imdb_id,
             "tvdb_id": tvdb_id,
@@ -517,7 +517,7 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
                 stream.to_dict() for stream in self.blacklisted_streams
             ]
             extended_dict["active_stream"] = self.active_stream
-        
+
         extended_dict["number"] = (
             self.number if my_type in ("episode", "season") else None
         )
@@ -536,14 +536,14 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
 
         # Efficiently collect subtitles
         sub_list = [subtitle.to_dict() for subtitle in self.subtitles]
-        
+
         # Include embedded subtitles from media_metadata if available
         if m_entry and m_entry.media_metadata:
             embedded_subs = m_entry.media_metadata.subtitle_tracks
             if embedded_subs:
                 # model_dump() is expensive, but here we only do it for entries that actually have them
                 sub_list.extend([sub.model_dump() for sub in embedded_subs])
-        
+
         extended_dict["subtitles"] = sub_list
 
         return extended_dict
@@ -1256,7 +1256,7 @@ class Episode(MediaItem):
 
 def _set_nested_attr(obj: object, key: str, value: Any):
     if "." in key:
-        (current_key, rest_of_keys) = key.split(".", 1)
+        current_key, rest_of_keys = key.split(".", 1)
 
         if not hasattr(obj, current_key):
             raise AttributeError(f"Object does not have the attribute '{current_key}'.")

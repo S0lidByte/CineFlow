@@ -1,21 +1,22 @@
 import asyncio
 from collections import defaultdict
 
+
 class ItemLock:
     """
     Per-item async locking utility.
-    
+
     This provides synchronization for operations on specific items (e.g., metadata sync)
     to prevent race conditions.
-    
-    Assumption: This implementation uses asyncio.Lock and is suitable for 
+
+    Assumption: This implementation uses asyncio.Lock and is suitable for
     single-process deployments (e.g., Uvicorn with workers=1).
-    
+
     Migration Path: If the backend is scaled to multiple processes or containers,
-    this should be replaced with a distributed lock using Redis (Redlock) or 
+    this should be replaced with a distributed lock using Redis (Redlock) or
     Postgres Advisory Locks.
     """
-    
+
     _locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
     _global_lock = asyncio.Lock()
 
@@ -29,11 +30,11 @@ class ItemLock:
     async def acquire(cls, item_id: int, timeout: float | None = None) -> bool:
         """
         Attempt to acquire the lock for a specific item.
-        
+
         Args:
             item_id: The ID of the item to lock.
             timeout: Maximum time to wait for the lock in seconds.
-            
+
         Returns:
             bool: True if lock acquired, False otherwise (timeout).
         """
@@ -44,7 +45,7 @@ class ItemLock:
                 return True
             except (asyncio.TimeoutError, TimeoutError):
                 return False
-        
+
         await lock.acquire()
         return True
 

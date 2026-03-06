@@ -1,11 +1,11 @@
-from kink import di
-from pydantic import BaseModel
 from fastapi import APIRouter, Request
+from kink import di
 from loguru import logger
+from pydantic import BaseModel
 
 from program.media.item import MediaItem
-from program.services.content.overseerr import Overseerr
 from program.program import Program
+from program.services.content.overseerr import Overseerr
 
 from ..models.overseerr import OverseerrWebhook
 

@@ -6,8 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from program.media.item import Episode, MediaItem, Season, Show
 from program.services.scrapers.base import ScraperService
 from program.settings import settings_manager
-from program.utils.request import SmartSession, get_hostname_from_url
 from program.settings.models import ZileanConfig
+from program.utils.request import SmartSession, get_hostname_from_url
 
 
 class Params(BaseModel):
@@ -82,15 +82,20 @@ class Zilean(ScraperService[ZileanConfig]):
             return self.scrape(item)
         except Exception as e:
             from requests import HTTPError
+
             if isinstance(e, HTTPError) and e.response.status_code == 429:
                 from program.utils.exceptions import RateLimitError
+
                 retry_after = e.response.headers.get("Retry-After")
-                raise RateLimitError("Zilean rate limit exceeded", retry_after=int(retry_after) if retry_after else None)
-            elif "rate limit" in str(e).lower() or "429" in str(e):
+                raise RateLimitError(
+                    "Zilean rate limit exceeded",
+                    retry_after=int(retry_after) if retry_after else None,
+                )
+            if "rate limit" in str(e).lower() or "429" in str(e):
                 from program.utils.exceptions import RateLimitError
+
                 raise RateLimitError("Zilean rate limit exceeded")
-            else:
-                logger.exception(f"Zilean exception thrown: {e}")
+            logger.exception(f"Zilean exception thrown: {e}")
 
         return {}
 

@@ -4,9 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Generic, TypeVar
 
-from program.settings.models import Observable
 from program.media.item import MediaItem
-
+from program.settings.models import Observable
 
 type MediaItemGenerator[T: MediaItem = MediaItem] = Generator[
     RunnerResult[T], None, RunnerResult[T] | None

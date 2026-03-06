@@ -6,11 +6,11 @@ from datetime import datetime
 from apprise import Apprise
 from loguru import logger
 
+from program.core.runner import Runner
 from program.managers.sse_manager import sse_manager
 from program.media.item import Episode, MediaItem, Season
 from program.media.state import States
 from program.settings import settings_manager
-from program.core.runner import Runner
 from program.settings.models import NotificationsModel
 
 

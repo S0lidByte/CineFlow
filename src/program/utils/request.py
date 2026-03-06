@@ -1,18 +1,18 @@
-from collections.abc import Generator, Mapping
-from datetime import datetime
 import json
 import random
 import ssl
-import time
 import threading
-import httpx
-import requests
-
+import time
+from collections.abc import Generator, Mapping
+from contextlib import closing
+from datetime import datetime
 from email.utils import parsedate_to_datetime
 from types import SimpleNamespace
 from typing import Any, cast
 from urllib.parse import urlparse
-from contextlib import closing
+
+import httpx
+import requests
 from loguru import logger
 from lxml import etree
 
@@ -250,12 +250,14 @@ class SmartResponse(requests.Response):
         from io import BytesIO
 
         # Use an event-driven parser to prevent loading the entire DOM into memory
-        context = etree.iterparse(BytesIO(xml_string.encode('utf-8')), events=("start", "end"))
+        context = etree.iterparse(
+            BytesIO(xml_string.encode("utf-8")), events=("start", "end")
+        )
         _, root_elem = next(context)  # Get the root element
 
         # Push the root element onto the stack so it collects its children
         stack: list[tuple[Any, dict[str, Any]]] = [(root_elem, {})]
-        
+
         ns: SimpleNamespace | None = None
         for event, elem in context:
             if event == "start":
@@ -264,10 +266,10 @@ class SmartResponse(requests.Response):
                 elem_tag = str(elem.tag)
                 elem_text = elem.text
                 elem_attrib = {k: v for k, v in elem.attrib.items()}
-                
+
                 # Pop the current element's tracking state
                 _, current_children = stack.pop() if stack else (elem, {})
-                
+
                 # Create the namespace for the current element
                 ns = SimpleNamespace(
                     {
@@ -276,15 +278,15 @@ class SmartResponse(requests.Response):
                     },
                     text=elem_text,
                 )
-                
+
                 if stack:
                     # Attach to parent
                     _, parent_children = stack[-1]
                     parent_children[elem_tag] = ns
-                    
+
                 # Free memory: clear the Element tree references
                 elem.clear()
-                
+
                 # Also eliminate empty references from preceding siblings
                 parent = elem.getparent()
                 if parent is not None:
@@ -294,7 +296,11 @@ class SmartResponse(requests.Response):
         # Build the root namespace from whatever children were collected
         if stack:
             root_elem_ref, root_children = stack[0]
-            root_attrib = {k: v for k, v in root_elem_ref.attrib.items()} if root_elem_ref.attrib else {}
+            root_attrib = (
+                {k: v for k, v in root_elem_ref.attrib.items()}
+                if root_elem_ref.attrib
+                else {}
+            )
             return SimpleNamespace(
                 {**root_attrib, **root_children},
                 text=root_elem_ref.text,
@@ -638,18 +644,17 @@ class SmartSession:
             # Use context manager so the client is always closed
             with closing(per_request_client_factory()) as pr_client:
                 return _run_with_client(pr_client)
-        else:
-            if tmp_client is not None:
+        elif tmp_client is not None:
+            try:
+                return _run_with_client(tmp_client)
+            finally:
+                # Close tmp_client if still owned here (not handed off for streaming)
                 try:
-                    return _run_with_client(tmp_client)
-                finally:
-                    # Close tmp_client if still owned here (not handed off for streaming)
-                    try:
-                        tmp_client.close()
-                    except Exception:
-                        pass
-            else:
-                return _run_with_client(client)
+                    tmp_client.close()
+                except Exception:
+                    pass
+        else:
+            return _run_with_client(client)
 
     def get(self, url: str, **kwargs: Any) -> SmartResponse:
         return self.request("GET", url, **kwargs)

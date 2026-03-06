@@ -9,8 +9,10 @@ inspection via ffprobe) into a single, coherent structure.
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
-from RTN import ParsedData
+
 from pydantic import BaseModel, Field, ValidationError, field_validator
+from RTN import ParsedData
+
 from program.utils.ffprobe import FFProbeMediaMetadata
 
 

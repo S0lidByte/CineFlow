@@ -1,17 +1,18 @@
 """Shared functions for scrapers."""
 
 from datetime import datetime
+from typing import cast
+
 from loguru import logger
 from RTN import (
     RTN,
+    BaseRankingModel,
+    DefaultRanking,
     ParsedData,
     Torrent,
     sort_torrents,
-    BaseRankingModel,
-    DefaultRanking,
 )
 from RTN.models import SettingsModel
-from typing import cast
 
 from program.media.item import Episode, MediaItem, Movie, Season, Show
 from program.media.stream import Stream
@@ -51,7 +52,7 @@ def get_ranking_overrides(
                 continue
 
             targets = set(ranking_overrides[category])
-            
+
             # Iterate fields (assuming Pydantic model)
             for key in obj.__class__.model_fields:
                 if key == "unknown":
@@ -89,13 +90,12 @@ def parse_results(
     processed_infohashes = set[str]()
     correct_title = item.top_title
 
-
     # Use effective RTN settings (handles explicit overrides/context implicitly)
     active_settings = settings_manager.get_effective_rtn_model()
-    
+
     # Check if we are diverging from the global singleton `rtn` instance
-    is_default_settings = (active_settings.model_dump() == ranking_settings.model_dump())
-    
+    is_default_settings = active_settings.model_dump() == ranking_settings.model_dump()
+
     if is_default_settings:
         rtn_instance = rtn
     else:
@@ -118,9 +118,9 @@ def parse_results(
                 raw_title=raw_title,
                 infohash=infohash,
                 correct_title=correct_title,
-                remove_trash=active_settings.options[
-                    "remove_all_trash"
-                ] if not manual else False,
+                remove_trash=(
+                    active_settings.options["remove_all_trash"] if not manual else False
+                ),
                 aliases=aliases,
             )
 
@@ -134,7 +134,11 @@ def parse_results(
 
             if isinstance(item, Show):
                 # make sure the torrent has at least 2 episodes (should weed out most junk)
-                if not manual and torrent.data.episodes and len(torrent.data.episodes) <= 2:
+                if (
+                    not manual
+                    and torrent.data.episodes
+                    and len(torrent.data.episodes) <= 2
+                ):
                     logger.trace(
                         f"Skipping torrent with too few episodes for {item.log_string}: {raw_title}"
                     )
@@ -165,14 +169,22 @@ def parse_results(
                     continue
 
             if isinstance(item, Season):
-                if not manual and torrent.data.seasons and item.number not in torrent.data.seasons:
+                if (
+                    not manual
+                    and torrent.data.seasons
+                    and item.number not in torrent.data.seasons
+                ):
                     logger.trace(
                         f"Skipping torrent with no seasons or incorrect season number for {item.log_string}: {raw_title}"
                     )
                     continue
 
                 # make sure the torrent has at least 2 episodes (should weed out most junk)
-                if not manual and torrent.data.episodes and len(torrent.data.episodes) <= 2:
+                if (
+                    not manual
+                    and torrent.data.episodes
+                    and len(torrent.data.episodes) <= 2
+                ):
                     logger.trace(
                         f"Skipping torrent with too few episodes for {item.log_string}: {raw_title}"
                     )
@@ -185,8 +197,13 @@ def parse_results(
                     )
                     continue
 
-                if not manual and torrent.data.episodes and not all(
-                    episode.number in torrent.data.episodes for episode in item.episodes
+                if (
+                    not manual
+                    and torrent.data.episodes
+                    and not all(
+                        episode.number in torrent.data.episodes
+                        for episode in item.episodes
+                    )
                 ):
                     logger.trace(
                         f"Skipping incorrect season torrent for not having all episodes {item.log_string}: {raw_title}"
