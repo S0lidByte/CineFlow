@@ -37,6 +37,7 @@ import os
 import shutil
 import subprocess
 import threading
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import (
@@ -652,20 +653,35 @@ class RivenVFS(pyfuse3.Operations):
         """Prepare mountpoint by killing processes and unmounting if necessary."""
 
         # Attempt to unmount if already mounted or in a stale state
-        try:
-            # Detect if something is mounted there
-            is_mounted = False
-            try:
-                with open("/proc/mounts", "r") as f:
-                    for line in f:
-                        if f" {mountpoint} " in line:
-                            is_mounted = True
-                            break
-            except Exception:
-                # If we cannot check, attempt unmounts anyway
-                is_mounted = True
+        # We use a loop here to ensure all layers of a mountpoint are cleared.
+        max_attempts = 10
+        attempts = 0
 
-            if is_mounted:
+        while attempts < max_attempts:
+            attempts += 1
+            try:
+                # Detect if something is mounted there
+                is_mounted = False
+                try:
+                    with open("/proc/mounts", "r") as f:
+                        for line in f:
+                            if f" {mountpoint} " in line:
+                                is_mounted = True
+                                break
+                except Exception:
+                    # If we cannot check, assume we might need to unmount if this is the first iteration
+                    if attempts == 1:
+                        is_mounted = True
+                    else:
+                        break
+
+                if not is_mounted:
+                    break
+
+                logger.info(
+                    f"Detected existing mount at {mountpoint} (layer {attempts}), attempting to unmount..."
+                )
+
                 # Try a sequence of unmount strategies (graceful -> lazy)
                 for cmd in (
                     ["fusermount3", "-u", "-z", mountpoint],
@@ -678,8 +694,17 @@ class RivenVFS(pyfuse3.Operations):
                         )
                     except (subprocess.TimeoutExpired, FileNotFoundError):
                         continue
-        except Exception:
-            pass
+
+                # Sleep briefly to give the kernel time to update /proc/mounts
+                time.sleep(0.5)
+            except Exception as e:
+                logger.error(f"Error during mountpoint preparation: {e}")
+                break
+
+        if attempts >= max_attempts:
+            logger.warning(
+                f"Reached maximum unmount attempts ({max_attempts}) for {mountpoint}. Some stale mounts may remain."
+            )
 
         # Ensure mountpoint directory exists (recreate if necessary)
         try:
@@ -1704,7 +1729,14 @@ class RivenVFS(pyfuse3.Operations):
                 try:
                     logger.trace(f"Validating CDN URL for {node.path}...")
 
-                    DebridCDNUrl.from_filename(node.original_filename).validate()
+                    if (
+                        DebridCDNUrl.from_filename(node.original_filename).validate()
+                        is None
+                    ):
+                        logger.error(
+                            f"Failed to validate CDN URL for {node.path}; no valid link available."
+                        )
+                        raise pyfuse3.FUSEError(errno.EIO)
                 except DebridServiceLinkUnavailable:
                     logger.warning(
                         f"Dead link for {node.path}; attempting to download a working one..."

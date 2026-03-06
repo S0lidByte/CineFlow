@@ -50,7 +50,7 @@ def setup_logger(
         "DATABASE": (5, "d834eb", "🛢️"),  # trace
         "DEBRID": (20, "cc3333", "🔗"),
         "FILESYSTEM": (5, "F9E79F", "🔗"),  # trace
-        "VFS": (5, "9B59B6", "🧲"),  # trace
+        "VFS": (10, "9B59B6", "🧲"),  # debug
         "FUSE": (5, "999999", "⚙️"),  # trace
         "SCRAPER": (20, "3D5A80", "👻"),
         "COMPLETED": (20, "FFFFFF", "🟢"),
@@ -66,7 +66,7 @@ def setup_logger(
         "JELLYFIN": (20, "DAD3BE", "📽️ "),
         "EMBY": (20, "DAD3BE", "📽️ "),
         "TRAKT": (20, "006989", "🍿"),
-        "STREAM": (5, "9B59B6", "▶️ "),  # trace
+        "STREAM": (10, "9B59B6", "▶️ "),  # debug
         "NETWORK": (5, "235789", "🌐"),  # debug
     }
 
