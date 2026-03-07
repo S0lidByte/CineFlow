@@ -229,7 +229,6 @@ class TmdbApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -469,7 +468,6 @@ class TmdbApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -486,7 +484,6 @@ class TmdbApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -713,7 +710,6 @@ class TmdbApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -730,7 +726,6 @@ class TmdbApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -944,7 +939,6 @@ class TmdbApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1184,7 +1178,6 @@ class TmdbApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1413,7 +1406,6 @@ class TmdbApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1653,7 +1645,6 @@ class TmdbApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}

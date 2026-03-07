@@ -254,7 +254,6 @@ class StaticListsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -271,7 +270,6 @@ class StaticListsApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -558,7 +556,6 @@ class StaticListsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -579,7 +576,6 @@ class StaticListsApi:
             _path_params["action"] = action
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters

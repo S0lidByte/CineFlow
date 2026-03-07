@@ -242,7 +242,6 @@ class IssueApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -478,7 +477,6 @@ class IssueApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -733,7 +731,6 @@ class IssueApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -974,7 +971,6 @@ class IssueApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1266,7 +1262,6 @@ class IssueApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1283,23 +1278,18 @@ class IssueApi:
         # process the path parameters
         # process the query parameters
         if take is not None:
-
             _query_params.append(("take", take))
 
         if skip is not None:
-
             _query_params.append(("skip", skip))
 
         if sort is not None:
-
             _query_params.append(("sort", sort))
 
         if filter is not None:
-
             _query_params.append(("filter", filter))
 
         if requested_by is not None:
-
             _query_params.append(("requestedBy", requested_by))
 
         # process the header parameters
@@ -1539,7 +1529,6 @@ class IssueApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1793,7 +1782,6 @@ class IssueApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2029,7 +2017,6 @@ class IssueApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2284,7 +2271,6 @@ class IssueApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2528,7 +2514,6 @@ class IssueApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}

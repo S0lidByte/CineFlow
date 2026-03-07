@@ -282,7 +282,6 @@ class LogApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -299,23 +298,18 @@ class LogApi:
         # process the path parameters
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if page_size is not None:
-
             _query_params.append(("pageSize", page_size))
 
         if sort_key is not None:
-
             _query_params.append(("sortKey", sort_key))
 
         if sort_direction is not None:
-
             _query_params.append(("sortDirection", sort_direction.value))
 
         if level is not None:
-
             _query_params.append(("level", level))
 
         # process the header parameters

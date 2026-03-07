@@ -240,7 +240,6 @@ class NotificationApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -472,7 +471,6 @@ class NotificationApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -709,7 +707,6 @@ class NotificationApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -942,7 +939,6 @@ class NotificationApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1207,7 +1203,6 @@ class NotificationApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1226,7 +1221,6 @@ class NotificationApi:
             _path_params["id"] = id
         # process the query parameters
         if force_save is not None:
-
             _query_params.append(("forceSave", force_save))
 
         # process the header parameters
@@ -1475,7 +1469,6 @@ class NotificationApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1492,7 +1485,6 @@ class NotificationApi:
         # process the path parameters
         # process the query parameters
         if force_save is not None:
-
             _query_params.append(("forceSave", force_save))
 
         # process the header parameters
@@ -1715,7 +1707,6 @@ class NotificationApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1965,7 +1956,6 @@ class NotificationApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1982,7 +1972,6 @@ class NotificationApi:
         # process the path parameters
         # process the query parameters
         if force_test is not None:
-
             _query_params.append(("forceTest", force_test))
 
         # process the header parameters
@@ -2199,7 +2188,6 @@ class NotificationApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}

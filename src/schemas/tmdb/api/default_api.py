@@ -554,7 +554,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -573,7 +572,6 @@ class DefaultApi:
             _path_params["account_id"] = account_id
         # process the query parameters
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         # process the header parameters
@@ -838,7 +836,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -857,7 +854,6 @@ class DefaultApi:
             _path_params["account_id"] = account_id
         # process the query parameters
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         # process the header parameters
@@ -1109,7 +1105,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1128,7 +1123,6 @@ class DefaultApi:
             _path_params["account_id"] = account_id
         # process the query parameters
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         # process the header parameters
@@ -1407,7 +1401,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1426,19 +1419,15 @@ class DefaultApi:
             _path_params["account_id"] = account_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         if sort_by is not None:
-
             _query_params.append(("sort_by", sort_by))
 
         # process the header parameters
@@ -1717,7 +1706,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1736,19 +1724,15 @@ class DefaultApi:
             _path_params["account_id"] = account_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         if sort_by is not None:
-
             _query_params.append(("sort_by", sort_by))
 
         # process the header parameters
@@ -2001,7 +1985,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2020,11 +2003,9 @@ class DefaultApi:
             _path_params["account_id"] = account_id
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         # process the header parameters
@@ -2303,7 +2284,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2322,19 +2302,15 @@ class DefaultApi:
             _path_params["account_id"] = account_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         if sort_by is not None:
-
             _query_params.append(("sort_by", sort_by))
 
         # process the header parameters
@@ -2613,7 +2589,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2632,19 +2607,15 @@ class DefaultApi:
             _path_params["account_id"] = account_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         if sort_by is not None:
-
             _query_params.append(("sort_by", sort_by))
 
         # process the header parameters
@@ -2923,7 +2894,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2942,19 +2912,15 @@ class DefaultApi:
             _path_params["account_id"] = account_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         if sort_by is not None:
-
             _query_params.append(("sort_by", sort_by))
 
         # process the header parameters
@@ -3233,7 +3199,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3252,19 +3217,15 @@ class DefaultApi:
             _path_params["account_id"] = account_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         if sort_by is not None:
-
             _query_params.append(("sort_by", sort_by))
 
         # process the header parameters
@@ -3543,7 +3504,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3562,19 +3522,15 @@ class DefaultApi:
             _path_params["account_id"] = account_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         if sort_by is not None:
-
             _query_params.append(("sort_by", sort_by))
 
         # process the header parameters
@@ -3801,7 +3757,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4030,7 +3985,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4257,7 +4211,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4497,7 +4450,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4749,7 +4701,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -5001,7 +4952,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -5253,7 +5203,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -5495,7 +5444,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -5722,7 +5670,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -5949,7 +5896,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -6215,7 +6161,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -6243,7 +6188,6 @@ class DefaultApi:
                 _query_params.append(("end_date", end_date))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if start_date is not None:
@@ -6507,7 +6451,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -6535,7 +6478,6 @@ class DefaultApi:
                 _query_params.append(("end_date", end_date))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if start_date is not None:
@@ -6799,7 +6741,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -6827,7 +6768,6 @@ class DefaultApi:
                 _query_params.append(("end_date", end_date))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if start_date is not None:
@@ -7078,7 +7018,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -7097,7 +7036,6 @@ class DefaultApi:
             _path_params["collection_id"] = collection_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -7365,7 +7303,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -7384,11 +7321,9 @@ class DefaultApi:
             _path_params["collection_id"] = collection_id
         # process the query parameters
         if include_image_language is not None:
-
             _query_params.append(("include_image_language", include_image_language))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -7615,7 +7550,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -7857,7 +7791,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -8099,7 +8032,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -8341,7 +8273,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -8583,7 +8514,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -8600,7 +8530,6 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -8814,7 +8743,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -9041,7 +8969,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -9268,7 +9195,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -9495,7 +9421,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -9722,7 +9647,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -9975,7 +9899,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -9994,7 +9917,6 @@ class DefaultApi:
             _path_params["credit_id"] = credit_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -10221,7 +10143,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -11091,7 +11012,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -11108,39 +11028,30 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if certification is not None:
-
             _query_params.append(("certification", certification))
 
         if certification_gte is not None:
-
             _query_params.append(("certification.gte", certification_gte))
 
         if certification_lte is not None:
-
             _query_params.append(("certification.lte", certification_lte))
 
         if certification_country is not None:
-
             _query_params.append(("certification_country", certification_country))
 
         if include_adult is not None:
-
             _query_params.append(("include_adult", include_adult))
 
         if include_video is not None:
-
             _query_params.append(("include_video", include_video))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if primary_release_year is not None:
-
             _query_params.append(("primary_release_year", primary_release_year))
 
         if primary_release_date_gte is not None:
@@ -11174,7 +11085,6 @@ class DefaultApi:
                 )
 
         if region is not None:
-
             _query_params.append(("region", region))
 
         if release_date_gte is not None:
@@ -11204,101 +11114,77 @@ class DefaultApi:
                 _query_params.append(("release_date.lte", release_date_lte))
 
         if sort_by is not None:
-
             _query_params.append(("sort_by", sort_by))
 
         if vote_average_gte is not None:
-
             _query_params.append(("vote_average.gte", vote_average_gte))
 
         if vote_average_lte is not None:
-
             _query_params.append(("vote_average.lte", vote_average_lte))
 
         if vote_count_gte is not None:
-
             _query_params.append(("vote_count.gte", vote_count_gte))
 
         if vote_count_lte is not None:
-
             _query_params.append(("vote_count.lte", vote_count_lte))
 
         if watch_region is not None:
-
             _query_params.append(("watch_region", watch_region))
 
         if with_cast is not None:
-
             _query_params.append(("with_cast", with_cast))
 
         if with_companies is not None:
-
             _query_params.append(("with_companies", with_companies))
 
         if with_crew is not None:
-
             _query_params.append(("with_crew", with_crew))
 
         if with_genres is not None:
-
             _query_params.append(("with_genres", with_genres))
 
         if with_keywords is not None:
-
             _query_params.append(("with_keywords", with_keywords))
 
         if with_origin_country is not None:
-
             _query_params.append(("with_origin_country", with_origin_country))
 
         if with_original_language is not None:
-
             _query_params.append(("with_original_language", with_original_language))
 
         if with_people is not None:
-
             _query_params.append(("with_people", with_people))
 
         if with_release_type is not None:
-
             _query_params.append(("with_release_type", with_release_type))
 
         if with_runtime_gte is not None:
-
             _query_params.append(("with_runtime.gte", with_runtime_gte))
 
         if with_runtime_lte is not None:
-
             _query_params.append(("with_runtime.lte", with_runtime_lte))
 
         if with_watch_monetization_types is not None:
-
             _query_params.append(
                 ("with_watch_monetization_types", with_watch_monetization_types)
             )
 
         if with_watch_providers is not None:
-
             _query_params.append(("with_watch_providers", with_watch_providers))
 
         if without_companies is not None:
-
             _query_params.append(("without_companies", without_companies))
 
         if without_genres is not None:
-
             _query_params.append(("without_genres", without_genres))
 
         if without_keywords is not None:
-
             _query_params.append(("without_keywords", without_keywords))
 
         if without_watch_providers is not None:
-
             _query_params.append(("without_watch_providers", without_watch_providers))
 
         if year is not None:
-
             _query_params.append(("year", year))
 
         # process the header parameters
@@ -12043,7 +11929,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -12086,7 +11971,6 @@ class DefaultApi:
                 _query_params.append(("air_date.lte", air_date_lte))
 
         if first_air_date_year is not None:
-
             _query_params.append(("first_air_date_year", first_air_date_year))
 
         if first_air_date_gte is not None:
@@ -12116,119 +12000,91 @@ class DefaultApi:
                 _query_params.append(("first_air_date.lte", first_air_date_lte))
 
         if include_adult is not None:
-
             _query_params.append(("include_adult", include_adult))
 
         if include_null_first_air_dates is not None:
-
             _query_params.append(
                 ("include_null_first_air_dates", include_null_first_air_dates)
             )
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if screened_theatrically is not None:
-
             _query_params.append(("screened_theatrically", screened_theatrically))
 
         if sort_by is not None:
-
             _query_params.append(("sort_by", sort_by))
 
         if timezone is not None:
-
             _query_params.append(("timezone", timezone))
 
         if vote_average_gte is not None:
-
             _query_params.append(("vote_average.gte", vote_average_gte))
 
         if vote_average_lte is not None:
-
             _query_params.append(("vote_average.lte", vote_average_lte))
 
         if vote_count_gte is not None:
-
             _query_params.append(("vote_count.gte", vote_count_gte))
 
         if vote_count_lte is not None:
-
             _query_params.append(("vote_count.lte", vote_count_lte))
 
         if watch_region is not None:
-
             _query_params.append(("watch_region", watch_region))
 
         if with_companies is not None:
-
             _query_params.append(("with_companies", with_companies))
 
         if with_genres is not None:
-
             _query_params.append(("with_genres", with_genres))
 
         if with_keywords is not None:
-
             _query_params.append(("with_keywords", with_keywords))
 
         if with_networks is not None:
-
             _query_params.append(("with_networks", with_networks))
 
         if with_origin_country is not None:
-
             _query_params.append(("with_origin_country", with_origin_country))
 
         if with_original_language is not None:
-
             _query_params.append(("with_original_language", with_original_language))
 
         if with_runtime_gte is not None:
-
             _query_params.append(("with_runtime.gte", with_runtime_gte))
 
         if with_runtime_lte is not None:
-
             _query_params.append(("with_runtime.lte", with_runtime_lte))
 
         if with_status is not None:
-
             _query_params.append(("with_status", with_status))
 
         if with_watch_monetization_types is not None:
-
             _query_params.append(
                 ("with_watch_monetization_types", with_watch_monetization_types)
             )
 
         if with_watch_providers is not None:
-
             _query_params.append(("with_watch_providers", with_watch_providers))
 
         if without_companies is not None:
-
             _query_params.append(("without_companies", without_companies))
 
         if without_genres is not None:
-
             _query_params.append(("without_genres", without_genres))
 
         if without_keywords is not None:
-
             _query_params.append(("without_keywords", without_keywords))
 
         if without_watch_providers is not None:
-
             _query_params.append(("without_watch_providers", without_watch_providers))
 
         if with_type is not None:
-
             _query_params.append(("with_type", with_type))
 
         # process the header parameters
@@ -12481,7 +12337,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -12500,11 +12355,9 @@ class DefaultApi:
             _path_params["external_id"] = external_id
         # process the query parameters
         if external_source is not None:
-
             _query_params.append(("external_source", external_source))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -12731,7 +12584,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -12748,7 +12600,6 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -12975,7 +12826,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -12992,7 +12842,6 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -13258,7 +13107,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -13277,15 +13125,12 @@ class DefaultApi:
             _path_params["guest_session_id"] = guest_session_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if sort_by is not None:
-
             _query_params.append(("sort_by", sort_by))
 
         # process the header parameters
@@ -13551,7 +13396,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -13570,15 +13414,12 @@ class DefaultApi:
             _path_params["guest_session_id"] = guest_session_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if sort_by is not None:
-
             _query_params.append(("sort_by", sort_by))
 
         # process the header parameters
@@ -13844,7 +13685,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -13863,15 +13703,12 @@ class DefaultApi:
             _path_params["guest_session_id"] = guest_session_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if sort_by is not None:
-
             _query_params.append(("sort_by", sort_by))
 
         # process the header parameters
@@ -14098,7 +13935,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -14379,7 +14215,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -14398,15 +14233,12 @@ class DefaultApi:
             _path_params["keyword_id"] = keyword_id
         # process the query parameters
         if include_adult is not None:
-
             _query_params.append(("include_adult", include_adult))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -14659,7 +14491,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -14678,7 +14509,6 @@ class DefaultApi:
             _path_params["list_id"] = list_id
         # process the query parameters
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         # process the header parameters
@@ -14943,7 +14773,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -14962,11 +14791,9 @@ class DefaultApi:
             _path_params["list_id"] = list_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if movie_id is not None:
-
             _query_params.append(("movie_id", movie_id))
 
         # process the header parameters
@@ -15219,7 +15046,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -15238,11 +15064,9 @@ class DefaultApi:
             _path_params["list_id"] = list_id
         # process the query parameters
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         if confirm is not None:
-
             _query_params.append(("confirm", confirm))
 
         # process the header parameters
@@ -15482,7 +15306,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -15499,7 +15322,6 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         # process the header parameters
@@ -15751,7 +15573,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -15770,7 +15591,6 @@ class DefaultApi:
             _path_params["list_id"] = list_id
         # process the query parameters
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         # process the header parameters
@@ -16023,7 +15843,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -16042,11 +15861,9 @@ class DefaultApi:
             _path_params["list_id"] = list_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -16299,7 +16116,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -16318,7 +16134,6 @@ class DefaultApi:
             _path_params["list_id"] = list_id
         # process the query parameters
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         # process the header parameters
@@ -16583,7 +16398,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -16602,11 +16416,9 @@ class DefaultApi:
             _path_params["series_id"] = series_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -16859,7 +16671,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -16878,11 +16689,9 @@ class DefaultApi:
             _path_params["movie_id"] = movie_id
         # process the query parameters
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         if guest_session_id is not None:
-
             _query_params.append(("guest_session_id", guest_session_id))
 
         # process the header parameters
@@ -17161,7 +16970,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -17180,11 +16988,9 @@ class DefaultApi:
             _path_params["movie_id"] = movie_id
         # process the query parameters
         if guest_session_id is not None:
-
             _query_params.append(("guest_session_id", guest_session_id))
 
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         # process the header parameters
@@ -17447,7 +17253,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -17466,7 +17271,6 @@ class DefaultApi:
             _path_params["movie_id"] = movie_id
         # process the query parameters
         if country is not None:
-
             _query_params.append(("country", country))
 
         # process the header parameters
@@ -17732,7 +17536,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -17762,7 +17565,6 @@ class DefaultApi:
                 _query_params.append(("end_date", end_date))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if start_date is not None:
@@ -18013,7 +17815,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -18032,7 +17833,6 @@ class DefaultApi:
             _path_params["movie_id"] = movie_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -18298,7 +18098,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -18317,11 +18116,9 @@ class DefaultApi:
             _path_params["movie_id"] = movie_id
         # process the query parameters
         if guest_session_id is not None:
-
             _query_params.append(("guest_session_id", guest_session_id))
 
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         # process the header parameters
@@ -18591,7 +18388,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -18610,11 +18406,9 @@ class DefaultApi:
             _path_params["movie_id"] = movie_id
         # process the query parameters
         if append_to_response is not None:
-
             _query_params.append(("append_to_response", append_to_response))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -18841,7 +18635,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -19124,7 +18917,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -19143,11 +18935,9 @@ class DefaultApi:
             _path_params["movie_id"] = movie_id
         # process the query parameters
         if include_image_language is not None:
-
             _query_params.append(("include_image_language", include_image_language))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -19374,7 +19164,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -19603,7 +19392,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -19869,7 +19657,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -19888,11 +19675,9 @@ class DefaultApi:
             _path_params["movie_id"] = movie_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -20151,7 +19936,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -20168,15 +19952,12 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if region is not None:
-
             _query_params.append(("region", region))
 
         # process the header parameters
@@ -20435,7 +20216,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -20452,15 +20232,12 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if region is not None:
-
             _query_params.append(("region", region))
 
         # process the header parameters
@@ -20713,7 +20490,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -20732,11 +20508,9 @@ class DefaultApi:
             _path_params["movie_id"] = movie_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -20963,7 +20737,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -21231,7 +21004,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -21250,11 +21022,9 @@ class DefaultApi:
             _path_params["movie_id"] = movie_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -21507,7 +21277,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -21526,11 +21295,9 @@ class DefaultApi:
             _path_params["movie_id"] = movie_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -21789,7 +21556,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -21806,15 +21572,12 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if region is not None:
-
             _query_params.append(("region", region))
 
         # process the header parameters
@@ -22041,7 +21804,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -22315,7 +22077,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -22332,15 +22093,12 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if region is not None:
-
             _query_params.append(("region", region))
 
         # process the header parameters
@@ -22580,7 +22338,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -22599,7 +22356,6 @@ class DefaultApi:
             _path_params["movie_id"] = movie_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -22826,7 +22582,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -23068,7 +22823,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -23349,7 +23103,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -23379,7 +23132,6 @@ class DefaultApi:
                 _query_params.append(("end_date", end_date))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if start_date is not None:
@@ -23630,7 +23382,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -23649,7 +23400,6 @@ class DefaultApi:
             _path_params["person_id"] = person_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -23917,7 +23667,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -23936,11 +23685,9 @@ class DefaultApi:
             _path_params["person_id"] = person_id
         # process the query parameters
         if append_to_response is not None:
-
             _query_params.append(("append_to_response", append_to_response))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -24167,7 +23914,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -24409,7 +24155,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -24638,7 +24383,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -24891,7 +24635,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -24910,7 +24653,6 @@ class DefaultApi:
             _path_params["person_id"] = person_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -25150,7 +24892,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -25167,11 +24908,9 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -25411,7 +25150,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -25430,7 +25168,6 @@ class DefaultApi:
             _path_params["person_id"] = person_id
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -25670,7 +25407,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -25689,7 +25425,6 @@ class DefaultApi:
             _path_params["person_id"] = person_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -25916,7 +25651,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -26210,7 +25944,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -26227,23 +25960,18 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if query is not None:
-
             _query_params.append(("query", query))
 
         if include_adult is not None:
-
             _query_params.append(("include_adult", include_adult))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if region is not None:
-
             _query_params.append(("region", region))
 
         # process the header parameters
@@ -26483,7 +26211,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -26500,11 +26227,9 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if query is not None:
-
             _query_params.append(("query", query))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -26744,7 +26469,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -26761,11 +26485,9 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if query is not None:
-
             _query_params.append(("query", query))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -27070,7 +26792,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -27087,31 +26808,24 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if query is not None:
-
             _query_params.append(("query", query))
 
         if include_adult is not None:
-
             _query_params.append(("include_adult", include_adult))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         if primary_release_year is not None:
-
             _query_params.append(("primary_release_year", primary_release_year))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if region is not None:
-
             _query_params.append(("region", region))
 
         if year is not None:
-
             _query_params.append(("year", year))
 
         # process the header parameters
@@ -27377,7 +27091,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -27394,19 +27107,15 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if query is not None:
-
             _query_params.append(("query", query))
 
         if include_adult is not None:
-
             _query_params.append(("include_adult", include_adult))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -27672,7 +27381,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -27689,19 +27397,15 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if query is not None:
-
             _query_params.append(("query", query))
 
         if include_adult is not None:
-
             _query_params.append(("include_adult", include_adult))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -28023,7 +27727,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -28040,27 +27743,21 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if query is not None:
-
             _query_params.append(("query", query))
 
         if first_air_date_year is not None:
-
             _query_params.append(("first_air_date_year", first_air_date_year))
 
         if include_adult is not None:
-
             _query_params.append(("include_adult", include_adult))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if year is not None:
-
             _query_params.append(("year", year))
 
         # process the header parameters
@@ -28287,7 +27984,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -28548,7 +28244,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -28567,7 +28262,6 @@ class DefaultApi:
             _path_params["time_window"] = time_window
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -28813,7 +28507,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -28832,7 +28525,6 @@ class DefaultApi:
             _path_params["time_window"] = time_window
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -29078,7 +28770,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -29097,7 +28788,6 @@ class DefaultApi:
             _path_params["time_window"] = time_window
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -29343,7 +29033,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -29362,7 +29051,6 @@ class DefaultApi:
             _path_params["time_window"] = time_window
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -29641,7 +29329,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -29664,11 +29351,9 @@ class DefaultApi:
             _path_params["episode_number"] = episode_number
         # process the query parameters
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         if guest_session_id is not None:
-
             _query_params.append(("guest_session_id", guest_session_id))
 
         # process the header parameters
@@ -29973,7 +29658,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -29996,11 +29680,9 @@ class DefaultApi:
             _path_params["episode_number"] = episode_number
         # process the query parameters
         if guest_session_id is not None:
-
             _query_params.append(("guest_session_id", guest_session_id))
 
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         # process the header parameters
@@ -30241,7 +29923,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -30522,7 +30203,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -30545,7 +30225,6 @@ class DefaultApi:
             _path_params["episode_number"] = episode_number
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -30837,7 +30516,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -30860,11 +30538,9 @@ class DefaultApi:
             _path_params["episode_number"] = episode_number
         # process the query parameters
         if guest_session_id is not None:
-
             _query_params.append(("guest_session_id", guest_session_id))
 
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         # process the header parameters
@@ -31160,7 +30836,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -31183,11 +30858,9 @@ class DefaultApi:
             _path_params["episode_number"] = episode_number
         # process the query parameters
         if append_to_response is not None:
-
             _query_params.append(("append_to_response", append_to_response))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -31440,7 +31113,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -31686,7 +31358,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -31995,7 +31666,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -32018,11 +31688,9 @@ class DefaultApi:
             _path_params["episode_number"] = episode_number
         # process the query parameters
         if include_image_language is not None:
-
             _query_params.append(("include_image_language", include_image_language))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -32275,7 +31943,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -32588,7 +32255,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -32611,11 +32277,9 @@ class DefaultApi:
             _path_params["episode_number"] = episode_number
         # process the query parameters
         if include_video_language is not None:
-
             _query_params.append(("include_video_language", include_video_language))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -32881,7 +32545,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -32902,11 +32565,9 @@ class DefaultApi:
             _path_params["season_number"] = season_number
         # process the query parameters
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         if guest_session_id is not None:
-
             _query_params.append(("guest_session_id", guest_session_id))
 
         # process the header parameters
@@ -33159,7 +32820,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -33180,7 +32840,6 @@ class DefaultApi:
             _path_params["season_number"] = season_number
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -33446,7 +33105,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -33465,15 +33123,12 @@ class DefaultApi:
             _path_params["season_id"] = season_id
         # process the query parameters
         if end_date is not None:
-
             _query_params.append(("end_date", end_date))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if start_date is not None:
-
             _query_params.append(("start_date", start_date))
 
         # process the header parameters
@@ -33726,7 +33381,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -33747,7 +33401,6 @@ class DefaultApi:
             _path_params["season_number"] = season_number
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -34028,7 +33681,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -34049,11 +33701,9 @@ class DefaultApi:
             _path_params["season_number"] = season_number
         # process the query parameters
         if append_to_response is not None:
-
             _query_params.append(("append_to_response", append_to_response))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -34293,7 +33943,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -34591,7 +34240,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -34612,11 +34260,9 @@ class DefaultApi:
             _path_params["season_number"] = season_number
         # process the query parameters
         if include_image_language is not None:
-
             _query_params.append(("include_image_language", include_image_language))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -34856,7 +34502,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -35154,7 +34799,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -35175,11 +34819,9 @@ class DefaultApi:
             _path_params["season_number"] = season_number
         # process the query parameters
         if include_video_language is not None:
-
             _query_params.append(("include_video_language", include_video_language))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -35432,7 +35074,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -35453,7 +35094,6 @@ class DefaultApi:
             _path_params["season_number"] = season_number
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -35706,7 +35346,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -35725,11 +35364,9 @@ class DefaultApi:
             _path_params["series_id"] = series_id
         # process the query parameters
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         if guest_session_id is not None:
-
             _query_params.append(("guest_session_id", guest_session_id))
 
         # process the header parameters
@@ -36008,7 +35645,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -36027,11 +35663,9 @@ class DefaultApi:
             _path_params["series_id"] = series_id
         # process the query parameters
         if guest_session_id is not None:
-
             _query_params.append(("guest_session_id", guest_session_id))
 
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         # process the header parameters
@@ -36285,7 +35919,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -36304,7 +35937,6 @@ class DefaultApi:
             _path_params["series_id"] = series_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -36557,7 +36189,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -36574,15 +36205,12 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if timezone is not None:
-
             _query_params.append(("timezone", timezone))
 
         # process the header parameters
@@ -36809,7 +36437,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -37090,7 +36717,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -37109,15 +36735,12 @@ class DefaultApi:
             _path_params["series_id"] = series_id
         # process the query parameters
         if end_date is not None:
-
             _query_params.append(("end_date", end_date))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if start_date is not None:
-
             _query_params.append(("start_date", start_date))
 
         # process the header parameters
@@ -37344,7 +36967,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -37599,7 +37221,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -37618,7 +37239,6 @@ class DefaultApi:
             _path_params["series_id"] = series_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -37884,7 +37504,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -37903,11 +37522,9 @@ class DefaultApi:
             _path_params["series_id"] = series_id
         # process the query parameters
         if guest_session_id is not None:
-
             _query_params.append(("guest_session_id", guest_session_id))
 
         if session_id is not None:
-
             _query_params.append(("session_id", session_id))
 
         # process the header parameters
@@ -38177,7 +37794,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -38196,11 +37812,9 @@ class DefaultApi:
             _path_params["series_id"] = series_id
         # process the query parameters
         if append_to_response is not None:
-
             _query_params.append(("append_to_response", append_to_response))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -38427,7 +38041,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -38669,7 +38282,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -38952,7 +38564,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -38971,11 +38582,9 @@ class DefaultApi:
             _path_params["series_id"] = series_id
         # process the query parameters
         if include_image_language is not None:
-
             _query_params.append(("include_image_language", include_image_language))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -39202,7 +38811,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -39431,7 +39039,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -39697,7 +39304,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -39714,15 +39320,12 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if timezone is not None:
-
             _query_params.append(("timezone", timezone))
 
         # process the header parameters
@@ -39962,7 +39565,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -39979,11 +39581,9 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -40236,7 +39836,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -40255,11 +39854,9 @@ class DefaultApi:
             _path_params["series_id"] = series_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -40512,7 +40109,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -40531,11 +40127,9 @@ class DefaultApi:
             _path_params["series_id"] = series_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -40762,7 +40356,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -41030,7 +40623,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -41049,11 +40641,9 @@ class DefaultApi:
             _path_params["series_id"] = series_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -41293,7 +40883,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -41310,11 +40899,9 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -41541,7 +41128,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -41824,7 +41410,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -41843,11 +41428,9 @@ class DefaultApi:
             _path_params["series_id"] = series_id
         # process the query parameters
         if include_video_language is not None:
-
             _query_params.append(("include_video_language", include_video_language))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -42074,7 +41657,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -42329,7 +41911,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -42346,11 +41927,9 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if watch_region is not None:
-
             _query_params.append(("watch_region", watch_region))
 
         # process the header parameters
@@ -42577,7 +42156,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -42594,7 +42172,6 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -42834,7 +42411,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -42851,11 +42427,9 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         if watch_region is not None:
-
             _query_params.append(("watch_region", watch_region))
 
         # process the header parameters

@@ -43,7 +43,6 @@ async def test_auto_scrape_triggers_sync_when_seasons_missing():
             with patch(
                 "routers.secure.scrape.get_ranking_overrides", return_value=MagicMock()
             ):
-
                 # Execute
                 response = await auto_scrape(request)
 
@@ -90,7 +89,6 @@ async def test_auto_scrape_concurrency_returns_202():
             with patch(
                 "routers.secure.scrape.get_ranking_overrides", return_value=MagicMock()
             ):
-
                 # Execute
                 response = await auto_scrape(request)
 

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 class StreamRelation(Base):
     __tablename__ = "StreamRelation"
+    __mapper_args__ = {"confirm_deleted_rows": False}
 
     id: Mapped[int] = mapped_column(sqlalchemy.Integer, primary_key=True)
     parent_id: Mapped[int] = mapped_column(
@@ -23,6 +24,12 @@ class StreamRelation(Base):
     )
 
     __table_args__ = (
+        Index(
+            "uq_streamrelation_parent_id_child_id",
+            "parent_id",
+            "child_id",
+            unique=True,
+        ),
         Index("ix_streamrelation_parent_id", "parent_id"),
         Index("ix_streamrelation_child_id", "child_id"),
     )
@@ -30,6 +37,7 @@ class StreamRelation(Base):
 
 class StreamBlacklistRelation(Base):
     __tablename__ = "StreamBlacklistRelation"
+    __mapper_args__ = {"confirm_deleted_rows": False}
 
     id: Mapped[int] = mapped_column(sqlalchemy.Integer, primary_key=True)
     media_item_id: Mapped[int] = mapped_column(
@@ -40,6 +48,12 @@ class StreamBlacklistRelation(Base):
     )
 
     __table_args__ = (
+        Index(
+            "uq_streamblacklistrelation_media_item_id_stream_id",
+            "media_item_id",
+            "stream_id",
+            unique=True,
+        ),
         Index("ix_streamblacklistrelation_media_item_id", "media_item_id"),
         Index("ix_streamblacklistrelation_stream_id", "stream_id"),
     )

@@ -265,7 +265,6 @@ class AuthenticationApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -282,7 +281,6 @@ class AuthenticationApi:
         # process the path parameters
         # process the query parameters
         if return_url is not None:
-
             _query_params.append(("returnUrl", return_url))
 
         # process the header parameters
@@ -503,7 +501,6 @@ class AuthenticationApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}

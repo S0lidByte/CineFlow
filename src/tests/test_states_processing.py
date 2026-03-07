@@ -101,9 +101,9 @@ def test_downloaded_state(episode):
     episode.set("folder", "/path/to/folder")
     # When: The item has file and folder set
     # Then: The item's state should be Downloaded
-    assert (
-        episode.state == States.Downloaded
-    ), "Episode should transition to Downloaded state"
+    assert episode.state == States.Downloaded, (
+        "Episode should transition to Downloaded state"
+    )
 
 
 def test_completed_state(movie):
@@ -151,9 +151,9 @@ def test_process_event_transitions_movie(state, service, next_service, movie):
     if next_service is None:
         assert next_service_result is None, f"Next service should be None for {service}"
     else:
-        assert (
-            next_service_result == next_service
-        ), f"Next service should be {next_service} for {service}"
+        assert next_service_result == next_service, (
+            f"Next service should be {next_service} for {service}"
+        )
 
 
 @pytest.mark.parametrize(
@@ -189,9 +189,9 @@ def test_process_event_transition_shows(state, service, next_service, show):
     if next_service is None:
         assert next_service_result is None, f"Next service should be None for {service}"
     else:
-        assert (
-            next_service_result == next_service
-        ), f"Next service should be {next_service} for {service}"
+        assert next_service_result == next_service, (
+            f"Next service should be {next_service} for {service}"
+        )
 
 
 # test media item movie
@@ -223,9 +223,9 @@ def test_process_event_transitions_media_item_movie(
     if next_service is None:
         assert next_service_result is None, f"Next service should be None for {service}"
     else:
-        assert (
-            next_service_result == next_service
-        ), f"Next service should be {next_service} for {service}"
+        assert next_service_result == next_service, (
+            f"Next service should be {next_service} for {service}"
+        )
 
 
 # test media item show

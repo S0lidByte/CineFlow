@@ -314,7 +314,6 @@ class AuthenticationOAuthApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -331,19 +330,15 @@ class AuthenticationOAuthApi:
         # process the path parameters
         # process the query parameters
         if response_type is not None:
-
             _query_params.append(("response_type", response_type))
 
         if client_id is not None:
-
             _query_params.append(("client_id", client_id))
 
         if redirect_uri is not None:
-
             _query_params.append(("redirect_uri", redirect_uri))
 
         if state is not None:
-
             _query_params.append(("state", state))
 
         # process the header parameters
@@ -585,7 +580,6 @@ class AuthenticationOAuthApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -837,7 +831,6 @@ class AuthenticationOAuthApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}

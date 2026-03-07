@@ -274,7 +274,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -527,7 +526,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -781,7 +779,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1020,7 +1017,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1286,7 +1282,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1303,15 +1298,12 @@ class UsersApi:
         # process the path parameters
         # process the query parameters
         if take is not None:
-
             _query_params.append(("take", take))
 
         if skip is not None:
-
             _query_params.append(("skip", skip))
 
         if sort is not None:
-
             _query_params.append(("sort", sort))
 
         # process the header parameters
@@ -1544,7 +1536,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1796,7 +1787,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2048,7 +2038,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2300,7 +2289,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2546,7 +2534,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2788,7 +2775,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3043,7 +3029,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3294,7 +3279,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3538,7 +3522,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3793,7 +3776,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4047,7 +4029,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4315,7 +4296,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4334,11 +4314,9 @@ class UsersApi:
             _path_params["userId"] = user_id
         # process the query parameters
         if take is not None:
-
             _query_params.append(("take", take))
 
         if skip is not None:
-
             _query_params.append(("skip", skip))
 
         # process the header parameters
@@ -4565,7 +4543,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4820,7 +4797,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -5074,7 +5050,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -5329,7 +5304,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -5583,7 +5557,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -5838,7 +5811,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -6086,7 +6058,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -6341,7 +6312,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -6595,7 +6565,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -6850,7 +6819,6 @@ class UsersApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -6869,7 +6837,6 @@ class UsersApi:
             _path_params["userId"] = user_id
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters

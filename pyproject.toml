@@ -120,6 +120,14 @@ ignore = [
   "RET503",  # ruff: Ignore required explicit returns (is this desired?)
   "SLF001",  # private member accessing from pickle
   "B904",    # ruff: ignore raising exceptions from except for the API
+  "PLC0415", # ruff: allow local imports for circular dependencies
+  "ARG002", # ruff: allow unused arguments (common in overrides/tests)
+  "F841",   # ruff: allow unused variables
+  "PLW0603", # ruff: allow global statement
+  "F401",   # ruff: allow unused imports (often used for registration)
+  "C901",   # ruff: allow complex functions
+  "PLR0912", # ruff: allow too many branches
+  "PLR0915", # ruff: allow too many statements
 ]
 extend-select = [
   "I",   # isort

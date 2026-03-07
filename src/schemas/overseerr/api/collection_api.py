@@ -243,7 +243,6 @@ class CollectionApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -262,7 +261,6 @@ class CollectionApi:
             _path_params["collectionId"] = collection_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters

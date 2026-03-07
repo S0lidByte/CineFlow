@@ -299,7 +299,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -320,7 +319,6 @@ class SearchApi:
             _path_params["id"] = id
         # process the query parameters
         if type is not None:
-
             _query_params.append(("type", type))
 
         # process the header parameters
@@ -621,7 +619,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -640,7 +637,6 @@ class SearchApi:
             _path_params["type"] = type
         # process the query parameters
         if query is not None:
-
             _query_params.append(("query", query))
 
         # process the header parameters

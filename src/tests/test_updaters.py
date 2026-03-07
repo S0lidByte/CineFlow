@@ -59,7 +59,6 @@ def mock_settings():
         ) as mock_jellyfin_settings,
         patch("program.services.updaters.settings_manager") as mock_main_settings,
     ):
-
         # Plex settings
         mock_plex_settings.settings.updaters.plex.enabled = False
         mock_plex_settings.settings.updaters.plex.token = "test_token"

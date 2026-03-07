@@ -250,7 +250,6 @@ class TvApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -269,7 +268,6 @@ class TvApi:
             _path_params["tvId"] = tv_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -496,7 +494,6 @@ class TvApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -764,7 +761,6 @@ class TvApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -783,11 +779,9 @@ class TvApi:
             _path_params["tvId"] = tv_id
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -1040,7 +1034,6 @@ class TvApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1061,7 +1054,6 @@ class TvApi:
             _path_params["seasonId"] = season_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -1314,7 +1306,6 @@ class TvApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1333,11 +1324,9 @@ class TvApi:
             _path_params["tvId"] = tv_id
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters

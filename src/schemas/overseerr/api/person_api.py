@@ -246,7 +246,6 @@ class PersonApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -265,7 +264,6 @@ class PersonApi:
             _path_params["personId"] = person_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -505,7 +503,6 @@ class PersonApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -524,7 +521,6 @@ class PersonApi:
             _path_params["personId"] = person_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters

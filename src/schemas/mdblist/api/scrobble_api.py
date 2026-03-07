@@ -241,7 +241,6 @@ class ScrobbleApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -258,7 +257,6 @@ class ScrobbleApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -501,7 +499,6 @@ class ScrobbleApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -518,7 +515,6 @@ class ScrobbleApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -776,7 +772,6 @@ class ScrobbleApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -793,7 +788,6 @@ class ScrobbleApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -1048,7 +1042,6 @@ class ScrobbleApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1065,7 +1058,6 @@ class ScrobbleApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters

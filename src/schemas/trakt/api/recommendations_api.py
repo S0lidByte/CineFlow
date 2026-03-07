@@ -298,7 +298,6 @@ class RecommendationsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -315,11 +314,9 @@ class RecommendationsApi:
         # process the path parameters
         # process the query parameters
         if ignore_collected is not None:
-
             _query_params.append(("ignore_collected", ignore_collected))
 
         if ignore_watchlisted is not None:
-
             _query_params.append(("ignore_watchlisted", ignore_watchlisted))
 
         # process the header parameters
@@ -613,7 +610,6 @@ class RecommendationsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -630,11 +626,9 @@ class RecommendationsApi:
         # process the path parameters
         # process the query parameters
         if ignore_collected is not None:
-
             _query_params.append(("ignore_collected", ignore_collected))
 
         if ignore_watchlisted is not None:
-
             _query_params.append(("ignore_watchlisted", ignore_watchlisted))
 
         # process the header parameters
@@ -903,7 +897,6 @@ class RecommendationsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1181,7 +1174,6 @@ class RecommendationsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}

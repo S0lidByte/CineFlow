@@ -1004,7 +1004,6 @@ async def session_action(
             # Update Season States (Pause unselected / Unpause selected)
             # Update Season States (Pause unselected / Unpause selected)
             if isinstance(item, Show) and active_seasons:
-
                 logger.info(
                     f"Updating season states for {item.log_string}. Active seasons: {active_seasons}"
                 )

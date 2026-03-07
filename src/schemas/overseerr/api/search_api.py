@@ -266,7 +266,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -283,7 +282,6 @@ class SearchApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -510,7 +508,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -527,7 +524,6 @@ class SearchApi:
         # process the path parameters
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -780,7 +776,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -799,11 +794,9 @@ class SearchApi:
             _path_params["keywordId"] = keyword_id
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -1056,7 +1049,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1075,11 +1067,9 @@ class SearchApi:
             _path_params["genreId"] = genre_id
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -1501,7 +1491,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1518,67 +1507,51 @@ class SearchApi:
         # process the path parameters
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         if genre is not None:
-
             _query_params.append(("genre", genre))
 
         if studio is not None:
-
             _query_params.append(("studio", studio))
 
         if keywords is not None:
-
             _query_params.append(("keywords", keywords))
 
         if sort_by is not None:
-
             _query_params.append(("sortBy", sort_by))
 
         if primary_release_date_gte is not None:
-
             _query_params.append(("primaryReleaseDateGte", primary_release_date_gte))
 
         if primary_release_date_lte is not None:
-
             _query_params.append(("primaryReleaseDateLte", primary_release_date_lte))
 
         if with_runtime_gte is not None:
-
             _query_params.append(("withRuntimeGte", with_runtime_gte))
 
         if with_runtime_lte is not None:
-
             _query_params.append(("withRuntimeLte", with_runtime_lte))
 
         if vote_average_gte is not None:
-
             _query_params.append(("voteAverageGte", vote_average_gte))
 
         if vote_average_lte is not None:
-
             _query_params.append(("voteAverageLte", vote_average_lte))
 
         if vote_count_gte is not None:
-
             _query_params.append(("voteCountGte", vote_count_gte))
 
         if vote_count_lte is not None:
-
             _query_params.append(("voteCountLte", vote_count_lte))
 
         if watch_region is not None:
-
             _query_params.append(("watchRegion", watch_region))
 
         if watch_providers is not None:
-
             _query_params.append(("watchProviders", watch_providers))
 
         # process the header parameters
@@ -1831,7 +1804,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1850,11 +1822,9 @@ class SearchApi:
             _path_params["language"] = language
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language2 is not None:
-
             _query_params.append(("language", language2))
 
         # process the header parameters
@@ -2107,7 +2077,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2126,11 +2095,9 @@ class SearchApi:
             _path_params["studioId"] = studio_id
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -2370,7 +2337,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2387,11 +2353,9 @@ class SearchApi:
         # process the path parameters
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -2631,7 +2595,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2648,11 +2611,9 @@ class SearchApi:
         # process the path parameters
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -2905,7 +2866,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2924,11 +2884,9 @@ class SearchApi:
             _path_params["genreId"] = genre_id
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -3350,7 +3308,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3367,67 +3324,51 @@ class SearchApi:
         # process the path parameters
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         if genre is not None:
-
             _query_params.append(("genre", genre))
 
         if network is not None:
-
             _query_params.append(("network", network))
 
         if keywords is not None:
-
             _query_params.append(("keywords", keywords))
 
         if sort_by is not None:
-
             _query_params.append(("sortBy", sort_by))
 
         if first_air_date_gte is not None:
-
             _query_params.append(("firstAirDateGte", first_air_date_gte))
 
         if first_air_date_lte is not None:
-
             _query_params.append(("firstAirDateLte", first_air_date_lte))
 
         if with_runtime_gte is not None:
-
             _query_params.append(("withRuntimeGte", with_runtime_gte))
 
         if with_runtime_lte is not None:
-
             _query_params.append(("withRuntimeLte", with_runtime_lte))
 
         if vote_average_gte is not None:
-
             _query_params.append(("voteAverageGte", vote_average_gte))
 
         if vote_average_lte is not None:
-
             _query_params.append(("voteAverageLte", vote_average_lte))
 
         if vote_count_gte is not None:
-
             _query_params.append(("voteCountGte", vote_count_gte))
 
         if vote_count_lte is not None:
-
             _query_params.append(("voteCountLte", vote_count_lte))
 
         if watch_region is not None:
-
             _query_params.append(("watchRegion", watch_region))
 
         if watch_providers is not None:
-
             _query_params.append(("watchProviders", watch_providers))
 
         # process the header parameters
@@ -3680,7 +3621,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3699,11 +3639,9 @@ class SearchApi:
             _path_params["language"] = language
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language2 is not None:
-
             _query_params.append(("language", language2))
 
         # process the header parameters
@@ -3956,7 +3894,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3975,11 +3912,9 @@ class SearchApi:
             _path_params["networkId"] = network_id
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -4219,7 +4154,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4236,11 +4170,9 @@ class SearchApi:
         # process the path parameters
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -4464,7 +4396,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4481,7 +4412,6 @@ class SearchApi:
         # process the path parameters
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -4721,7 +4651,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4738,11 +4667,9 @@ class SearchApi:
         # process the path parameters
         # process the query parameters
         if query is not None:
-
             _query_params.append(("query", query))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters
@@ -4995,7 +4922,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -5012,15 +4938,12 @@ class SearchApi:
         # process the path parameters
         # process the query parameters
         if query is not None:
-
             _query_params.append(("query", query))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -5260,7 +5183,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -5277,11 +5199,9 @@ class SearchApi:
         # process the path parameters
         # process the query parameters
         if query is not None:
-
             _query_params.append(("query", query))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters

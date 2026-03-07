@@ -1,4 +1,4 @@
-﻿"""Overseerr API client"""
+"""Overseerr API client"""
 
 from typing import TYPE_CHECKING, Literal
 

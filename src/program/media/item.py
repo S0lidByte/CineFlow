@@ -34,6 +34,33 @@ if TYPE_CHECKING:
 TMediaItem = TypeVar("TMediaItem", bound="MediaItem")
 
 
+def _dedupe_stream_list_in_place(items: list[Stream]) -> None:
+    """Deduplicate stream objects in-place by stream id/infohash while preserving order."""
+
+    seen_ids = set[int]()
+    seen_hashes = set[str]()
+    unique_items: list[Stream] = []
+
+    for stream in items:
+        stream_id = getattr(stream, "id", None)
+        infohash = getattr(stream, "infohash", None)
+
+        if stream_id is not None:
+            if stream_id in seen_ids:
+                continue
+            seen_ids.add(stream_id)
+
+        if infohash:
+            if infohash in seen_hashes:
+                continue
+            seen_hashes.add(infohash)
+
+        unique_items.append(stream)
+
+    if len(unique_items) != len(items):
+        items[:] = unique_items
+
+
 class MediaItem(MappedAsDataclass, Base, kw_only=True):
     """MediaItem class"""
 
@@ -281,6 +308,9 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
     def blacklist_stream(self, stream: Stream) -> bool:
         """Blacklist a stream by moving it from streams to blacklisted_streams."""
 
+        _dedupe_stream_list_in_place(self.streams)
+        _dedupe_stream_list_in_place(self.blacklisted_streams)
+
         if stream in self.streams:
             self.streams.remove(stream)
 
@@ -295,6 +325,9 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
 
     def unblacklist_stream(self, stream: Stream) -> None:
         """Unblacklist a stream by moving it from blacklisted_streams to streams."""
+
+        _dedupe_stream_list_in_place(self.streams)
+        _dedupe_stream_list_in_place(self.blacklisted_streams)
 
         if stream in self.blacklisted_streams:
             self.blacklisted_streams.remove(stream)

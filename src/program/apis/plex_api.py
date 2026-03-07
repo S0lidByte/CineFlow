@@ -1,4 +1,4 @@
-﻿from typing import Literal, cast
+from typing import Literal, cast
 
 import regex
 from loguru import logger
@@ -99,9 +99,7 @@ class PlexAPI:
 
         class ResponseData(BaseModel):
             class MediaContainerModel(BaseModel):
-
                 class MetadataModel(BaseModel):
-
                     Guid: list[GuidModel]
 
                 Metadata: list[MetadataModel]

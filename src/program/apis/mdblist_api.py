@@ -1,4 +1,4 @@
-﻿from typing import Literal
+from typing import Literal
 
 from loguru import logger
 from pydantic import BaseModel, StrictInt, StrictStr

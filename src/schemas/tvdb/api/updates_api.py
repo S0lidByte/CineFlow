@@ -281,7 +281,6 @@ class UpdatesApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -298,19 +297,15 @@ class UpdatesApi:
         # process the path parameters
         # process the query parameters
         if since is not None:
-
             _query_params.append(("since", since))
 
         if type is not None:
-
             _query_params.append(("type", type))
 
         if action is not None:
-
             _query_params.append(("action", action))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         # process the header parameters

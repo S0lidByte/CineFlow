@@ -328,7 +328,9 @@ class MediaStream:
                                     )
 
                                     with benchmark(
-                                        log=lambda duration, conn=connection, start=start_read_position: (
+                                        log=lambda duration,
+                                        conn=connection,
+                                        start=start_read_position: (
                                             logger.log(
                                                 "STREAM",
                                                 self.build_log_message(
@@ -364,7 +366,9 @@ class MediaStream:
                                                 )
 
                                             with benchmark(
-                                                log=lambda duration, label=chunk_label, range_label=chunk_range_label: (
+                                                log=lambda duration,
+                                                label=chunk_label,
+                                                range_label=chunk_range_label: (
                                                     logger.log(
                                                         "STREAM",
                                                         self.build_log_message(
@@ -1081,8 +1085,7 @@ class MediaStream:
             # Playback has already begun, so the header has been served
             # for this file, but the scan happens on a new file handle
             # and is the first request to be made.
-            start > self.config.header_size
-            and self.recent_reads.last_read_end is None
+            start > self.config.header_size and self.recent_reads.last_read_end is None
         ):
             return "general_scan"
 

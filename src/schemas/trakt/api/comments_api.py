@@ -296,7 +296,6 @@ class CommentsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -574,7 +573,6 @@ class CommentsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -858,7 +856,6 @@ class CommentsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1174,7 +1171,6 @@ class CommentsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1195,7 +1191,6 @@ class CommentsApi:
             _path_params["type"] = type
         # process the query parameters
         if include_replies is not None:
-
             _query_params.append(("include_replies", include_replies))
 
         # process the header parameters
@@ -1496,7 +1491,6 @@ class CommentsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1517,7 +1511,6 @@ class CommentsApi:
             _path_params["type"] = type
         # process the query parameters
         if include_replies is not None:
-
             _query_params.append(("include_replies", include_replies))
 
         # process the header parameters
@@ -1786,7 +1779,6 @@ class CommentsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2070,7 +2062,6 @@ class CommentsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2386,7 +2377,6 @@ class CommentsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2407,7 +2397,6 @@ class CommentsApi:
             _path_params["type"] = type
         # process the query parameters
         if include_replies is not None:
-
             _query_params.append(("include_replies", include_replies))
 
         # process the header parameters
@@ -2676,7 +2665,6 @@ class CommentsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2954,7 +2942,6 @@ class CommentsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3267,7 +3254,6 @@ class CommentsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3563,7 +3549,6 @@ class CommentsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3860,7 +3845,6 @@ class CommentsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}

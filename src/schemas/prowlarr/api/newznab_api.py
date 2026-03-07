@@ -252,7 +252,6 @@ class NewznabApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -271,11 +270,9 @@ class NewznabApi:
             _path_params["id"] = id
         # process the query parameters
         if link is not None:
-
             _query_params.append(("link", link))
 
         if file is not None:
-
             _query_params.append(("file", file))
 
         # process the header parameters
@@ -909,7 +906,6 @@ class NewznabApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -928,131 +924,99 @@ class NewznabApi:
             _path_params["id"] = id
         # process the query parameters
         if t is not None:
-
             _query_params.append(("t", t))
 
         if q is not None:
-
             _query_params.append(("q", q))
 
         if cat is not None:
-
             _query_params.append(("cat", cat))
 
         if imdbid is not None:
-
             _query_params.append(("imdbid", imdbid))
 
         if tmdbid is not None:
-
             _query_params.append(("tmdbid", tmdbid))
 
         if extended is not None:
-
             _query_params.append(("extended", extended))
 
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if offset is not None:
-
             _query_params.append(("offset", offset))
 
         if minage is not None:
-
             _query_params.append(("minage", minage))
 
         if maxage is not None:
-
             _query_params.append(("maxage", maxage))
 
         if minsize is not None:
-
             _query_params.append(("minsize", minsize))
 
         if maxsize is not None:
-
             _query_params.append(("maxsize", maxsize))
 
         if rid is not None:
-
             _query_params.append(("rid", rid))
 
         if tvmazeid is not None:
-
             _query_params.append(("tvmazeid", tvmazeid))
 
         if traktid is not None:
-
             _query_params.append(("traktid", traktid))
 
         if tvdbid is not None:
-
             _query_params.append(("tvdbid", tvdbid))
 
         if doubanid is not None:
-
             _query_params.append(("doubanid", doubanid))
 
         if season is not None:
-
             _query_params.append(("season", season))
 
         if ep is not None:
-
             _query_params.append(("ep", ep))
 
         if album is not None:
-
             _query_params.append(("album", album))
 
         if artist is not None:
-
             _query_params.append(("artist", artist))
 
         if label is not None:
-
             _query_params.append(("label", label))
 
         if track is not None:
-
             _query_params.append(("track", track))
 
         if year is not None:
-
             _query_params.append(("year", year))
 
         if genre is not None:
-
             _query_params.append(("genre", genre))
 
         if author is not None:
-
             _query_params.append(("author", author))
 
         if title is not None:
-
             _query_params.append(("title", title))
 
         if publisher is not None:
-
             _query_params.append(("publisher", publisher))
 
         if configured is not None:
-
             _query_params.append(("configured", configured))
 
         if source is not None:
-
             _query_params.append(("source", source))
 
         if host is not None:
-
             _query_params.append(("host", host))
 
         if server is not None:
-
             _query_params.append(("server", server))
 
         # process the header parameters
@@ -1686,7 +1650,6 @@ class NewznabApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1705,131 +1668,99 @@ class NewznabApi:
             _path_params["id"] = id
         # process the query parameters
         if t is not None:
-
             _query_params.append(("t", t))
 
         if q is not None:
-
             _query_params.append(("q", q))
 
         if cat is not None:
-
             _query_params.append(("cat", cat))
 
         if imdbid is not None:
-
             _query_params.append(("imdbid", imdbid))
 
         if tmdbid is not None:
-
             _query_params.append(("tmdbid", tmdbid))
 
         if extended is not None:
-
             _query_params.append(("extended", extended))
 
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if offset is not None:
-
             _query_params.append(("offset", offset))
 
         if minage is not None:
-
             _query_params.append(("minage", minage))
 
         if maxage is not None:
-
             _query_params.append(("maxage", maxage))
 
         if minsize is not None:
-
             _query_params.append(("minsize", minsize))
 
         if maxsize is not None:
-
             _query_params.append(("maxsize", maxsize))
 
         if rid is not None:
-
             _query_params.append(("rid", rid))
 
         if tvmazeid is not None:
-
             _query_params.append(("tvmazeid", tvmazeid))
 
         if traktid is not None:
-
             _query_params.append(("traktid", traktid))
 
         if tvdbid is not None:
-
             _query_params.append(("tvdbid", tvdbid))
 
         if doubanid is not None:
-
             _query_params.append(("doubanid", doubanid))
 
         if season is not None:
-
             _query_params.append(("season", season))
 
         if ep is not None:
-
             _query_params.append(("ep", ep))
 
         if album is not None:
-
             _query_params.append(("album", album))
 
         if artist is not None:
-
             _query_params.append(("artist", artist))
 
         if label is not None:
-
             _query_params.append(("label", label))
 
         if track is not None:
-
             _query_params.append(("track", track))
 
         if year is not None:
-
             _query_params.append(("year", year))
 
         if genre is not None:
-
             _query_params.append(("genre", genre))
 
         if author is not None:
-
             _query_params.append(("author", author))
 
         if title is not None:
-
             _query_params.append(("title", title))
 
         if publisher is not None:
-
             _query_params.append(("publisher", publisher))
 
         if configured is not None:
-
             _query_params.append(("configured", configured))
 
         if source is not None:
-
             _query_params.append(("source", source))
 
         if host is not None:
-
             _query_params.append(("host", host))
 
         if server is not None:
-
             _query_params.append(("server", server))
 
         # process the header parameters
@@ -2073,7 +2004,6 @@ class NewznabApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2092,11 +2022,9 @@ class NewznabApi:
             _path_params["id"] = id
         # process the query parameters
         if link is not None:
-
             _query_params.append(("link", link))
 
         if file is not None:
-
             _query_params.append(("file", file))
 
         # process the header parameters

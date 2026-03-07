@@ -159,7 +159,7 @@ class RivenVFS(pyfuse3.Operations):
         if free_bytes > 0 and configured_bytes > int(free_bytes * 0.9):
             effective_max_bytes = int(free_bytes * 0.9)
             logger.bind(component="RivenVFS").warning(
-                f"cache_max_size_mb clamped to available space: {effective_max_bytes // (1024*1024)} MB"
+                f"cache_max_size_mb clamped to available space: {effective_max_bytes // (1024 * 1024)} MB"
             )
 
         di[Cache] = Cache(

@@ -577,7 +577,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -594,55 +593,42 @@ class SearchApi:
         # process the path parameters
         # process the query parameters
         if query is not None:
-
             _query_params.append(("query", query))
 
         if q is not None:
-
             _query_params.append(("q", q))
 
         if type is not None:
-
             _query_params.append(("type", type))
 
         if year is not None:
-
             _query_params.append(("year", year))
 
         if company is not None:
-
             _query_params.append(("company", company))
 
         if country is not None:
-
             _query_params.append(("country", country))
 
         if director is not None:
-
             _query_params.append(("director", director))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         if primary_type is not None:
-
             _query_params.append(("primaryType", primary_type))
 
         if network is not None:
-
             _query_params.append(("network", network))
 
         if remote_id is not None:
-
             _query_params.append(("remote_id", remote_id))
 
         if offset is not None:
-
             _query_params.append(("offset", offset))
 
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         # process the header parameters
@@ -887,7 +873,6 @@ class SearchApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}

@@ -383,7 +383,6 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
             }
 
             for future, indexer in future_to_indexer.items():
-
                 try:
                     result = future.result(timeout=self.timeout)
 

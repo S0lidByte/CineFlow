@@ -313,7 +313,6 @@ class UpdatesApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -330,19 +329,15 @@ class UpdatesApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         if since is not None:
-
             _query_params.append(("since", since))
 
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if cursor is not None:
-
             _query_params.append(("cursor", cursor))
 
         # process the header parameters
@@ -647,7 +642,6 @@ class UpdatesApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -664,19 +658,15 @@ class UpdatesApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         if since is not None:
-
             _query_params.append(("since", since))
 
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if cursor is not None:
-
             _query_params.append(("cursor", cursor))
 
         # process the header parameters

@@ -300,7 +300,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -317,11 +316,9 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         if anime is not None:
-
             _query_params.append(("anime", anime))
 
         # process the header parameters
@@ -567,7 +564,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -586,7 +582,6 @@ class DefaultApi:
             _path_params["listid"] = listid
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -845,7 +840,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -866,7 +860,6 @@ class DefaultApi:
             _path_params["listname"] = listname
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -1106,7 +1099,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1125,7 +1117,6 @@ class DefaultApi:
             _path_params["listid"] = listid
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -1624,7 +1615,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1643,59 +1633,45 @@ class DefaultApi:
             _path_params["listid"] = listid
         # process the query parameters
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if offset is not None:
-
             _query_params.append(("offset", offset))
 
         if append_to_response is not None:
-
             _query_params.append(("append_to_response", append_to_response))
 
         if filter_title is not None:
-
             _query_params.append(("filter_title", filter_title))
 
         if filter_genre is not None:
-
             _query_params.append(("filter_genre", filter_genre))
 
         if genre_operator is not None:
-
             _query_params.append(("genre_operator", genre_operator))
 
         if released_from is not None:
-
             _query_params.append(("released_from", released_from))
 
         if released_to is not None:
-
             _query_params.append(("released_to", released_to))
 
         if filter_score_min is not None:
-
             _query_params.append(("filter_score_min", filter_score_min))
 
         if filter_score_max is not None:
-
             _query_params.append(("filter_score_max", filter_score_max))
 
         if sort is not None:
-
             _query_params.append(("sort", sort))
 
         if order is not None:
-
             _query_params.append(("order", order))
 
         if unified is not None:
-
             _query_params.append(("unified", unified))
 
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -2213,7 +2189,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2234,59 +2209,45 @@ class DefaultApi:
             _path_params["listname"] = listname
         # process the query parameters
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if offset is not None:
-
             _query_params.append(("offset", offset))
 
         if append_to_response is not None:
-
             _query_params.append(("append_to_response", append_to_response))
 
         if filter_title is not None:
-
             _query_params.append(("filter_title", filter_title))
 
         if filter_genre is not None:
-
             _query_params.append(("filter_genre", filter_genre))
 
         if genre_operator is not None:
-
             _query_params.append(("genre_operator", genre_operator))
 
         if released_from is not None:
-
             _query_params.append(("released_from", released_from))
 
         if released_to is not None:
-
             _query_params.append(("released_to", released_to))
 
         if filter_score_min is not None:
-
             _query_params.append(("filter_score_min", filter_score_min))
 
         if filter_score_max is not None:
-
             _query_params.append(("filter_score_max", filter_score_max))
 
         if sort is not None:
-
             _query_params.append(("sort", sort))
 
         if order is not None:
-
             _query_params.append(("order", order))
 
         if unified is not None:
-
             _query_params.append(("unified", unified))
 
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -2580,7 +2541,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2603,11 +2563,9 @@ class DefaultApi:
             _path_params["media_id"] = media_id
         # process the query parameters
         if append_to_response is not None:
-
             _query_params.append(("append_to_response", append_to_response))
 
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -2873,7 +2831,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2894,7 +2851,6 @@ class DefaultApi:
             _path_params["media_type"] = media_type
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -3127,7 +3083,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3144,7 +3099,6 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -3390,7 +3344,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3407,11 +3360,9 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         if sort is not None:
-
             _query_params.append(("sort", sort))
 
         # process the header parameters
@@ -3677,7 +3628,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -3698,7 +3648,6 @@ class DefaultApi:
             _path_params["return_rating"] = return_rating
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -4039,7 +3988,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4058,27 +4006,21 @@ class DefaultApi:
             _path_params["media_type"] = media_type
         # process the query parameters
         if query is not None:
-
             _query_params.append(("query", query))
 
         if limit_by_score is not None:
-
             _query_params.append(("limit_by_score", limit_by_score))
 
         if sort_by_score is not None:
-
             _query_params.append(("sort_by_score", sort_by_score))
 
         if year is not None:
-
             _query_params.append(("year", year))
 
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -4305,7 +4247,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4322,7 +4263,6 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -4593,7 +4533,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4610,15 +4549,12 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if offset is not None:
-
             _query_params.append(("offset", offset))
 
         # process the header parameters
@@ -4877,7 +4813,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -4896,11 +4831,9 @@ class DefaultApi:
             _path_params["userid"] = userid
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         if sort is not None:
-
             _query_params.append(("sort", sort))
 
         # process the header parameters
@@ -5159,7 +5092,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -5178,11 +5110,9 @@ class DefaultApi:
             _path_params["username"] = username
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         if sort is not None:
-
             _query_params.append(("sort", sort))
 
         # process the header parameters
@@ -5422,7 +5352,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -5439,11 +5368,9 @@ class DefaultApi:
         # process the path parameters
         # process the query parameters
         if query is not None:
-
             _query_params.append(("query", query))
 
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -5702,7 +5629,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -5721,7 +5647,6 @@ class DefaultApi:
             _path_params["listid"] = listid
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -6005,7 +5930,6 @@ class DefaultApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -6026,7 +5950,6 @@ class DefaultApi:
             _path_params["listname"] = listname
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters

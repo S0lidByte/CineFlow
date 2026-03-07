@@ -252,7 +252,6 @@ class MoviesApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -271,7 +270,6 @@ class MoviesApi:
             _path_params["movieId"] = movie_id
         # process the query parameters
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -498,7 +496,6 @@ class MoviesApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -740,7 +737,6 @@ class MoviesApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1008,7 +1004,6 @@ class MoviesApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1027,11 +1022,9 @@ class MoviesApi:
             _path_params["movieId"] = movie_id
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters
@@ -1284,7 +1277,6 @@ class MoviesApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1303,11 +1295,9 @@ class MoviesApi:
             _path_params["movieId"] = movie_id
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if language is not None:
-
             _query_params.append(("language", language))
 
         # process the header parameters

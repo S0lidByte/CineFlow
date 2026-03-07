@@ -405,7 +405,6 @@ class WatchlistApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -422,43 +421,33 @@ class WatchlistApi:
         # process the path parameters
         # process the query parameters
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if offset is not None:
-
             _query_params.append(("offset", offset))
 
         if append_to_response is not None:
-
             _query_params.append(("append_to_response", append_to_response))
 
         if filter_genre is not None:
-
             _query_params.append(("filter_genre", filter_genre))
 
         if filter_score_min is not None:
-
             _query_params.append(("filter_score_min", filter_score_min))
 
         if filter_score_max is not None:
-
             _query_params.append(("filter_score_max", filter_score_max))
 
         if sort is not None:
-
             _query_params.append(("sort", sort))
 
         if order is not None:
-
             _query_params.append(("order", order))
 
         if unified is not None:
-
             _query_params.append(("unified", unified))
 
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -711,7 +700,6 @@ class WatchlistApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -730,7 +718,6 @@ class WatchlistApi:
             _path_params["action"] = action
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters

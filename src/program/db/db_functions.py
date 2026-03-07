@@ -440,7 +440,6 @@ def run_thread_with_db_item(
                 )
 
                 if input_item:
-
                     from program.settings import settings_manager
 
                     # Execute service within the settings context if overrides exist
@@ -582,12 +581,14 @@ def hard_reset_database() -> None:
         try:
             # Terminate existing connections for PostgreSQL
             if db.engine.name == "postgresql":
-                connection.execute(text("""
+                connection.execute(
+                    text("""
                             SELECT pg_terminate_backend(pid)
                             FROM pg_stat_activity
                             WHERE datname = current_database()
                             AND pid <> pg_backend_pid()
-                        """))
+                        """)
+                )
 
                 # Drop and recreate schema
                 connection.execute(text("DROP SCHEMA public CASCADE"))

@@ -1,4 +1,4 @@
-﻿"""Listrr API"""
+"""Listrr API"""
 
 from program.utils.request import SmartSession
 

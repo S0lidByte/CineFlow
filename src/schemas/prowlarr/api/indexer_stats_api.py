@@ -280,7 +280,6 @@ class IndexerStatsApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -323,15 +322,12 @@ class IndexerStatsApi:
                 _query_params.append(("endDate", end_date))
 
         if indexers is not None:
-
             _query_params.append(("indexers", indexers))
 
         if protocols is not None:
-
             _query_params.append(("protocols", protocols))
 
         if tags is not None:
-
             _query_params.append(("tags", tags))
 
         # process the header parameters

@@ -232,7 +232,6 @@ class OtherApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -474,7 +473,6 @@ class OtherApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -491,7 +489,6 @@ class OtherApi:
         # process the path parameters
         # process the query parameters
         if watch_region is not None:
-
             _query_params.append(("watchRegion", watch_region))
 
         # process the header parameters
@@ -705,7 +702,6 @@ class OtherApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -945,7 +941,6 @@ class OtherApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -962,7 +957,6 @@ class OtherApi:
         # process the path parameters
         # process the query parameters
         if watch_region is not None:
-
             _query_params.append(("watchRegion", watch_region))
 
         # process the header parameters

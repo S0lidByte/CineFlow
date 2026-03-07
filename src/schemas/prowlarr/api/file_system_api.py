@@ -252,7 +252,6 @@ class FileSystemApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -269,15 +268,12 @@ class FileSystemApi:
         # process the path parameters
         # process the query parameters
         if path is not None:
-
             _query_params.append(("path", path))
 
         if include_files is not None:
-
             _query_params.append(("includeFiles", include_files))
 
         if allow_folders_without_trailing_slashes is not None:
-
             _query_params.append(
                 (
                     "allowFoldersWithoutTrailingSlashes",
@@ -500,7 +496,6 @@ class FileSystemApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -517,7 +512,6 @@ class FileSystemApi:
         # process the path parameters
         # process the query parameters
         if path is not None:
-
             _query_params.append(("path", path))
 
         # process the header parameters

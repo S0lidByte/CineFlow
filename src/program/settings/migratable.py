@@ -1,4 +1,4 @@
-﻿from typing import Any
+from typing import Any
 
 from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
@@ -14,9 +14,7 @@ class MigratableBaseModel(BaseModel):
                     field.default_factory is not None
                     and field.default_factory != PydanticUndefined
                 ):
-                    data[field_name] = (
-                        field.default_factory()
-                    )  # pyright: ignore[reportCallIssue]
+                    data[field_name] = field.default_factory()  # pyright: ignore[reportCallIssue]
                 # Then check for default value
                 elif field.default is not None and field.default != PydanticUndefined:
                     data[field_name] = field.default

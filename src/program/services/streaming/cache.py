@@ -404,7 +404,7 @@ class Cache:
 
                 if read_time > 0.05:  # Log slow reads (>50ms)
                     logger.warning(
-                        f"Slow cache read: {len(result)/(1024*1024):.2f}MB in {read_time*1000:.0f}ms from {chunk_file}"
+                        f"Slow cache read: {len(result) / (1024 * 1024):.2f}MB in {read_time * 1000:.0f}ms from {chunk_file}"
                     )
 
                 if len(result) == needed_len:

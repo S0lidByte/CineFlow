@@ -323,7 +323,6 @@ class SyncApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -340,19 +339,15 @@ class SyncApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if since is not None:
-
             _query_params.append(("since", since))
 
         # process the header parameters
@@ -643,7 +638,6 @@ class SyncApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -660,19 +654,15 @@ class SyncApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if since is not None:
-
             _query_params.append(("since", since))
 
         # process the header parameters
@@ -969,7 +959,6 @@ class SyncApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -986,19 +975,15 @@ class SyncApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if since is not None:
-
             _query_params.append(("since", since))
 
         # process the header parameters
@@ -1250,7 +1235,6 @@ class SyncApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1267,7 +1251,6 @@ class SyncApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -1519,7 +1502,6 @@ class SyncApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1536,7 +1518,6 @@ class SyncApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -1788,7 +1769,6 @@ class SyncApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1805,7 +1785,6 @@ class SyncApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -2083,7 +2062,6 @@ class SyncApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2100,19 +2078,15 @@ class SyncApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if since is not None:
-
             _query_params.append(("since", since))
 
         # process the header parameters
@@ -2339,7 +2313,6 @@ class SyncApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2356,7 +2329,6 @@ class SyncApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         # process the header parameters
@@ -2622,7 +2594,6 @@ class SyncApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2639,19 +2610,15 @@ class SyncApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if since is not None:
-
             _query_params.append(("since", since))
 
         # process the header parameters
@@ -2917,7 +2884,6 @@ class SyncApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -2934,19 +2900,15 @@ class SyncApi:
         # process the path parameters
         # process the query parameters
         if apikey is not None:
-
             _query_params.append(("apikey", apikey))
 
         if page is not None:
-
             _query_params.append(("page", page))
 
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         if since is not None:
-
             _query_params.append(("since", since))
 
         # process the header parameters

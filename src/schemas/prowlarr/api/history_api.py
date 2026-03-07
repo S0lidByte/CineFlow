@@ -324,7 +324,6 @@ class HistoryApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {
@@ -344,35 +343,27 @@ class HistoryApi:
         # process the path parameters
         # process the query parameters
         if page is not None:
-
             _query_params.append(("page", page))
 
         if page_size is not None:
-
             _query_params.append(("pageSize", page_size))
 
         if sort_key is not None:
-
             _query_params.append(("sortKey", sort_key))
 
         if sort_direction is not None:
-
             _query_params.append(("sortDirection", sort_direction.value))
 
         if event_type is not None:
-
             _query_params.append(("eventType", event_type))
 
         if successful is not None:
-
             _query_params.append(("successful", successful))
 
         if download_id is not None:
-
             _query_params.append(("downloadId", download_id))
 
         if indexer_ids is not None:
-
             _query_params.append(("indexerIds", indexer_ids))
 
         # process the header parameters
@@ -622,7 +613,6 @@ class HistoryApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -639,15 +629,12 @@ class HistoryApi:
         # process the path parameters
         # process the query parameters
         if indexer_id is not None:
-
             _query_params.append(("indexerId", indexer_id))
 
         if event_type is not None:
-
             _query_params.append(("eventType", event_type.value))
 
         if limit is not None:
-
             _query_params.append(("limit", limit))
 
         # process the header parameters
@@ -884,7 +871,6 @@ class HistoryApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -914,7 +900,6 @@ class HistoryApi:
                 _query_params.append(("date", var_date))
 
         if event_type is not None:
-
             _query_params.append(("eventType", event_type.value))
 
         # process the header parameters

@@ -1,4 +1,4 @@
-﻿import os
+import os
 import re
 from collections.abc import Callable
 from typing import Any, Generic, Literal, TypeVar

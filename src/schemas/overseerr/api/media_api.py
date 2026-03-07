@@ -276,7 +276,6 @@ class MediaApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -293,19 +292,15 @@ class MediaApi:
         # process the path parameters
         # process the query parameters
         if take is not None:
-
             _query_params.append(("take", take))
 
         if skip is not None:
-
             _query_params.append(("skip", skip))
 
         if filter is not None:
-
             _query_params.append(("filter", filter))
 
         if sort is not None:
-
             _query_params.append(("sort", sort))
 
         # process the header parameters
@@ -532,7 +527,6 @@ class MediaApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -800,7 +794,6 @@ class MediaApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
@@ -1056,7 +1049,6 @@ class MediaApi:
         _headers,
         _host_index,
     ) -> RequestSerialized:
-
         _host = None
 
         _collection_formats: Dict[str, str] = {}
