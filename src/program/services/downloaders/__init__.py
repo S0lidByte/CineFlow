@@ -118,9 +118,10 @@ class Downloader(Runner[None, DownloaderBase]):
 
             tried_streams = 0
             # run_thread_with_db_item uses next() so only the first yield is consumed.
-            # Yielding after 20 streams releases the thread quickly and re-queues the item.
+            # Keep the per-run stream budget small so one item cannot monopolize
+            # a worker thread and increase queue latency for newly indexed items.
             # Blacklisted streams are skipped on the next invocation.
-            MAX_STREAMS_PER_RUN = 20
+            MAX_STREAMS_PER_RUN = 3
 
             for stream in sorted_streams:
                 # Try each available service for this stream before blacklisting

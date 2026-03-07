@@ -486,16 +486,17 @@ class EventManager:
                         raise Empty
 
                     # Define state priority (lower number = higher priority).
-                    # Items closest to completion are processed first to avoid
-                    # PartiallyCompleted shows starving Symlinked/Downloaded items.
+                    # Keep end-of-pipeline states high, but prioritize Indexed ahead
+                    # of Scraped/PartiallyCompleted to reduce perceived latency for
+                    # newly discovered content under backlog pressure.
                     state_priority = dict[States, int](
                         {
                             States.Completed: 0,
                             States.Symlinked: 1,
                             States.Downloaded: 2,
-                            States.Scraped: 3,
-                            States.PartiallyCompleted: 4,
-                            States.Indexed: 5,
+                            States.Indexed: 3,
+                            States.Scraped: 4,
+                            States.PartiallyCompleted: 5,
                         }
                     )
 
