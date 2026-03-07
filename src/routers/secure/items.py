@@ -1,9 +1,11 @@
+import hashlib
 import os
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal, Self
 
+from cachetools import TTLCache
 from fastapi import APIRouter, Body, HTTPException, Path, Query, status
 from kink import di
 from loguru import logger
@@ -40,11 +42,6 @@ class SortOrderEnum(str, Enum):
     def sort_type(self) -> str:
         return "title" if self.value.startswith("title") else "date"
 
-
-import hashlib
-
-from cachetools import TTLCache
-
 router = APIRouter(
     prefix="/items",
     tags=["items"],
@@ -52,6 +49,49 @@ router = APIRouter(
 )
 
 _get_items_count_cache: TTLCache[str, int] = TTLCache(maxsize=1024, ttl=5)
+
+_RETRY_SKIP_RESET_STATES = frozenset(
+    {
+        States.Completed,
+        States.Unreleased,
+        States.Downloaded,
+        States.Symlinked,
+        States.Paused,
+    }
+)
+
+_ADD_SKIP_REQUEUE_STATES = frozenset(
+    {
+        States.Completed,
+        States.Unreleased,
+        States.Paused,
+    }
+)
+
+
+def _reset_scrape_state_for_retry(item: MediaItem) -> None:
+    """Reset scrape blockers recursively for retry/requeue operations.
+
+    Skips items in terminal/paused states where scrape reset is not appropriate.
+    """
+
+    if item.last_state in _RETRY_SKIP_RESET_STATES:
+        return
+
+    item.scraped_at = None
+    item.scraped_times = 1
+    item.failed_attempts = 0
+    item.streams.clear()
+    item.blacklisted_streams.clear()
+    item.active_stream = None
+    item.store_state(States.Indexed)
+
+    if isinstance(item, Show):
+        for season in item.seasons:
+            _reset_scrape_state_for_retry(season)
+    elif isinstance(item, Season):
+        for episode in item.episodes:
+            _reset_scrape_state_for_retry(episode)
 
 
 def handle_ids(ids: Sequence[str | int]) -> list[int]:
@@ -277,14 +317,14 @@ async def get_items(
             media_types.remove(MediaTypeEnum.ANIME.value)
 
             if not media_types:
-                query = query.where(MediaItem.is_anime == True)
+                query = query.where(MediaItem.is_anime)
             else:
                 query = query.where(
                     and_(
                         MediaItem.type.in_(
                             media_types if media_types else ["movie", "show"]
                         ),
-                        MediaItem.is_anime == True,
+                        MediaItem.is_anime,
                     )
                 )
 
@@ -323,7 +363,7 @@ async def get_items(
         # Cache the count query for 5 seconds to avoid expensive double round-trips on every page
         # Use a safe hash of the query string representation as cache key
         # (literal_binds=True crashes on bound parameter lists)
-        cache_key = hashlib.md5(str(query.whereclause).encode()).hexdigest()
+        cache_key = hashlib.sha256(str(query.whereclause).encode()).hexdigest()
 
         if cache_key in _get_items_count_cache:
             total_items = _get_items_count_cache[cache_key]
@@ -410,8 +450,12 @@ async def add_items(
     )
 
     added_count = 0
+    requeued_count = 0
+    skipped_existing_count = 0
     failed_ids: list[str] = []
     items = list[MediaItem]()
+    existing_ids_to_requeue = set[int]()
+    existing_mutated = False
 
     with db_session() as session:
         if all_tmdb_ids:
@@ -434,6 +478,26 @@ async def add_items(
                         items.append(item)
                 else:
                     logger.debug(f"Item with TMDB ID {id} already exists")
+
+                    if existing.last_state in _ADD_SKIP_REQUEUE_STATES:
+                        skipped_existing_count += 1
+                        continue
+
+                    if existing.last_state not in _RETRY_SKIP_RESET_STATES:
+
+                        def mutation(i: MediaItem, _: Session):
+                            _reset_scrape_state_for_retry(i)
+
+                        apply_item_mutation(
+                            program=di[Program],
+                            session=session,
+                            item=existing,
+                            mutation_fn=mutation,
+                            bubble_parents=True,
+                        )
+                        existing_mutated = True
+
+                    existing_ids_to_requeue.add(existing.id)
 
         if all_tvdb_ids:
             import asyncio
@@ -483,16 +547,54 @@ async def add_items(
                 else:
                     logger.debug(f"Item with TVDB ID {id} already exists")
 
+                    if existing.last_state in _ADD_SKIP_REQUEUE_STATES:
+                        skipped_existing_count += 1
+                        continue
+
+                    if existing.last_state not in _RETRY_SKIP_RESET_STATES:
+
+                        def mutation(i: MediaItem, _: Session):
+                            _reset_scrape_state_for_retry(i)
+
+                        apply_item_mutation(
+                            program=di[Program],
+                            session=session,
+                            item=existing,
+                            mutation_fn=mutation,
+                            bubble_parents=True,
+                        )
+                        existing_mutated = True
+
+                    existing_ids_to_requeue.add(existing.id)
+
+        if existing_mutated:
+            session.commit()
+
+        for existing_id in existing_ids_to_requeue:
+            if di[Program].em.add_event(Event("AddItemsExisting", existing_id)):
+                requeued_count += 1
+
         if items:
             for item in items:
-                di[Program].em.add_item(item)
-                added_count += 1
+                if di[Program].em.add_item(item):
+                    added_count += 1
+
+    message_parts = [f"Added {added_count} new item(s)"]
+
+    if requeued_count > 0:
+        message_parts.append(f"requeued {requeued_count} existing item(s)")
+
+    if skipped_existing_count > 0:
+        message_parts.append(
+            f"skipped {skipped_existing_count} existing item(s) in terminal/paused states"
+        )
 
     if failed_ids:
         return MessageResponse(
-            message=f"Added {added_count} item(s). {len(failed_ids)} TVDB ID(s) not found: {', '.join(failed_ids)}"
+            message=f"{'. '.join(message_parts)}. {len(failed_ids)} TVDB ID(s) not found: {', '.join(failed_ids)}"
         )
-    return MessageResponse(message=f"Added {added_count} item(s) to the queue")
+
+    return MessageResponse(message=f"{'. '.join(message_parts)}")
 
 
 @router.get(
@@ -667,7 +769,7 @@ async def reset_items(
                             if refresh_path not in refresh_paths:
                                 refresh_paths.append(refresh_path)
 
-                    def mutation(i: MediaItem, s: Session):
+                    def mutation(i: MediaItem, _: Session):
                         """
                         Blacklist the MediaItem's currently active stream and reset the item's state.
 
@@ -740,46 +842,6 @@ async def retry_items(
 
     parsed_ids = handle_ids(payload.ids)
 
-    _SKIP_RESET_STATES = frozenset(
-        {
-            States.Completed,
-            States.Unreleased,
-            States.Downloaded,
-            States.Symlinked,
-            States.Paused,
-        }
-    )
-
-    def _reset_scrape_state(i: MediaItem) -> None:
-        """Reset all scraping blockers on item and eligible children recursively.
-
-        Skips items in Completed, Unreleased, Downloaded, Symlinked, or Paused
-        states — those either have files on disk (require full _reset()) or are
-        deliberately paused by the user.
-
-        Clears:
-        - scraped_at / scraped_times / failed_attempts (cooldown + should_submit)
-        - streams / blacklisted_streams / active_stream (forces re-scrape)
-        - last_state → Indexed (routes through scraper in state_transition)
-        """
-        if i.last_state in _SKIP_RESET_STATES:
-            return
-
-        i.scraped_at = None
-        i.scraped_times = 1
-        i.failed_attempts = 0
-        i.streams.clear()
-        i.blacklisted_streams.clear()
-        i.active_stream = None
-        i.store_state(States.Indexed)
-
-        if isinstance(i, Show):
-            for season in i.seasons:
-                _reset_scrape_state(season)
-        elif isinstance(i, Season):
-            for episode in i.episodes:
-                _reset_scrape_state(episode)
-
     with db_session() as session:
         for id in parsed_ids:
             try:
@@ -788,8 +850,8 @@ async def retry_items(
 
                 if item:
 
-                    def mutation(i: MediaItem, s: Session):
-                        _reset_scrape_state(i)
+                    def mutation(i: MediaItem, _: Session):
+                        _reset_scrape_state_for_retry(i)
 
                     apply_item_mutation(
                         program=di[Program],
@@ -914,8 +976,7 @@ async def remove_item(
             # 2. Gather all refresh paths before deletion (entry may appear at multiple VFS paths)
             refresh_paths = list[str]()
 
-            if updater and item.filesystem_entry:
-                if media_entry := item.media_entry:
+            if updater and item.filesystem_entry and (media_entry := item.media_entry):
                     for vfs_path in media_entry.get_all_vfs_paths():
                         # Check if VFS path is already absolute (filesystem path)
                         # VFS paths are normally VFS-relative (e.g., /movies/...) but could be
@@ -1073,7 +1134,7 @@ async def blacklist_stream(
                 detail="Stream not found",
             )
 
-        def mutation(i: MediaItem, s: Session):
+        def mutation(i: MediaItem, _: Session):
             i.blacklist_stream(stream)
 
         apply_item_mutation(
@@ -1136,7 +1197,7 @@ async def unblacklist_stream(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Stream not found"
             )
 
-        def mutation(i: MediaItem, s: Session):
+        def mutation(i: MediaItem, _: Session):
             i.unblacklist_stream(stream)
 
         apply_item_mutation(di[Program], db, item, mutation, bubble_parents=True)
@@ -1176,7 +1237,7 @@ async def reset_item_streams(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Item not found"
             )
 
-        def mutation(i: MediaItem, s: Session):
+        def mutation(i: MediaItem, _: Session):
             i.streams.clear()
             i.blacklisted_streams.clear()
             i.active_stream = None
@@ -1247,7 +1308,7 @@ async def pause_items(
                         States.Completed,
                     ]:
 
-                        def mutation(i: MediaItem, s: Session):
+                        def mutation(i: MediaItem, _: Session):
                             i.store_state(States.Paused)
 
                         apply_item_mutation(
@@ -1302,7 +1363,7 @@ async def unpause_items(
                 try:
                     if media_item.last_state == States.Paused:
 
-                        def mutation(i: MediaItem, s: Session):
+                        def mutation(i: MediaItem, _: Session):
                             i.store_state(States.Requested)
 
                         apply_item_mutation(
