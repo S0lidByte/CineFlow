@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.7.2](https://github.com/S0lidByte/CineFlow/compare/v1.7.1...v1.7.2) (2026-03-07)
+
+
+### Bug Fixes
+
+* **db:** harden stream relation uniqueness and resolve StaleDataError ([ee7b0b2](https://github.com/S0lidByte/CineFlow/commit/ee7b0b213afe4aa34fe50a160115b06d6f808585))
+* **items:** requeue existing add requests and harden retry reset flow ([699c220](https://github.com/S0lidByte/CineFlow/commit/699c220c626482fa231642c8f47ea4078f456eb3))
+* **queue:** reduce downloader monopolization and prioritize indexed items ([7907757](https://github.com/S0lidByte/CineFlow/commit/790775782a63f2af6d7e3d9c0699ccf411169d9f))
+* **vfs:** resolve playback failures by fixing duplicate mounts and robust link validation ([fe1e4fa](https://github.com/S0lidByte/CineFlow/commit/fe1e4fa973dad292eb21d3f673b9361e292d6df4))
+
 ## [1.7.1](https://github.com/S0lidByte/CineFlow/compare/v1.7.0...v1.7.1) (2026-03-07)
 
 
