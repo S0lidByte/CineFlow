@@ -131,3 +131,20 @@ async def test_stream_timeout_concurrency(mock_vfs):
 
     # Ensure the stream was removed safely
     assert "test_path:1" not in mock_vfs._active_streams
+
+
+def test_close_waits_for_fuse_thread_and_unmounts(mock_vfs):
+    """close() should wait for the background thread and force cleanup if needed."""
+
+    mock_vfs._thread.is_alive.side_effect = [True, False]
+
+    with (
+        patch.object(pyfuse3, "trio_token", object(), create=True),
+        patch("program.services.filesystem.vfs.rivenvfs.trio.from_thread.run"),
+        patch.object(mock_vfs, "_is_mountpoint_mounted", return_value=True),
+        patch.object(mock_vfs, "_force_unmount_mountpoint") as force_unmount,
+    ):
+        mock_vfs.close()
+
+    mock_vfs._thread.join.assert_called_once_with(timeout=10)
+    force_unmount.assert_called_once_with(mock_vfs._mountpoint)

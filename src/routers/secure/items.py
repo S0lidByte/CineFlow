@@ -317,14 +317,14 @@ async def get_items(
             media_types.remove(MediaTypeEnum.ANIME.value)
 
             if not media_types:
-                query = query.where(MediaItem.is_anime)
+                query = query.where(MediaItem.is_anime.is_(True))
             else:
                 query = query.where(
                     and_(
                         MediaItem.type.in_(
                             media_types if media_types else ["movie", "show"]
                         ),
-                        MediaItem.is_anime,
+                        MediaItem.is_anime.is_(True),
                     )
                 )
 

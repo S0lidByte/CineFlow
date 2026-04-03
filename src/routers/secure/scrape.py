@@ -1156,6 +1156,7 @@ async def auto_scrape(
                     # This calls the TVDB API, updates the Show in-place, and adds new seasons
                     from program.program import riven
 
+                    assert riven.services and riven.services.indexer
                     tvdb_indexer = riven.services.indexer.tvdb_indexer
 
                     # Track which seasons exist before sync
@@ -1165,7 +1166,7 @@ async def auto_scrape(
                     # Use no_autoflush to prevent premature flush of transient objects
                     with session.no_autoflush:
                         success = await asyncio.to_thread(
-                            tvdb_indexer._update_show_metadata, item
+                            tvdb_indexer._update_show_metadata, item  # type: ignore
                         )
 
                     if success:

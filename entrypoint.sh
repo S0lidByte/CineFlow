@@ -1,8 +1,48 @@
 #!/bin/sh
 
+MOUNT_PATH="/mnt/rivenfs"
+
 # Default PUID and PGID to 1000 if not set
 PUID=${PUID:-1000}
 PGID=${PGID:-1000}
+
+cleanup_riven_mounts() {
+    MAX_ATTEMPTS=${1:-20}
+    ATTEMPT=0
+
+    while grep -q " $MOUNT_PATH " /proc/mounts 2>/dev/null; do
+        ATTEMPT=$((ATTEMPT + 1))
+        echo "Cleaning stale RivenVFS mount at $MOUNT_PATH (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
+
+        fusermount3 -u -z "$MOUNT_PATH" 2>/dev/null || \
+        fusermount -u -z "$MOUNT_PATH" 2>/dev/null || \
+        umount -l "$MOUNT_PATH" 2>/dev/null || true
+
+        sleep 1
+
+        if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
+            echo "Failed to fully clean stale RivenVFS mounts after $MAX_ATTEMPTS attempts."
+            break
+        fi
+    done
+}
+
+forward_signal() {
+    SIGNAL="$1"
+
+    echo "Received $SIGNAL, shutting down Riven..."
+
+    if [ -n "${MAIN_PID:-}" ] && kill -0 "$MAIN_PID" 2>/dev/null; then
+        kill -TERM "$MAIN_PID" 2>/dev/null || true
+        wait "$MAIN_PID" 2>/dev/null || true
+    fi
+
+    cleanup_riven_mounts 20
+    exit 0
+}
+
+trap 'forward_signal SIGINT' INT
+trap 'forward_signal SIGTERM' TERM
 
 echo "Starting Container with $PUID:$PGID permissions..."
 
@@ -40,6 +80,8 @@ fi
 echo "Container Initialization complete."
 echo "Starting Riven (Backend)..."
 
+cleanup_riven_mounts 20
+
 # Execute the command in the background
 if [ "$PUID" = "0" ]; then
     RUN_CMD="$CMD"
@@ -60,13 +102,14 @@ done
 sleep 1
 
 # Check if the mount duplicated in the container's namespace
-MOUNT_COUNT=$(grep -c "rivenvfs" /proc/mounts || true)
+MOUNT_COUNT=$(grep -c " $MOUNT_PATH " /proc/mounts || true)
 if [ "$MOUNT_COUNT" -gt 1 ]; then
     echo "Duplicate FUSE mount detected ($MOUNT_COUNT entries). Cleaning up..."
-    # A lazy unmount clears the top/duplicate layer inside this namespace 
-    # without breaking the lower layer that propagated to the host.
-    umount -l /mnt/rivenfs || true
+    cleanup_riven_mounts 20
 fi
 
 # Bring the main program back to the foreground so logs pass through and SIGTERMs work
 wait $MAIN_PID
+EXIT_CODE=$?
+cleanup_riven_mounts 20
+exit $EXIT_CODE

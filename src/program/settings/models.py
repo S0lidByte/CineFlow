@@ -54,7 +54,7 @@ class Observable(MigratableBaseModel):
         if (
             self.__class__._notify_observers
             and not name.startswith("_")
-            and name in self.model_fields
+            and name in self.__class__.model_fields
         ):
             self.__class__._notify_observers()
 

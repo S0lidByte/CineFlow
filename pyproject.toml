@@ -70,6 +70,10 @@ dev = [
 ]
 test = ["pytest>=8.3.2,<9"]
 
+[tool.pyright]
+reportMissingImports = "none"
+
+
 [tool.uv]
 package = false
 default-groups = [

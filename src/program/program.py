@@ -116,6 +116,12 @@ class Program(threading.Thread):
     def initialize_services(self):
         """Initialize all services."""
 
+        if self.services:
+            try:
+                self.services.filesystem.close()
+            except Exception:
+                logger.exception("Failed to close previous filesystem service")
+
         # Instantiate services fresh on each settings change; settings_manager observers handle reinit
         _downloader = Downloader()
 

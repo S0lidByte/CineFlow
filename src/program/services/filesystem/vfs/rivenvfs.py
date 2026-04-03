@@ -250,7 +250,7 @@ class RivenVFS(pyfuse3.Operations):
         self._thread = threading.Thread(target=_fuse_runner, daemon=True)
         self._thread.start()
 
-        logger.log("VFS", f"RivenVFS mounted at {self._mountpoint}")
+        logger.log("VFS", f"Starting RivenVFS for {self._mountpoint}")
 
         # Synchronize library profiles with VFS structure
         self.sync()
@@ -272,6 +272,7 @@ class RivenVFS(pyfuse3.Operations):
             pyfuse3.init(self, self._mountpoint, fuse_options)
 
             self.mounted = True
+            logger.log("VFS", f"RivenVFS mounted at {self._mountpoint}")
 
             # Open stream nursery for handling streaming operations.
             # This is separate from the main FUSE loop,
@@ -634,11 +635,28 @@ class RivenVFS(pyfuse3.Operations):
             logger.log("VFS", f"Unmounting RivenVFS from {self._mountpoint}")
 
             self._unmount_requested.value = True
+            await self._terminate_async()
 
-        trio.from_thread.run(
-            _request_unmount,
-            trio_token=pyfuse3.trio_token,
-        )
+        trio_token = getattr(pyfuse3, "trio_token", None)
+
+        if trio_token is not None:
+            try:
+                trio.from_thread.run(_request_unmount, trio_token=trio_token)
+            except Exception:
+                logger.exception("Failed to request graceful FUSE unmount")
+        else:
+            logger.warning("pyfuse3 trio token unavailable during close; forcing unmount")
+
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=10)
+
+        if self._thread and self._thread.is_alive():
+            logger.warning(
+                f"FUSE thread did not stop in time for {self._mountpoint}; forcing unmount"
+            )
+
+        if self._is_mountpoint_mounted(self._mountpoint):
+            self._force_unmount_mountpoint(self._mountpoint)
 
     # Helper methods
 
@@ -660,20 +678,9 @@ class RivenVFS(pyfuse3.Operations):
         while attempts < max_attempts:
             attempts += 1
             try:
-                # Detect if something is mounted there
-                is_mounted = False
-                try:
-                    with open("/proc/mounts", "r") as f:
-                        for line in f:
-                            if f" {mountpoint} " in line:
-                                is_mounted = True
-                                break
-                except Exception:
-                    # If we cannot check, assume we might need to unmount if this is the first iteration
-                    if attempts == 1:
-                        is_mounted = True
-                    else:
-                        break
+                is_mounted = self._is_mountpoint_mounted(
+                    mountpoint, assume_mounted_on_failure=attempts == 1
+                )
 
                 if not is_mounted:
                     break
@@ -682,18 +689,7 @@ class RivenVFS(pyfuse3.Operations):
                     f"Detected existing mount at {mountpoint} (layer {attempts}), attempting to unmount..."
                 )
 
-                # Try a sequence of unmount strategies (graceful -> lazy)
-                for cmd in (
-                    ["fusermount3", "-u", "-z", mountpoint],
-                    ["fusermount", "-u", "-z", mountpoint],
-                    ["umount", "-l", mountpoint],
-                ):
-                    try:
-                        subprocess.run(
-                            cmd, capture_output=True, timeout=10, check=False
-                        )
-                    except (subprocess.TimeoutExpired, FileNotFoundError):
-                        continue
+                self._force_unmount_mountpoint(mountpoint)
 
                 # Sleep briefly to give the kernel time to update /proc/mounts
                 time.sleep(0.5)
@@ -719,25 +715,38 @@ class RivenVFS(pyfuse3.Operations):
     def _cleanup_mountpoint(self, mountpoint: str) -> None:
         """Clean up mountpoint after unmounting."""
 
-        if not self.mounted:
-            return
+        if self.mounted:
+            try:
+                # Close FUSE session after main loop has exited
+                pyfuse3.close(unmount=True)
+            except Exception:
+                logger.exception("Error closing FUSE session")
+
+        self._force_unmount_mountpoint(mountpoint)
+
+    def _is_mountpoint_mounted(
+        self, mountpoint: str, assume_mounted_on_failure: bool = False
+    ) -> bool:
+        """Return whether the kernel still reports a mount on the target path."""
 
         try:
-            # Close FUSE session after main loop has exited
-            pyfuse3.close(unmount=True)
+            with open("/proc/mounts", "r", encoding="utf-8") as mounts_file:
+                return any(f" {mountpoint} " in line for line in mounts_file)
         except Exception:
-            logger.exception("Error closing FUSE session")
+            return assume_mounted_on_failure
 
-        # Force unmount if necessary
-        try:
-            subprocess.run(
-                ["fusermount", "-u", mountpoint],
-                capture_output=True,
-                timeout=10,
-                check=False,
-            )
-        except Exception:
-            pass
+    def _force_unmount_mountpoint(self, mountpoint: str) -> None:
+        """Try the common Linux unmount commands until the mount disappears."""
+
+        for cmd in (
+            ["fusermount3", "-u", "-z", mountpoint],
+            ["fusermount", "-u", "-z", mountpoint],
+            ["umount", "-l", mountpoint],
+        ):
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=10, check=False)
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                continue
 
     async def _terminate_async(self) -> None:
         """Async helper to call pyfuse3.terminate() within the Trio loop."""

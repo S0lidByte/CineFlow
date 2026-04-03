@@ -552,7 +552,7 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
             extended_dict["active_stream"] = self.active_stream
 
         extended_dict["number"] = (
-            self.number if my_type in ("episode", "season") else None
+            getattr(self, "number", None) if my_type in ("episode", "season") else None
         )
         extended_dict["is_anime"] = bool(self.is_anime)
 
