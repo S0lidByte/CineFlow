@@ -40,9 +40,33 @@ fi
 echo "Container Initialization complete."
 echo "Starting Riven (Backend)..."
 
-# Execute the command
+# Execute the command in the background
 if [ "$PUID" = "0" ]; then
-    exec $CMD
+    RUN_CMD="$CMD"
 else
-    exec gosu "$USERNAME" $CMD
+    RUN_CMD="gosu $USERNAME $CMD"
 fi
+
+$RUN_CMD &
+MAIN_PID=$!
+
+echo "Waiting for RivenVFS FUSE mount to initialize..."
+# Wait for the first 'rivenvfs' mount to register
+while ! grep -q "rivenvfs" /proc/mounts; do
+    sleep 1
+done
+
+# Give it an extra second to allow host propagation back to the container
+sleep 1
+
+# Check if the mount duplicated in the container's namespace
+MOUNT_COUNT=$(grep -c "rivenvfs" /proc/mounts || true)
+if [ "$MOUNT_COUNT" -gt 1 ]; then
+    echo "Duplicate FUSE mount detected ($MOUNT_COUNT entries). Cleaning up..."
+    # A lazy unmount clears the top/duplicate layer inside this namespace 
+    # without breaking the lower layer that propagated to the host.
+    umount -l /mnt/rivenfs || true
+fi
+
+# Bring the main program back to the foreground so logs pass through and SIGTERMs work
+wait $MAIN_PID
