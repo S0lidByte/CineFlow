@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal, TypeAlias, cast
 from uuid import uuid4
@@ -15,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from kink import di
 from loguru import logger
 from PTT import parse_title  # pyright: ignore[reportUnknownVariableType]
-from pydantic import BaseModel, Json, RootModel
+from pydantic import BaseModel, RootModel
 from RTN import ParsedData, Torrent, parse
 from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.orm import Session
@@ -513,7 +514,7 @@ def scrape_item(
         Query(description="Custom IMDB ID to use for scraping (not persisted)"),
     ] = None,
     ranking_overrides: Annotated[
-        Json[dict[str, list[str]]] | None,
+        str | None,
         Query(
             description='JSON-encoded ranking overrides, e.g. {"resolutions": ["1080p"]}'
         ),
@@ -543,7 +544,13 @@ def scrape_item(
         media_type if media_type in ("movie", "tv") else None
     )
 
-    rtn_settings_override_model = get_ranking_overrides(ranking_overrides)
+    parsed_ranking_overrides: dict[str, list[str]] | None = None
+    if ranking_overrides:
+        try:
+            parsed_ranking_overrides = json.loads(ranking_overrides)
+        except (json.JSONDecodeError, ValueError) as e:
+            raise HTTPException(status_code=422, detail=f"Invalid ranking_overrides JSON: {e}") from e
+    rtn_settings_override_model = get_ranking_overrides(parsed_ranking_overrides)
     overrides: dict[str, Any] = (
         rtn_settings_override_model.model_dump() if rtn_settings_override_model else {}
     )
