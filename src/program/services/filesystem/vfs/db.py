@@ -147,7 +147,7 @@ class VFSDatabase:
                 logger.warning(
                     f"Fair usage limit reached when unrestricting URL for {entry.original_filename}: {e}"
                 )
-                return entry.unrestricted_url
+                raise
             except DebridServiceLinkUnavailable as e:
                 logger.warning(
                     f"Failed to unrestrict URL for {entry.original_filename}: {e}"

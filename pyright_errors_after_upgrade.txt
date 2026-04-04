@@ -1,0 +1,250 @@
+e:\Dev\Triven_riven-fork\Triven_backend\dump_schema.py
+  e:\Dev\Triven_riven-fork\Triven_backend\dump_schema.py:8:6 - error: Import "program.settings.models" could not be resolved (reportMissingImports)
+  e:\Dev\Triven_riven-fork\Triven_backend\dump_schema.py:8:37 - error: Type of "FilesystemModel" is unknown (reportUnknownVariableType)
+e:\Dev\Triven_riven-fork\Triven_backend\rtn_test.py
+  e:\Dev\Triven_riven-fork\Triven_backend\rtn_test.py:6:6 - error: Import "program.settings" could not be resolved (reportMissingImports)
+  e:\Dev\Triven_riven-fork\Triven_backend\rtn_test.py:6:30 - error: Type of "settings_manager" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\rtn_test.py:11:6 - error: Import "program.services.scrapers.shared" could not be resolved (reportMissingImports)
+  e:\Dev\Triven_riven-fork\Triven_backend\rtn_test.py:11:46 - error: Type of "ranking_settings" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\rtn_test.py:11:64 - error: Type of "rtn" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\rtn_test.py:17:28 - error: Argument type is unknown
+    Argument corresponds to parameter "values" in function "print" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\rtn_test.py:19:1 - error: Type of "active_settings" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\rtn_test.py:21:5 - error: Type of "torrent" is unknown (reportUnknownVariableType)
+e:\Dev\Triven_riven-fork\Triven_backend\src\main.py
+  e:\Dev\Triven_riven-fork\Triven_backend\src\main.py:158:1 - warning: Type analysis indicates code is unreachable (reportUnreachable)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\main.py:161:66 - error: Argument type is partially unknown
+    Argument corresponds to parameter "o" in function "__new__"
+    Argument type is "list[Unknown]" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\main.py:161:105 - error: Type of "wtqiceobrebqsxl" is unknown (reportUnknownVariableType)
+e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:51:8 - error: Import "pyfuse3" could not be resolved (reportMissingImports)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:106:16 - error: Base class type is unknown, obscuring type of derived class (reportUntypedBaseClass)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:248:21 - error: Type of "unmount_requested" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:270:13 - error: Type of "fuse_options" is partially unknown
+    Type of "fuse_options" is "set[Unknown]" (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:270:32 - error: Argument type is unknown
+    Argument corresponds to parameter "iterable" in function "__init__" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:271:13 - error: Type of "fuse_options" is partially unknown
+    Type of "fuse_options" is "set[Unknown]" (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:283:53 - error: Argument type is unknown
+    Argument corresponds to parameter "fn" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:424:35 - error: Argument type is unknown
+    Argument corresponds to parameter "inode" in function "__init__" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:434:35 - error: Argument type is unknown
+    Argument corresponds to parameter "inode" in function "__init__" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:470:37 - error: Argument type is unknown
+    Argument corresponds to parameter "key" in function "pop" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:482:41 - error: Argument type is unknown
+    Argument corresponds to parameter "key" in function "pop" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:487:9 - error: Return type is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:489:9 - error: Type of "inode" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:491:16 - error: Return type is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:493:9 - error: Return type, "list[Unknown]", is partially unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:506:9 - error: Type of "inodes" is partially unknown
+    Type of "inodes" is "list[Unknown]" (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:511:31 - error: Argument type is unknown
+    Argument corresponds to parameter "object" in function "append" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:515:16 - error: Return type, "list[Unknown]", is partially unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:887:21 - error: Type of "inode" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:898:70 - error: Argument type is partially unknown
+    Argument corresponds to parameter "obj" in function "len"
+    Argument type is "set[Unknown]" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1187:13 - error: Type of "parent_inodes" is partially unknown
+    Type of "parent_inodes" is "list[Unknown]" (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1291:9 - error: Type of "inodes_to_invalidate" is partially unknown
+    Type of "inodes_to_invalidate" is "set[Unknown]" (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1320:46 - error: Argument type is unknown
+    Argument corresponds to parameter "element" in function "add" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1327:46 - error: Argument type is unknown
+    Argument corresponds to parameter "element" in function "add" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1337:46 - error: Argument type is unknown
+    Argument corresponds to parameter "element" in function "add" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1341:13 - error: Type of "inode" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1417:9 - error: Type of parameter "deleted_inode" is partially unknown
+    Parameter type is "Unknown | None" (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1446:9 - error: Type of parameter "inodes" is partially unknown
+    Parameter type is "list[Unknown]" (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1458:13 - error: Type of "ino" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1469:31 - error: Type of parameter "parent_inodes" is partially unknown
+    Parameter type is "list[Unknown]" (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1492:15 - error: Return type is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1494:9 - error: Type of parameter "inode" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1495:9 - error: Type of parameter "ctx" is partially unknown
+    Parameter type is "Unknown | None" (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1499:46 - error: Argument type is unknown
+    Argument corresponds to parameter "inode" in function "_get_path_from_inode" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1501:13 - error: Type of "attrs" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1506:31 - error: "getuid" is not a known attribute of module "os" (reportAttributeAccessIssue)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1507:31 - error: "getgid" is not a known attribute of module "os" (reportAttributeAccessIssue)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1524:24 - error: Return type is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1541:24 - error: Return type is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1592:20 - error: Return type is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1599:15 - error: Return type is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1601:9 - error: Type of parameter "parent_inode" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1603:9 - error: Type of parameter "ctx" is partially unknown
+    Parameter type is "Unknown | None" (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1609:55 - error: Argument type is unknown
+    Argument corresponds to parameter "key" in function "get" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1620:21 - error: Type of "child_inode" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1624:25 - error: Type of "child_inode" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1626:25 - error: Type of "child_inode" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1634:21 - error: Type of "child_inode" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1636:20 - error: Return type is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1636:39 - error: Argument type is unknown
+    Argument corresponds to parameter "inode" in function "getattr" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1643:15 - error: Return type is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1645:9 - error: Type of parameter "inode" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1646:9 - error: Type of parameter "ctx" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1652:48 - error: Argument type is unknown
+    Argument corresponds to parameter "key" in function "get" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1661:20 - error: Return type is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1670:9 - error: Type of parameter "fh" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1672:9 - error: Type of parameter "token" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1676:46 - error: Argument type is unknown
+    Argument corresponds to parameter "inode" in function "_get_path_from_inode" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1681:48 - error: Argument type is unknown
+    Argument corresponds to parameter "key" in function "get" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1682:17 - error: Type of "parent_inode" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1686:17 - error: Type of "items" is partially unknown
+    Type of "items" is "list[tuple[bytes, Unknown]]" (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1699:44 - error: Argument type is partially unknown
+    Argument corresponds to parameter "obj" in function "len"
+    Argument type is "list[tuple[bytes, Unknown]]" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1700:29 - error: Type of "child_ino" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1703:21 - error: Type of "attrs" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1703:48 - error: Argument type is unknown
+    Argument corresponds to parameter "inode" in function "getattr" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1705:21 - error: Type of "attrs" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1717:15 - error: Return type is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1719:9 - error: Type of parameter "inode" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1721:9 - error: Type of parameter "ctx" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1728:48 - error: Argument type is unknown
+    Argument corresponds to parameter "key" in function "get" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1758:25 - error: Type of "original_inode" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1790:21 - error: Type of "inode" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1792:28 - error: Return type is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1792:44 - error: Argument type is unknown
+    Argument corresponds to parameter "inode" in function "open" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1792:58 - error: Argument type is unknown
+    Argument corresponds to parameter "ctx" in function "open" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1806:13 - error: Type of "fh" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1816:20 - error: Return type is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1820:26 - error: Type of parameter "fh" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1820:75 - error: Function with declared return type "bytes" must return value on all code paths
+    "None" is not assignable to "bytes" (reportReturnType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1846:50 - error: Argument type is unknown
+    Argument corresponds to parameter "key" in function "get" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1852:13 - error: Type of "inode" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1858:48 - error: Argument type is unknown
+    Argument corresponds to parameter "key" in function "get" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:1940:20 - error: Argument type is unknown
+    Argument corresponds to parameter "fh" in function "_get_stream" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:2046:29 - error: Type of parameter "fh" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:2050:50 - error: Argument type is unknown
+    Argument corresponds to parameter "key" in function "pop" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:2055:17 - error: Type of "inode" is unknown (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:2059:56 - error: Argument type is unknown
+    Argument corresponds to parameter "key" in function "get" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:2065:57 - error: Argument type is unknown
+    Argument corresponds to parameter "fh" in function "_stream_key" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:2088:15 - error: Type of parameter "inode" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:2088:49 - error: Type of parameter "ctx" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:2096:48 - error: Argument type is unknown
+    Argument corresponds to parameter "key" in function "get" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:2107:60 - error: Type of parameter "ctx" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:2121:59 - error: Type of parameter "ctx" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:2142:9 - error: Type of parameter "ctx" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:2163:9 - error: Type of parameter "fh" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:2179:45 - error: Argument type is unknown
+    Argument corresponds to parameter "fh" in function "_stream_key" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\rivenvfs.py:2194:24 - error: Argument type is unknown
+    Argument corresponds to parameter "fh" in function "__init__" (reportUnknownArgumentType)
+e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\vfs_node.py
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\vfs_node.py:5:8 - error: Import "pyfuse3" could not be resolved (reportMissingImports)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\vfs_node.py:108:19 - error: Argument type is unknown
+    Argument corresponds to parameter "inode" in function "__init__" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\vfs_node.py:155:9 - error: Type of parameter "inode" is unknown (reportUnknownParameterType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\filesystem\vfs\vfs_node.py:165:19 - error: Argument type is unknown
+    Argument corresponds to parameter "inode" in function "__init__" (reportUnknownArgumentType)
+e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\indexers\tvdb_indexer.py
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\indexers\tvdb_indexer.py:49:44 - error: Condition will always evaluate to False since the types "str | None" and "Literal[359913]" have no overlap (reportUnnecessaryComparison)
+e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\streaming\media_stream.py
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\streaming\media_stream.py:8:8 - error: Import "pyfuse3" could not be resolved (reportMissingImports)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\program\services\streaming\media_stream.py:75:9 - error: Type of parameter "fh" is unknown (reportUnknownParameterType)
+e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:96:9 - error: Type of "initialized_services" is partially unknown
+    Type of "initialized_services" is "Any | list[Unknown]" (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:101:13 - error: Type of "service" is partially unknown
+    Type of "service" is "Any | Unknown" (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:103:17 - error: Type of "user_info" is partially unknown
+    Type of "user_info" is "Any | Unknown" (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:108:32 - error: Argument type is partially unknown
+    Argument corresponds to parameter "o" in function "getattr"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:109:25 - error: Type of "dt" is partially unknown
+    Type of "dt" is "Any | Unknown" (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:110:25 - error: Type of "premium_expires_at_val" is partially unknown
+    Type of "premium_expires_at_val" is "Any | Unknown | str" (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:111:55 - error: Argument type is partially unknown
+    Argument corresponds to parameter "obj" in function "hasattr"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:111:81 - error: Argument type is partially unknown
+    Argument corresponds to parameter "object" in function "__new__"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:114:32 - error: Argument type is partially unknown
+    Argument corresponds to parameter "o" in function "getattr"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:115:25 - error: Type of "dt" is partially unknown
+    Type of "dt" is "Any | Unknown" (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:116:25 - error: Type of "cooldown_until_val" is partially unknown
+    Type of "cooldown_until_val" is "Any | Unknown | str" (reportUnknownVariableType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:117:55 - error: Argument type is partially unknown
+    Argument corresponds to parameter "obj" in function "hasattr"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:117:81 - error: Argument type is partially unknown
+    Argument corresponds to parameter "object" in function "__new__"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:121:37 - error: Argument type is partially unknown
+    Argument corresponds to parameter "service" in function "__init__"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:122:38 - error: Argument type is partially unknown
+    Argument corresponds to parameter "username" in function "__init__"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:123:35 - error: Argument type is partially unknown
+    Argument corresponds to parameter "email" in function "__init__"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:124:37 - error: Argument type is partially unknown
+    Argument corresponds to parameter "user_id" in function "__init__"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:125:44 - error: Argument type is partially unknown
+    Argument corresponds to parameter "premium_status" in function "__init__"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:126:48 - error: Argument type is partially unknown
+    Argument corresponds to parameter "premium_expires_at" in function "__init__"
+    Argument type is "str | Unknown | None" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:127:47 - error: Argument type is partially unknown
+    Argument corresponds to parameter "premium_days_left" in function "__init__"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:128:36 - error: Argument type is partially unknown
+    Argument corresponds to parameter "points" in function "__init__"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:129:52 - error: Argument type is partially unknown
+    Argument corresponds to parameter "total_downloaded_bytes" in function "__init__"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:130:44 - error: Argument type is partially unknown
+    Argument corresponds to parameter "cooldown_until" in function "__init__"
+    Argument type is "str | Unknown | None" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:136:33 - error: Argument type is partially unknown
+    Argument corresponds to parameter "o" in function "getattr"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:136:54 - error: Argument type is partially unknown
+    Argument corresponds to parameter "o" in function "__init__"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:141:29 - error: Argument type is partially unknown
+    Argument corresponds to parameter "o" in function "getattr"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  e:\Dev\Triven_riven-fork\Triven_backend\src\routers\secure\default.py:141:50 - error: Argument type is partially unknown
+    Argument corresponds to parameter "o" in function "__init__"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+143 errors, 1 warning, 0 informations

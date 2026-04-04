@@ -1787,6 +1787,13 @@ class RivenVFS(pyfuse3.Operations):
                     inode = new_nodes[0].inode
 
                     return await self.open(inode, flags, ctx)
+                except pyfuse3.FUSEError:
+                    raise
+                except DebridServiceFairUsageLimitException:
+                    logger.warning(
+                        f"Fair usage limit reached for {node.path}; unable to validate CDN URL."
+                    )
+                    raise pyfuse3.FUSEError(errno.EACCES)
                 except Exception as e:
                     logger.exception(f"Unexpected error whilst validating CDN URL: {e}")
 

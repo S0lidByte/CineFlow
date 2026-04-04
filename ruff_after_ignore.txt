@@ -1,0 +1,133 @@
+src\alembic\env.py:94:9: PLW2901 `with` statement variable `connection` overwritten by assignment target
+src\main.py:45:20: RET504 Unnecessary assignment to `response` before `return` statement
+src\main.py:134:20: ARG001 Unused function argument: `signum`
+src\main.py:134:33: ARG001 Unused function argument: `frame`
+src\main.py:161:1: E731 Do not assign a `lambda` expression, use a `def`
+src\main.py:161:43: ARG005 Unused lambda argument: `osatiehltgdbqxk`
+src\program\apis\tvdb_api.py:123:17: PLR1722 Use `sys.exit()` instead of `exit`
+src\program\core\runner.py:14:13: PLC0105 `TypeVar` name "TSettings" does not reflect its covariance; consider renaming it to "TSettings_co"
+src\program\core\runner.py:23:13: PLC0105 `TypeVar` name "TItemType" does not reflect its covariance; consider renaming it to "TItemType_co"
+src\program\db\db.py:15:15: PLW0406 Module `src.program.db.db` imports itself
+src\program\db\db.py:54:13: PLW2901 `with` statement variable `connection` overwritten by assignment target
+src\program\db\db_functions.py:261:16: RET504 Unnecessary assignment to `ids` before `return` statement
+src\program\db\db_functions.py:579:9: PLW2901 `with` statement variable `connection` overwritten by assignment target
+src\program\db\db_functions.py:675:5: PLR1722 Use `sys.exit()` instead of `exit`
+src\program\managers\event_manager.py:406:20: ARG005 Unused lambda argument: `f`
+src\program\managers\event_manager.py:510:40: B023 Function definition does not bind loop variable `state_priority`
+src\program\managers\event_manager.py:627:9: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\media\item.py:521:16: RET504 Unnecessary assignment to `data` before `return` statement
+src\program\media\item.py:589:12: E721 Use `is` and `is not` for type comparisons, or `isinstance()` for isinstance checks
+src\program\media\item.py:1078:13: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\media\item.py:1229:9: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\downloaders\__init__.py:406:17: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\downloaders\alldebrid.py:29:5: E741 Ambiguous variable name: `l`
+src\program\services\downloaders\alldebrid.py:324:17: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\downloaders\alldebrid.py:334:17: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\downloaders\alldebrid.py:346:17: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\downloaders\alldebrid.py:356:17: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\downloaders\debridlink.py:281:17: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\downloaders\debridlink.py:291:17: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\downloaders\debridlink.py:303:17: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\downloaders\debridlink.py:313:17: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\downloaders\realdebrid.py:288:17: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\downloaders\realdebrid.py:299:17: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\downloaders\realdebrid.py:311:17: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\downloaders\realdebrid.py:321:17: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\downloaders\realdebrid.py:333:17: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\filesystem\vfs\db.py:160:48: ARG001 Unused function argument: `s`
+src\program\services\filesystem\vfs\naming.py:332:16: RET504 Unnecessary assignment to `full_path` before `return` statement
+src\program\services\filesystem\vfs\naming.py:613:16: RET504 Unnecessary assignment to `adapted` before `return` statement
+src\program\services\filesystem\vfs\rivenvfs.py:143:9: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\filesystem\vfs\rivenvfs.py:227:17: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+src\program\services\filesystem\vfs\rivenvfs.py:280:13: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+src\program\services\filesystem\vfs\rivenvfs.py:665:9: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\filesystem\vfs\rivenvfs.py:709:13: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\filesystem\vfs\rivenvfs.py:805:50: E712 Avoid equality comparisons to `False`; use `not MediaEntry.is_directory:` for false checks
+src\program\services\filesystem\vfs\rivenvfs.py:1114:20: RET504 Unnecessary assignment to `unregistered_paths` before `return` statement
+src\program\services\filesystem\vfs\rivenvfs.py:1339:13: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\filesystem\vfs\rivenvfs.py:1838:13: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\indexers\tmdb_indexer.py:57:9: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\indexers\tmdb_indexer.py:116:17: SIM105 Use `contextlib.suppress(ValueError, TypeError)` instead of `try`-`except`-`pass`
+src\program\services\indexers\tvdb_indexer.py:49:16: PLR1714 Consider merging multiple comparisons: `item.tvdb_id in {"359913", 359913}`.
+src\program\services\indexers\tvdb_indexer.py:136:17: SIM105 Use `contextlib.suppress(ValueError, TypeError)` instead of `try`-`except`-`pass`
+src\program\services\indexers\tvdb_indexer.py:166:13: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\indexers\tvdb_indexer.py:167:17: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\indexers\tvdb_indexer.py:194:21: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\indexers\tvdb_indexer.py:307:17: SIM105 Use `contextlib.suppress(ValueError, TypeError)` instead of `try`-`except`-`pass`
+src\program\services\indexers\tvdb_indexer.py:333:13: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\indexers\tvdb_indexer.py:334:17: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\indexers\tvdb_indexer.py:367:21: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\indexers\tvdb_indexer.py:544:13: SIM108 Use binary operator `poster_path = season_data.image or show.poster_path` instead of `if`-`else`-block
+src\program\services\indexers\tvdb_indexer.py:586:17: SIM105 Use `contextlib.suppress(ValueError, TypeError)` instead of `try`-`except`-`pass`
+src\program\services\indexers\tvdb_indexer.py:624:17: SIM105 Use `contextlib.suppress(ValueError, TypeError)` instead of `try`-`except`-`pass`
+src\program\services\library_profile_matcher.py:83:9: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\library_profile_matcher.py:88:9: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\library_profile_matcher.py:101:13: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\library_profile_matcher.py:119:9: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\library_profile_matcher.py:124:9: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\library_profile_matcher.py:134:9: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\library_profile_matcher.py:144:9: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\library_profile_matcher.py:264:9: SIM103 Return the condition directly
+src\program\services\media_analysis.py:65:9: SIM103 Return the negated condition directly
+src\program\services\notifications.py:49:21: PLW2901 `for` loop variable `service_url` overwritten by assignment target
+src\program\services\post_processing\subtitles\providers\opensubtitles.py:108:17: SIM105 Use `contextlib.suppress(BabelfishError, ValueError, KeyError)` instead of `try`-`except`-`pass`
+src\program\services\post_processing\subtitles\providers\opensubtitles.py:115:13: SIM105 Use `contextlib.suppress(BabelfishError, ValueError, KeyError)` instead of `try`-`except`-`pass`
+src\program\services\post_processing\subtitles\providers\opensubtitles.py:265:27: B005 Using `.strip()` with multi-character strings is misleading
+src\program\services\post_processing\subtitles\providers\opensubtitles.py:265:42: PLE1310 String `lstrip` call contains duplicate characters (did you mean `removeprefix`?)
+src\program\services\post_processing\subtitles\providers\opensubtitles.py:327:21: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\post_processing\subtitles\utils.py:95:12: RET504 Unnecessary assignment to `subtitle_path` before `return` statement
+src\program\services\scrapers\__init__.py:266:9: SIM103 Return the negated condition directly
+src\program\services\scrapers\base.py:14:5: PLC0105 `TypeVar` name "T" does not reflect its covariance; consider renaming it to "T_co"
+src\program\services\scrapers\prowlarr.py:505:9: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\scrapers\rarbg.py:136:13: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\scrapers\shared.py:78:5: ARG001 Unused function argument: `log_msg`
+src\program\services\scrapers\shared.py:99:5: SIM108 Use ternary operator `rtn_instance = rtn if is_default_settings else RTN(active_settings, ranking_model)` instead of `if`-`else`-block
+src\program\services\scrapers\shared.py:127:13: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\scrapers\shared.py:243:13: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\scrapers\shared.py:267:13: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\services\streaming\cache.py:216:13: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\streaming\cache.py:223:16: RET504 Unnecessary assignment to `h` before `return` statement
+src\program\services\streaming\cache.py:705:9: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\services\streaming\media_stream.py:183:16: RET504 Unnecessary assignment to `aligned_footer_size` before `return` statement
+src\program\services\streaming\media_stream.py:265:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+src\program\services\streaming\media_stream.py:691:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+src\program\services\updaters\__init__.py:95:17: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\settings\__init__.py:22:84: B039 Do not use mutable data structures for `ContextVar` defaults
+src\program\settings\migratable.py:25:13: SIM102 Use a single `if` statement instead of nested `if` statements
+src\program\settings\models.py:1014:12: E712 Avoid equality comparisons to `True`; use `v:` for truth checks
+src\program\settings\models.py:1016:14: E712 Avoid equality comparisons to `False`; use `not v:` for false checks
+src\program\utils\cli.py:394:9: PLR1722 Use `sys.exit()` instead of `exit`
+src\program\utils\cli.py:399:9: PLR1722 Use `sys.exit()` instead of `exit`
+src\program\utils\cli.py:404:9: PLR1722 Use `sys.exit()` instead of `exit`
+src\program\utils\cli.py:412:9: PLR1722 Use `sys.exit()` instead of `exit`
+src\program\utils\cli.py:421:9: PLR1722 Use `sys.exit()` instead of `exit`
+src\program\utils\debrid_cdn_url.py:126:17: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+src\program\utils\request.py:594:37: B023 Function definition does not bind loop variable `orig_close`
+src\program\utils\request.py:597:44: B023 Function definition does not bind loop variable `tmp_client`
+src\program\utils\request.py:598:45: B023 Function definition does not bind loop variable `tmp_client`
+src\program\utils\request.py:652:17: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\utils\request.py:681:9: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\utils\request.py:721:21: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\utils\request.py:731:17: ARG001 Unused function argument: `decode_unicode`
+src\program\utils\request.py:750:13: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\utils\request.py:760:13: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\program\utils\request.py:776:9: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\routers\secure\database.py:215:9: SIM102 Use a single `if` statement instead of nested `if` statements
+src\routers\secure\default.py:284:5: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+src\routers\secure\scrape.py:385:25: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+src\routers\secure\scrape.py:424:9: SIM105 Use `contextlib.suppress(ValueError)` instead of `try`-`except`-`pass`
+src\routers\secure\scrape.py:432:5: SIM102 Use a single `if` statement instead of nested `if` statements
+src\routers\secure\scrape.py:606:17: SIM105 Use `contextlib.suppress(InvalidRequestError)` instead of `try`-`except`-`pass`
+src\routers\secure\scrape.py:916:38: SIM118 Use `key in dict` instead of `key in dict.keys()`
+src\routers\secure\stream.py:253:5: SIM108 Use ternary operator `num_segments = 10 if duration == 0 else math.ceil(duration / segment_duration)` instead of `if`-`else`-block
+src\tests\test_auto_sync.py:41:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+src\tests\test_auto_sync.py:88:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+src\tests\test_auto_sync.py:122:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+src\tests\test_db_functions.py:24:9: S106 Possible hardcoded password assigned to argument: "password"
+src\tests\test_db_functions.py:51:9: PLW2901 `with` statement variable `conn` overwritten by assignment target
+src\tests\test_requests.py:39:9: SIM108 Use ternary operator `cfg = entry["queue"].pop(0) if entry["queue"] else entry["sticky"]` instead of `if`-`else`-block
+src\tests\test_scheduling.py:25:9: S106 Possible hardcoded password assigned to argument: "password"
+src\tests\test_scheduling.py:48:9: PLW2901 `with` statement variable `conn` overwritten by assignment target
+src\tests\test_updaters.py:64:59: S105 Possible hardcoded password assigned to: "token"
+Found 131 errors.
+No fixes available (74 hidden fixes can be enabled with the `--unsafe-fixes` option).
