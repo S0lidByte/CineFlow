@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.3](https://github.com/S0lidByte/CineFlow/compare/v1.7.2...v1.7.3) (2026-04-04)
+
+
+### Bug Fixes
+
+* **scrape:** make ranking_overrides a plain string query param to fix FastAPI AssertionError on Python 3.13 ([f72f169](https://github.com/S0lidByte/CineFlow/commit/f72f16902335b7b4d612673465f0f4453b782417))
+* **vfs:** clean up duplicate FUSE mount in entrypoint ([a351971](https://github.com/S0lidByte/CineFlow/commit/a3519714034a3e42aeae1e9a0251f78de7e2832f))
+
 ## [1.2.1](https://github.com/S0lidByte/CineFlow/compare/v1.7.2...v1.2.1) (2026-04-03)
 
 
