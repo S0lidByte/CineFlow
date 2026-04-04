@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.4](https://github.com/S0lidByte/CineFlow/compare/v1.7.3...v1.7.4) (2026-04-04)
+
+
+### Bug Fixes
+
+* **lint:** apply ruff fixes and update dependencies ([75027f5](https://github.com/S0lidByte/CineFlow/commit/75027f5e994f2d0bfdc378bb6889aa61daf8cc67))
+* **vfs:** resolve FUSEError pickling and fair usage block loops ([33bc068](https://github.com/S0lidByte/CineFlow/commit/33bc068cb052b6d72af94f5535ef6d4e6d9be63d))
+
 ## [1.7.3](https://github.com/S0lidByte/CineFlow/compare/v1.7.2...v1.7.3) (2026-04-04)
 
 
