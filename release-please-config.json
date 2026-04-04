@@ -1,9 +1,10 @@
 {
-    "bootstrap-sha": "1b5b208aeace9af00dd0c816ebf1c35bbda86f87",
-    "last-release-sha": "1b5b208aeace9af00dd0c816ebf1c35bbda86f87",
+    "bootstrap-sha": "1b8c0a5e439033676cfef3b0421f40d6e49a660e",
+    "last-release-sha": "1b8c0a5e439033676cfef3b0421f40d6e49a660e",
     "packages": {
         ".": {
             "release-type": "python"
         }
     }
 }
+
