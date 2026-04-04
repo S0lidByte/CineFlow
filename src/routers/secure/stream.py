@@ -225,7 +225,7 @@ def _get_video_duration(path: str) -> float:
                 "default=noprint_wrappers=1:nokey=1",
                 path,
             ],
-            stdout=subprocess.PIPE,
+            check=False, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
         return float(result.stdout)

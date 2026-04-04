@@ -2,6 +2,7 @@ import argparse
 import contextlib
 import os
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -102,7 +103,7 @@ def _run_pg_dump(
 
     logger.info(f"Creating database snapshot at {output_file} using pg_dump...")
     env = _setup_pg_env(password)
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    result = subprocess.run(cmd, check=False, env=env, capture_output=True, text=True)
 
     if result.returncode == 0:
         return True
@@ -140,7 +141,7 @@ def _run_psql(
 
     logger.info(f"Restoring database from {snapshot_file} using psql...")
     env = _setup_pg_env(password)
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    result = subprocess.run(cmd, check=False, env=env, capture_output=True, text=True)
 
     if result.returncode == 0:
         return True
@@ -391,17 +392,17 @@ def handle_args():
     if args.hard_reset_db:
         hard_reset_database()
         logger.info("Hard reset the database")
-        exit(0)
+        sys.exit(0)
 
     if args.clean_logs:
         log_cleaner()
         logger.info("Cleaned old logs.")
-        exit(0)
+        sys.exit(0)
 
     if args.snapshot_db:
         snapshot_name = args.snapshot_db if isinstance(args.snapshot_db, str) else None
         success = snapshot_database(snapshot_name=snapshot_name)
-        exit(0 if success else 1)
+        sys.exit(0 if success else 1)
 
     if args.restore_db:
         if args.restore_db == "latest":
@@ -409,7 +410,7 @@ def handle_args():
         else:
             snapshot_file = Path(args.restore_db)
         success = restore_database(snapshot_file)
-        exit(0 if success else 1)
+        sys.exit(0 if success else 1)
 
     if args.clean_snapshots:
         snapshot_name = (
@@ -418,6 +419,6 @@ def handle_args():
         success, deleted = clean_snapshots(snapshot_name)
         if deleted:
             logger.info(f"Deleted files: {', '.join(deleted)}")
-        exit(0 if success else 1)
+        sys.exit(0 if success else 1)
 
     return args

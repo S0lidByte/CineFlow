@@ -112,6 +112,7 @@ exclude = '''
 
 [tool.ruff.lint]
 # https://docs.astral.sh/ruff/rules/
+exclude = ["src/schemas/**"]
 ignore = [
   "PLR0913", # flask8-bugbear: Too many arguments for a method or function
   "PLR0911", # flask8-bugbear: Too many return statements
@@ -132,6 +133,16 @@ ignore = [
   "C901",   # ruff: allow complex functions
   "PLR0912", # ruff: allow too many branches
   "PLR0915", # ruff: allow too many statements
+  "B008",   # FastAPI: function calls in argument defaults are the intended DI pattern
+  "S110",   # intentional silent except-pass in circuit-breaker and cleanup paths
+  "S112",   # intentional silent except-continue in resilient loops
+  "S324",   # sha1 used for non-security purposes (cache keys)
+  "S603",   # subprocess used with trusted internal input
+  "S607",   # partial executable path used intentionally (e.g. ffprobe)
+  "S608",   # SQL construction unavoidable in migration utility
+  "T201",   # print used intentionally in websocket debug paths
+  "E402",   # load_dotenv() must precede other imports in main.py
+  "S102",   # exec used intentionally in main.py runtime bootstrap
 ]
 extend-select = [
   "I",   # isort

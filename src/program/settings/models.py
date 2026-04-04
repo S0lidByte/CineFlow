@@ -1011,9 +1011,9 @@ class AppModel(Observable):
 
     @field_validator("log_level", mode="before")
     def check_debug(cls, v: str | bool):
-        if v == True:
+        if v is True:
             return "DEBUG"
-        elif v == False:
+        elif v is False:
             return "INFO"
 
         return v.upper()

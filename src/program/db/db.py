@@ -2,14 +2,14 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
+from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from loguru import logger
 from sqla_wrapper import Session, SQLAlchemy
 from sqlalchemy import text
 
 from alembic import command
-from alembic.config import Config
-from alembic.runtime.migration import MigrationContext
-from alembic.script import ScriptDirectory
 from program.utils import root_dir
 
 from . import db, db_host, engine_options

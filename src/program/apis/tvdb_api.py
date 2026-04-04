@@ -120,7 +120,7 @@ class TVDBApi:
             if not self.token:
                 logger.error("Failed to obtain TVDB token, exiting.")
 
-                exit(0)
+                exit(0)  # noqa: PLR1722
 
             logger.info("Successfully obtained new TVDB token")
 

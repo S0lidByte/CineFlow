@@ -9,11 +9,9 @@ from pydantic import BaseModel
 from program.utils import data_dir_path
 from program.utils.cli import (
     clean_snapshots,
-)
-from program.utils.cli import restore_database as restore_database_from_file
-from program.utils.cli import (
     snapshot_database,
 )
+from program.utils.cli import restore_database as restore_database_from_file
 from program.utils.logging import logger
 
 router = APIRouter(

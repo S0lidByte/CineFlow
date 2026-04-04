@@ -637,6 +637,7 @@ def hard_reset_database() -> None:
                 # Stamp with head version if no previous version
                 import alembic.command
                 import alembic.config
+
                 from program.utils import root_dir
 
                 alembic_cfg = alembic.config.Config(root_dir / "src" / "alembic.ini")
@@ -671,4 +672,5 @@ reset = os.getenv("HARD_RESET", None)
 
 if reset is not None and reset.lower() in ["true", "1"]:
     hard_reset_database()
-    exit(0)
+    import sys
+    sys.exit(0)
