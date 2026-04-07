@@ -33,7 +33,7 @@ dependencies = [
     "python-dotenv>=1.0.1,<2",
     "requests-ratelimiter>=0.7.0,<0.10",
     "requests-cache>=1.2.1,<2",
-    "kink>=0.8.1,<0.9",
+    "kink>=0.8.1,<0.10",
     "bencodepy>=0.9.5,<0.10",
     "plexapi>=4.17.1,<5",
     "pyfuse3>=3.4.0,<4; sys_platform == 'linux'",
