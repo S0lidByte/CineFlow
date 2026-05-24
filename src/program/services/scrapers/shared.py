@@ -10,8 +10,10 @@ from RTN import (
     DefaultRanking,
     ParsedData,
     Torrent,
+    parse,
     sort_torrents,
 )
+from RTN.exceptions import GarbageTorrent
 from RTN.models import SettingsModel
 
 from program.media.item import Episode, MediaItem, Movie, Season, Show
@@ -23,6 +25,130 @@ scraping_settings: ScraperModel = settings_manager.settings.scraping
 ranking_settings: RTNSettingsModel = settings_manager.settings.ranking
 ranking_model: BaseRankingModel = DefaultRanking()
 rtn = RTN(ranking_settings, ranking_model)
+
+RTN_LANGUAGE_GROUPS = {"anime", "non_anime", "common", "all"}
+RTN_LANGUAGE_ALIASES = {
+    "eng": "en",
+    "english": "en",
+    "jpn": "ja",
+    "japanese": "ja",
+    "jp": "ja",
+    "chi": "zh",
+    "zho": "zh",
+    "chinese": "zh",
+    "kor": "ko",
+    "korean": "ko",
+    "fre": "fr",
+    "fra": "fr",
+    "french": "fr",
+    "ger": "de",
+    "deu": "de",
+    "german": "de",
+    "spa": "es",
+    "spanish": "es",
+    "por": "pt",
+    "portuguese": "pt",
+    "ita": "it",
+    "italian": "it",
+    "rus": "ru",
+    "russian": "ru",
+}
+
+
+def _normalize_rtn_language(language: str) -> str:
+    normalized = language.strip().lower().replace("_", "-")
+    if not normalized:
+        return normalized
+    if normalized in RTN_LANGUAGE_GROUPS:
+        return normalized
+    if "-" in normalized:
+        normalized = normalized.split("-", 1)[0]
+    if normalized in RTN_LANGUAGE_ALIASES:
+        return RTN_LANGUAGE_ALIASES[normalized]
+    return normalized
+
+
+def _normalize_rtn_language_list(languages: list[str]) -> list[str]:
+    normalized_languages = list[str]()
+    seen = set[str]()
+
+    for language in languages:
+        normalized = _normalize_rtn_language(language)
+        if normalized and normalized not in seen:
+            normalized_languages.append(normalized)
+            seen.add(normalized)
+
+    return normalized_languages
+
+
+def _normalize_rtn_language_settings(settings: SettingsModel) -> None:
+    settings.languages.required = _normalize_rtn_language_list(
+        settings.languages.required
+    )
+    settings.languages.allowed = _normalize_rtn_language_list(
+        settings.languages.allowed
+    )
+    settings.languages.exclude = _normalize_rtn_language_list(
+        settings.languages.exclude
+    )
+    settings.languages.preferred = _normalize_rtn_language_list(
+        settings.languages.preferred
+    )
+
+
+def _should_retry_as_untagged_english(
+    error: GarbageTorrent, settings: SettingsModel, raw_title: str
+) -> bool:
+    if "missing_required_language" not in str(error):
+        return False
+
+    if not settings.options.get("allow_english_in_languages", True):
+        return False
+
+    if "en" not in set(_normalize_rtn_language_list(settings.languages.required)):
+        return False
+
+    try:
+        return not parse(raw_title).languages
+    except Exception:
+        return False
+
+
+def _rank_with_language_compat(
+    rtn_instance: RTN,
+    settings: SettingsModel,
+    *,
+    raw_title: str,
+    infohash: str,
+    correct_title: str,
+    remove_trash: bool,
+    aliases: dict[str, str],
+) -> Torrent:
+    try:
+        return rtn_instance.rank(
+            raw_title=raw_title,
+            infohash=infohash,
+            correct_title=correct_title,
+            remove_trash=remove_trash,
+            aliases=aliases,
+        )
+    except GarbageTorrent as e:
+        if not _should_retry_as_untagged_english(e, settings, raw_title):
+            raise
+
+        relaxed_settings = settings.model_copy(deep=True)
+        relaxed_settings.languages.required = []
+        relaxed_rtn = RTN(relaxed_settings, ranking_model)
+        logger.trace(
+            f"Treating untagged release as English for language-required ranking: {raw_title}"
+        )
+        return relaxed_rtn.rank(
+            raw_title=raw_title,
+            infohash=infohash,
+            correct_title=correct_title,
+            remove_trash=remove_trash,
+            aliases=aliases,
+        )
 
 
 def get_ranking_overrides(
@@ -86,20 +212,18 @@ def parse_results(
         manual: If True, bypass content filters (for manual scraping).
     """
 
+    _ = log_msg
     torrents = set[Torrent]()
     processed_infohashes = set[str]()
     correct_title = item.top_title
 
     # Use effective RTN settings (handles explicit overrides/context implicitly)
     active_settings = settings_manager.get_effective_rtn_model()
+    _normalize_rtn_language_settings(active_settings)
 
     # Check if we are diverging from the global singleton `rtn` instance
     is_default_settings = active_settings.model_dump() == ranking_settings.model_dump()
-
-    if is_default_settings:
-        rtn_instance = rtn
-    else:
-        rtn_instance = RTN(active_settings, ranking_model)
+    rtn_instance = rtn if is_default_settings else RTN(active_settings, ranking_model)
 
     aliases = (
         {k: v for k, v in a.items() if k not in active_settings.languages.exclude}
@@ -114,7 +238,9 @@ def parse_results(
             continue
 
         try:
-            torrent = rtn_instance.rank(
+            torrent = _rank_with_language_compat(
+                rtn_instance,
+                active_settings,
                 raw_title=raw_title,
                 infohash=infohash,
                 correct_title=correct_title,
@@ -124,13 +250,16 @@ def parse_results(
                 aliases=aliases,
             )
 
-            if isinstance(item, Movie):
-                # If movie item, disregard torrents with seasons and episodes
-                if not manual and (torrent.data.episodes or torrent.data.seasons):
-                    logger.trace(
-                        f"Skipping show torrent for movie {item.log_string}: {raw_title}"
-                    )
-                    continue
+            # If movie item, disregard torrents with seasons and episodes
+            if (
+                isinstance(item, Movie)
+                and not manual
+                and (torrent.data.episodes or torrent.data.seasons)
+            ):
+                logger.trace(
+                    f"Skipping show torrent for movie {item.log_string}: {raw_title}"
+                )
+                continue
 
             if isinstance(item, Show):
                 # make sure the torrent has at least 2 episodes (should weed out most junk)
@@ -240,17 +369,18 @@ def parse_results(
                     )
                     continue
 
-            if not manual and torrent.data.country and not item.is_anime:
-                # If country is present, then check to make sure it's correct. (Covers: US, UK, NZ, AU)
-                if (
-                    torrent.data.country
-                    and (item_country := _get_item_country(item))
-                    and torrent.data.country not in item_country
-                ):
-                    logger.trace(
-                        f"Skipping torrent for incorrect country with {item.log_string}: {raw_title}"
-                    )
-                    continue
+            # If country is present, then check to make sure it's correct. (Covers: US, UK, NZ, AU)
+            if (
+                not manual
+                and torrent.data.country
+                and not item.is_anime
+                and (item_country := _get_item_country(item))
+                and torrent.data.country not in item_country
+            ):
+                logger.trace(
+                    f"Skipping torrent for incorrect country with {item.log_string}: {raw_title}"
+                )
+                continue
 
             if (
                 not manual
@@ -264,13 +394,17 @@ def parse_results(
                 )
                 continue
 
-            if not manual and item.is_anime and scraping_settings.dubbed_anime_only:
-                # If anime and user wants dubbed only, then check to make sure it's dubbed
-                if not torrent.data.dubbed:
-                    logger.trace(
-                        f"Skipping non-dubbed anime torrent for {item.log_string}: {raw_title}"
-                    )
-                    continue
+            # If anime and user wants dubbed only, then check to make sure it's dubbed
+            if (
+                not manual
+                and item.is_anime
+                and scraping_settings.dubbed_anime_only
+                and not torrent.data.dubbed
+            ):
+                logger.trace(
+                    f"Skipping non-dubbed anime torrent for {item.log_string}: {raw_title}"
+                )
+                continue
 
             torrents.add(torrent)
             processed_infohashes.add(infohash)
