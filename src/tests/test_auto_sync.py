@@ -7,7 +7,43 @@ from fastapi import HTTPException
 from program.media.item import Show
 from program.services.indexers import IndexerService
 from program.utils.locking import ItemLock
-from routers.secure.scrape import AutoScrapeRequest, auto_scrape
+from routers.secure.scrape import (
+    AutoScrapeRequest,
+    _matching_targeted_episodes,
+    _normalize_episode_numbers,
+    _requested_season_numbers,
+    auto_scrape,
+)
+
+
+def test_episode_targets_are_normalized_and_select_seasons():
+    request = AutoScrapeRequest(
+        media_type="tv",
+        tvdb_id="359913",
+        season_numbers=[2],
+        episode_numbers={"1": [3, 1, 3], "-1": [1], "3": [0]},
+    )
+
+    assert _normalize_episode_numbers(request.episode_numbers) == {1: {1, 3}}
+    assert _requested_season_numbers(request) == {1, 2}
+
+
+def test_matching_targeted_episodes_returns_only_requested_numbers():
+    season = MagicMock()
+    season.number = 1
+    episode_one = MagicMock()
+    episode_one.number = 1
+    episode_two = MagicMock()
+    episode_two.number = 2
+    episode_three = MagicMock()
+    episode_three.number = 3
+    season.episodes = [episode_one, episode_two, episode_three]
+
+    assert _matching_targeted_episodes(season, {1: {1, 3}}) == [
+        episode_one,
+        episode_three,
+    ]
+    assert _matching_targeted_episodes(season, {2: {1}}) is None
 
 
 @pytest.mark.asyncio

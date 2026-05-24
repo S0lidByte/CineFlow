@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from program.db import db_functions
 from program.db.db import db_session
-from program.media.item import MediaItem, ProcessedItemType, Season, Show
+from program.media.item import Episode, MediaItem, ProcessedItemType, Season, Show
 from program.media.state import States
 from program.media.stream import Stream as ItemStream
 from program.program import Program
@@ -549,7 +549,9 @@ def scrape_item(
         try:
             parsed_ranking_overrides = json.loads(ranking_overrides)
         except (json.JSONDecodeError, ValueError) as e:
-            raise HTTPException(status_code=422, detail=f"Invalid ranking_overrides JSON: {e}") from e
+            raise HTTPException(
+                status_code=422, detail=f"Invalid ranking_overrides JSON: {e}"
+            ) from e
     rtn_settings_override_model = get_ranking_overrides(parsed_ranking_overrides)
     overrides: dict[str, Any] = (
         rtn_settings_override_model.model_dump() if rtn_settings_override_model else {}
@@ -1068,8 +1070,57 @@ class AutoScrapeRequest(BaseModel):
     season_numbers: list[int] | None = (
         None  # If provided for TV, scrape specific seasons
     )
+    episode_numbers: dict[int, list[int]] | None = (
+        None  # If provided for TV, scrape specific episodes by season
+    )
     min_filesize_override: int | None = None
     max_filesize_override: int | None = None
+
+
+def _normalize_episode_numbers(
+    episode_numbers: dict[int, list[int]] | None,
+) -> dict[int, set[int]]:
+    if not episode_numbers:
+        return {}
+
+    normalized: dict[int, set[int]] = {}
+    for season_number, numbers in episode_numbers.items():
+        if season_number <= 0:
+            continue
+
+        cleaned = {
+            episode_number
+            for episode_number in numbers
+            if isinstance(episode_number, int) and episode_number > 0
+        }
+        if cleaned:
+            normalized[season_number] = cleaned
+
+    return normalized
+
+
+def _requested_season_numbers(request: AutoScrapeRequest) -> set[int]:
+    season_numbers = {
+        season_number
+        for season_number in (request.season_numbers or [])
+        if isinstance(season_number, int) and season_number > 0
+    }
+    return season_numbers | set(_normalize_episode_numbers(request.episode_numbers))
+
+
+def _matching_targeted_episodes(
+    season: Season,
+    episode_numbers_by_season: dict[int, set[int]],
+) -> list[Episode] | None:
+    requested_episode_numbers = episode_numbers_by_season.get(season.number)
+    if requested_episode_numbers is None:
+        return None
+
+    return [
+        episode
+        for episode in season.episodes
+        if episode.number in requested_episode_numbers
+    ]
 
 
 class StatelessSelectFilesRequest(BaseModel):
@@ -1120,8 +1171,19 @@ async def auto_scrape(
         if not item:
             raise HTTPException(status_code=404, detail="Item not found")
 
-        # If season_numbers provided for TV, scrape specific seasons
-        if request.season_numbers and request.media_type == "tv":
+        requested_season_numbers = _requested_season_numbers(request)
+        episode_numbers_by_season = _normalize_episode_numbers(request.episode_numbers)
+
+        if request.media_type != "tv" and (
+            request.season_numbers or request.episode_numbers
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Season and episode selection is only supported for TV shows",
+            )
+
+        # If season or episode numbers are provided for TV, scrape only that selection.
+        if requested_season_numbers and request.media_type == "tv":
             if not isinstance(item, Show):
                 raise HTTPException(status_code=400, detail="Item is not a TV show")
 
@@ -1141,7 +1203,7 @@ async def auto_scrape(
             # Check if any requested seasons are missing from DB
             available_season_numbers = [s.number for s in item.seasons]
             missing_seasons = [
-                n for n in request.season_numbers if n not in available_season_numbers
+                n for n in requested_season_numbers if n not in available_season_numbers
             ]
 
             if missing_seasons:
@@ -1216,7 +1278,7 @@ async def auto_scrape(
                     ItemLock.release(item.id)
 
             for season in item.seasons:
-                if season.number in request.season_numbers:
+                if season.number in requested_season_numbers:
                     seasons_to_scrape.append(season)
                 else:
                     seasons_to_pause.append(season)
@@ -1232,10 +1294,41 @@ async def auto_scrape(
                     season.last_state = States.Unknown
                     session.merge(season)
 
-                # Also unpause episodes in the selected season
+                targeted_episodes = _matching_targeted_episodes(
+                    season, episode_numbers_by_season
+                )
+                targeted_episode_numbers = (
+                    {episode.number for episode in targeted_episodes}
+                    if targeted_episodes is not None
+                    else None
+                )
+
+                if targeted_episodes is not None and not targeted_episodes:
+                    logger.warning(
+                        f"No matching episodes found in season {season.number} for requested numbers"
+                    )
+                    raise HTTPException(
+                        status_code=404, detail="No matching episodes found"
+                    )
+
+                # Unpause the selected episodes. For whole-season requests, every episode
+                # in the selected season remains eligible.
                 for episode in season.episodes:
-                    if episode.last_state == States.Paused:
-                        episode.last_state = States.Unknown
+                    if (
+                        targeted_episode_numbers is None
+                        or episode.number in targeted_episode_numbers
+                    ):
+                        if episode.last_state == States.Paused:
+                            episode.last_state = States.Unknown
+                            session.merge(episode)
+                    elif episode.state not in (
+                        States.Downloaded,
+                        States.Symlinked,
+                        States.Completed,
+                        States.PartiallyCompleted,
+                        States.Paused,
+                    ):
+                        episode.last_state = States.Paused
                         session.merge(episode)
 
             for season in seasons_to_pause:
@@ -1258,27 +1351,49 @@ async def auto_scrape(
             session.commit()
 
             # 2. Dispatch events
+            dispatched_seasons = 0
+            dispatched_episodes = 0
+
             for season in seasons_to_scrape:
-                # Dispatch for Season (Packs)
-                di[Program].em.add_event(
-                    Event(
-                        "API",
-                        season.id,
-                        overrides=overrides,
-                    )
+                targeted_episodes = _matching_targeted_episodes(
+                    season, episode_numbers_by_season
                 )
-                # Dispatch for Episodes (Individual files)
-                for episode in season.episodes:
+
+                if targeted_episodes is None:
+                    # Dispatch for Season (Packs)
                     di[Program].em.add_event(
                         Event(
                             "API",
-                            episode.id,
+                            season.id,
                             overrides=overrides,
                         )
                     )
+                    dispatched_seasons += 1
+                    episodes_to_dispatch = season.episodes
+                else:
+                    episodes_to_dispatch = targeted_episodes
+
+                # Dispatch for Episodes (Individual files)
+                for episode in episodes_to_dispatch:
+                    di[Program].em.add_event(
+                        Event("API", episode.id, overrides=overrides)
+                    )
+                    dispatched_episodes += 1
+
+            if episode_numbers_by_season:
+                return MessageResponse(
+                    message=f"Started scrape for {dispatched_episodes} episodes across {len(seasons_to_scrape)} seasons of {item.log_string} (paused {len(seasons_to_pause)} others)"
+                )
 
             return MessageResponse(
-                message=f"Started scrape for {len(seasons_to_scrape)} seasons of {item.log_string} (paused {len(seasons_to_pause)} others)"
+                message=f"Started scrape for {dispatched_seasons} seasons of {item.log_string} (paused {len(seasons_to_pause)} others)"
+            )
+
+        if request.media_type == "tv" and (
+            request.season_numbers or request.episode_numbers
+        ):
+            raise HTTPException(
+                status_code=400, detail="No valid season or episode numbers provided"
             )
 
         # Scrape entire item
