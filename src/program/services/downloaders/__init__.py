@@ -43,19 +43,19 @@ class Downloader(Runner[None, DownloaderBase]):
         super().__init__()
 
         self.initialized = False
-        self.services = {
+        self.services: dict[type[DownloaderBase], DownloaderBase] = {
             RealDebridDownloader: RealDebridDownloader(),
             DebridLinkDownloader: DebridLinkDownloader(),
             AllDebridDownloader: AllDebridDownloader(),
         }
 
         # Get all initialized services instead of just the first one
-        self.initialized_services = [
+        self.initialized_services: list[DownloaderBase] = [
             service for service in self.services.values() if service.initialized
         ]
 
         # Keep backward compatibility - primary service is the first initialized one
-        self.service = (
+        self.service: DownloaderBase | None = (
             self.initialized_services[0] if self.initialized_services else None
         )
 

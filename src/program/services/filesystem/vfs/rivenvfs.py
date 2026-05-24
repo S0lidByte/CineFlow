@@ -46,6 +46,7 @@ from typing import (
     Literal,
     NoReturn,
     TypedDict,
+    cast,
 )
 
 import pyfuse3
@@ -221,7 +222,7 @@ class RivenVFS(pyfuse3.Operations):
             # We use a plain bool here (main thread sets it), and create fresh
             # Trio primitives at the start of each trio.run() to avoid binding
             # them to a dead runner (which causes AssertionError on restart).
-            unmount_requested = False
+            unmount_requested: bool = False
 
             async def _async_main() -> NoReturn:
                 async with self.mountpoint_lifecycle():
@@ -243,7 +244,7 @@ class RivenVFS(pyfuse3.Operations):
                 except Exception:
                     logger.exception("FUSE main loop error, restarting")
 
-                unmount_requested = self._unmount_requested.value
+                unmount_requested = cast(bool, self._unmount_requested.value)
 
             logger.trace("FUSE main loop exited")
 
@@ -2039,6 +2040,8 @@ class RivenVFS(pyfuse3.Operations):
 
             if is_fair_usage:
                 return b""
+
+            raise pyfuse3.FUSEError(errno.EIO)
 
         except pyfuse3.FUSEError:
             raise

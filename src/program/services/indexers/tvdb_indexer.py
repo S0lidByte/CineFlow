@@ -46,7 +46,7 @@ class TVDBIndexer(BaseIndexer):
 
         # Scenario 1: Fresh indexing - create new Show from API data
         if item.type == "mediaitem":
-            if item.tvdb_id == "359913" or item.tvdb_id == 359913:
+            if item.tvdb_id == "359913":
                 logger.info(
                     "On-demand indexing triggered for Formula 1: Drive to Survive (TVDB: 359913)"
                 )

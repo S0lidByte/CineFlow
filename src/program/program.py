@@ -98,7 +98,7 @@ class Program(threading.Thread):
 
         self.initialized = False
         self.running = False
-        self.services = None
+        self.services: Services | None = None
         self.enable_trace = settings_manager.settings.tracemalloc
         self.em = EventManager()
         self.scheduler_manager = ProgramScheduler(self)
@@ -108,7 +108,7 @@ class Program(threading.Thread):
 
             tracemalloc.start()
             self.malloc_time = time.monotonic() - 50
-            self.last_snapshot = None
+            self.last_snapshot: Snapshot | None = None
 
     def initialize_apis(self):
         bootstrap_apis()

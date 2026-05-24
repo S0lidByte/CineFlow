@@ -1,7 +1,10 @@
 {
+  "extraPaths": ["src"],
   "ignore": ["src/schemas", "src/tests", "src/alembic"],
+  "pythonPlatform": "Linux",
   "deprecateTypingAliases": true,
   "typeCheckingMode": "strict",
+  "reportMissingModuleSource": "none",
   "reportMissingTypeStubs": false,
   "reportUnknownMemberType": "none",
   "reportUnknownLambdaType": "none",

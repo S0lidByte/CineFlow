@@ -77,7 +77,7 @@ async def download_user_info() -> DownloaderUserInfoResponse:
         # Get the downloader service from the program (may not be initialized yet)
         try:
             program = di[Program]
-            services = program.services if program else None
+            services = program.services
         except ServiceError:
             return DownloaderUserInfoResponse(services=[])
         except Exception as e:
@@ -92,8 +92,7 @@ async def download_user_info() -> DownloaderUserInfoResponse:
             return DownloaderUserInfoResponse(services=[])
 
         downloader = services.downloader
-        # Use getattr to avoid AttributeError if initialized_services is missing
-        initialized_services = getattr(downloader, "initialized_services", None) or []
+        initialized_services = downloader.initialized_services
 
         # Get user info from all initialized services
         services_info = list[DownloaderUserInfo]()
@@ -105,14 +104,12 @@ async def download_user_info() -> DownloaderUserInfoResponse:
                 if user_info:
                     # Convert datetime objects to ISO strings for JSON serialization
                     premium_expires_at_val: str | None = None
-                    if getattr(user_info, "premium_expires_at", None):
-                        dt = user_info.premium_expires_at
+                    if (dt := user_info.premium_expires_at) is not None:
                         premium_expires_at_val = (
                             dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
                         )
                     cooldown_until_val: str | None = None
-                    if getattr(user_info, "cooldown_until", None):
-                        dt = user_info.cooldown_until
+                    if (dt := user_info.cooldown_until) is not None:
                         cooldown_until_val = (
                             dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
                         )
