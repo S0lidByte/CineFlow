@@ -1,6 +1,6 @@
 [project]
 name = "riven"
-version = "1.7.3"
+version = "1.7.4"
 description = "Plex torrent streaming through Real Debrid and 3rd party services like Overseerr, Mdblist, etc."
 authors = [{ name = "Riven Developers" }]
 requires-python = "==3.13.*"
