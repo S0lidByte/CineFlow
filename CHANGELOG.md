@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/S0lidByte/CineFlow/compare/v1.7.5...v1.8.0) (2026-05-24)
+
+
+### Features
+
+* target episodes in auto scrape ([55b595b](https://github.com/S0lidByte/CineFlow/commit/55b595b620737e4835b2ccd2d349ab427bffb012))
+
 ## [1.7.5](https://github.com/S0lidByte/CineFlow/compare/v1.7.4...v1.7.5) (2026-05-24)
 
 
