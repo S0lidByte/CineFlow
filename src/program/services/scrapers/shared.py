@@ -122,7 +122,7 @@ def _rank_with_language_compat(
     infohash: str,
     correct_title: str,
     remove_trash: bool,
-    aliases: dict[str, str],
+    aliases: dict[str, list[str]],
 ) -> Torrent:
     try:
         return rtn_instance.rank(

@@ -621,11 +621,11 @@ wheels = [
 
 [[package]]
 name = "isort"
-version = "5.13.2"
+version = "8.0.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/87/f9/c1eb8635a24e87ade2efce21e3ce8cd6b8630bb685ddc9cdaca1349b2eb5/isort-5.13.2.tar.gz", hash = "sha256:48fdfcb9face5d58a4f6dde2e72a1fb8dcaf8ab26f95ab49fab84c2ddefb0109", size = 175303, upload-time = "2023-12-13T20:37:26.124Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ef/7c/ec4ab396d31b3b395e2e999c8f46dec78c5e29209fac49d1f4dace04041d/isort-8.0.1.tar.gz", hash = "sha256:171ac4ff559cdc060bcfff550bc8404a486fee0caab245679c2abe7cb253c78d", size = 769592, upload-time = "2026-02-28T10:08:20.685Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d1/b3/8def84f539e7d2289a02f0524b944b15d7c75dab7628bedf1c4f0992029c/isort-5.13.2-py3-none-any.whl", hash = "sha256:8ca5e72a8d85860d5a3fa69b8745237f2939afe12dbf656afbcb47fe72d947a6", size = 92310, upload-time = "2023-12-13T20:37:23.244Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/95/c7c34aa53c16353c56d0b802fba48d5f5caa2cdee7958acbcb795c830416/isort-8.0.1-py3-none-any.whl", hash = "sha256:28b89bc70f751b559aeca209e6120393d43fbe2490de0559662be7a9787e3d75", size = 89733, upload-time = "2026-02-28T10:08:19.466Z" },
 ]
 
 [[package]]
@@ -667,14 +667,14 @@ wheels = [
 
 [[package]]
 name = "kink"
-version = "0.8.1"
+version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "typing-extensions", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/00/28/f0bec943112929c6fe324d7a43633aafe4bd9c11949618f4a67fb280cbb9/kink-0.8.1.tar.gz", hash = "sha256:9310fa5860ad4df3cdd4a2b998517a718cbc83ed4975c51b8ebd60f640a9702c", size = 13081, upload-time = "2024-10-19T09:58:05.459Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bc/9b/71623fd68aabf7ee785e2a4032dbccc5121d7e27db0d72125739d1ce602b/kink-0.9.0.tar.gz", hash = "sha256:febe96b17f5e071858595ed536cc046fd0377596db296137773e4eeaa344800e", size = 13269, upload-time = "2026-03-19T08:26:54.794Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a0/ce/1f98d7f0fabdd2eb0f984527d8863b38399600a6fdce00c7b887ec57bad9/kink-0.8.1-py3-none-any.whl", hash = "sha256:c046be42395de6e18776daa93ac78280a70b3aa5c70b9ea5ca716cc71b3ff91a", size = 11241, upload-time = "2024-10-19T09:58:03.461Z" },
+    { url = "https://files.pythonhosted.org/packages/72/c4/1c8fa2e8480c846bd9df3b39c53f987ae85575604acf8cd9373a5c860ae4/kink-0.9.0-py3-none-any.whl", hash = "sha256:ae4a7f644ed94ecaf94517d3c95b0f31332e11b9941e90a3f72898067020a494", size = 11627, upload-time = "2026-03-19T08:26:55.837Z" },
 ]
 
 [[package]]
@@ -1069,11 +1069,11 @@ wheels = [
 
 [[package]]
 name = "prometheus-client"
-version = "0.20.0"
+version = "0.24.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/3d/39/3be07741a33356127c4fe633768ee450422c1231c6d34b951fee1458308d/prometheus_client-0.20.0.tar.gz", hash = "sha256:287629d00b147a32dcb2be0b9df905da599b2d82f80377083ec8463309a4bb89", size = 78278, upload-time = "2024-02-14T15:55:14.761Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f0/58/a794d23feb6b00fc0c72787d7e87d872a6730dd9ed7c7b3e954637d8f280/prometheus_client-0.24.1.tar.gz", hash = "sha256:7e0ced7fbbd40f7b84962d5d2ab6f17ef88a72504dcf7c0b40737b43b2a461f9", size = 85616, upload-time = "2026-01-14T15:26:26.965Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/98/745b810d822103adca2df8decd4c0bbe839ba7ad3511af3f0d09692fc0f0/prometheus_client-0.20.0-py3-none-any.whl", hash = "sha256:cde524a85bce83ca359cc837f28b8c0db5cac7aa653a588fd7e84ba061c329e7", size = 54474, upload-time = "2024-02-14T15:55:03.957Z" },
+    { url = "https://files.pythonhosted.org/packages/74/c3/24a2f845e3917201628ecaba4f18bab4d18a337834c1df2a159ee9d22a42/prometheus_client-0.24.1-py3-none-any.whl", hash = "sha256:150db128af71a5c2482b36e588fc8a6b95e498750da4b17065947c16070f4055", size = 64057, upload-time = "2026-01-14T15:26:24.42Z" },
 ]
 
 [[package]]
@@ -1530,16 +1530,16 @@ wheels = [
 
 [[package]]
 name = "responses"
-version = "0.25.3"
+version = "0.26.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyyaml", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "requests", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "urllib3", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/67/24/1d67c8974daa502e860b4a5b57ad6de0d7dbc0b1160ef7148189a24a40e1/responses-0.25.3.tar.gz", hash = "sha256:617b9247abd9ae28313d57a75880422d55ec63c29d33d629697590a034358dba", size = 77798, upload-time = "2024-06-14T16:32:58.41Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/b4/b7e040379838cc71bf5aabdb26998dfbe5ee73904c92c1c161faf5de8866/responses-0.26.0.tar.gz", hash = "sha256:c7f6923e6343ef3682816ba421c006626777893cb0d5e1434f674b649bac9eb4", size = 81303, upload-time = "2026-02-19T14:38:05.574Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/24/93293d0be0db9da1ed8dfc5e6af700fdd40e8f10a928704dd179db9f03c1/responses-0.25.3-py3-none-any.whl", hash = "sha256:521efcbc82081ab8daa588e08f7e8a64ce79b91c39f6e62199b19159bea7dbcb", size = 55238, upload-time = "2024-06-14T16:32:55.758Z" },
+    { url = "https://files.pythonhosted.org/packages/ce/04/7f73d05b556da048923e31a0cc878f03be7c5425ed1f268082255c75d872/responses-0.26.0-py3-none-any.whl", hash = "sha256:03ec4409088cd5c66b71ecbbbd27fe2c58ddfad801c66203457b3e6a04868c37", size = 35099, upload-time = "2026-02-19T14:38:03.847Z" },
 ]
 
 [[package]]
@@ -1624,7 +1624,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.110.0,<1" },
     { name = "httpx", extras = ["http2", "socks"], specifier = ">=0.28.1,<0.29" },
     { name = "jsonschema", specifier = ">=4.23.0,<5" },
-    { name = "kink", specifier = ">=0.8.1,<0.9" },
+    { name = "kink", specifier = ">=0.8.1,<0.10" },
     { name = "lazy-imports", specifier = ">=1.1.0" },
     { name = "loguru", specifier = ">=0.7.2,<0.8" },
     { name = "lxml", specifier = ">=5.1.0,<7" },
@@ -1634,7 +1634,7 @@ requires-dist = [
     { name = "ordered-set", specifier = ">=4.1.0" },
     { name = "parsett", specifier = ">=1.8.2,<2" },
     { name = "plexapi", specifier = ">=4.17.1,<5" },
-    { name = "prometheus-client", specifier = ">=0.20.0,<0.21" },
+    { name = "prometheus-client", specifier = ">=0.20.0,<0.25" },
     { name = "psutil", specifier = ">=7.1.0,<8" },
     { name = "psycopg2-binary", specifier = ">=2.9.9,<3" },
     { name = "pydantic", specifier = ">=2.12.0,<3" },
@@ -1658,7 +1658,7 @@ requires-dist = [
 dev = [
     { name = "black", specifier = ">=25.9.0,<27" },
     { name = "codecov", specifier = ">=2.1.13,<3" },
-    { name = "isort", specifier = ">=5.10.1,<6" },
+    { name = "isort", specifier = ">=5.10.1,<9" },
     { name = "mypy", specifier = ">=1.11.2,<2" },
     { name = "openapi-generator-cli", extras = ["jdk4py"], specifier = ">=7.17.0" },
     { name = "pre-commit", specifier = ">=4.3.0,<5" },
@@ -1668,7 +1668,7 @@ dev = [
     { name = "pytest", specifier = ">=9.0.3,<10" },
     { name = "pytest-mock", specifier = ">=3.14.0,<4" },
     { name = "requests-mock", specifier = ">=1.12.1,<2" },
-    { name = "responses", specifier = "==0.25.3" },
+    { name = "responses", specifier = "==0.26.0" },
     { name = "ruff", specifier = ">=0.13.3,<0.14" },
     { name = "testcontainers", specifier = ">=4.8.0,<5" },
     { name = "types-lxml", specifier = ">=2025.8.25" },
