@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.5](https://github.com/S0lidByte/CineFlow/compare/v1.7.4...v1.7.5) (2026-05-24)
+
+
+### Bug Fixes
+
+* close backend static analysis gaps ([c110228](https://github.com/S0lidByte/CineFlow/commit/c11022881f4b69df7a5ecf747b87d698bdc176d5))
+
 ## [1.7.4](https://github.com/S0lidByte/CineFlow/compare/v1.7.3...v1.7.4) (2026-05-24)
 
 
