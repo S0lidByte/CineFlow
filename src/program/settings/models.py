@@ -872,9 +872,42 @@ class SubtitleProviderConfig(Observable):
     enabled: bool = Field(default=False, description="Enable this subtitle provider")
 
 
+class OpenSubtitlesProviderConfig(Observable):
+    enabled: bool = Field(default=False, description="Enable OpenSubtitles provider")
+    username: str = Field(default="", description="OpenSubtitles username")
+    password: str = Field(
+        default="",
+        description="OpenSubtitles password",
+        json_schema_extra={"format": "password"},
+    )
+    user_agent: str = Field(default="VLSub 0.11.1", description="OpenSubtitles user agent")
+    allow_anonymous: bool = Field(
+        default=False,
+        description="Allow fallback to anonymous login when username/password are empty.",
+    )
+
+    @model_validator(mode="after")
+    def validate_credentials(self) -> "OpenSubtitlesProviderConfig":
+        has_username = bool(self.username)
+        has_password = bool(self.password)
+
+        if (has_username or has_password) and has_username != has_password:
+            raise ValueError(
+                "OpenSubtitles provider requires both username and password, or neither."
+            )
+
+        if self.enabled and not (has_username and has_password) and not self.allow_anonymous:
+            raise ValueError(
+                "OpenSubtitles provider is enabled but authentication is not configured. "
+                "Set both username and password, or enable allow_anonymous."
+            )
+
+        return self
+
+
 class SubtitleProvidersDict(Observable):
-    opensubtitles: SubtitleProviderConfig = Field(
-        default_factory=lambda: SubtitleProviderConfig(),
+    opensubtitles: OpenSubtitlesProviderConfig = Field(
+        default_factory=lambda: OpenSubtitlesProviderConfig(),
         description="OpenSubtitles provider configuration",
     )
 
