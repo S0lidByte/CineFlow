@@ -882,7 +882,7 @@ class OpenSubtitlesProviderConfig(Observable):
     )
     user_agent: str = Field(default="VLSub 0.11.1", description="OpenSubtitles user agent")
     allow_anonymous: bool = Field(
-        default=False,
+        default=True,
         description="Allow fallback to anonymous login when username/password are empty.",
     )
 
