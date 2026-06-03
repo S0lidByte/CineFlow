@@ -11,7 +11,7 @@ from program.media.media_entry import MediaEntry
 from program.services.streaming.exceptions import (
     DebridServiceLinkUnavailable,
 )
-from program.services.streaming.media_stream import PROXY_REQUIRED_PROVIDERS
+from program.services.streaming.streaming_constants import PROXY_REQUIRED_PROVIDERS
 from program.settings import settings_manager
 
 
