@@ -148,6 +148,9 @@ server = Server(config=config)
 with server.run_in_thread():
     try:
         di[Program].start()
+        if not di[Program].initialized or not di[Program].is_alive():
+            raise RuntimeError("Riven program did not start correctly.")
+
         di[Program].join()
     except Exception:
         logger.exception("Error in main thread")
