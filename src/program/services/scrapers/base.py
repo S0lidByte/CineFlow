@@ -89,7 +89,18 @@ class ScraperService(Runner[T, "ScraperService", dict[str, str]]):
             sanitized = [
                 (
                     key,
-                    "[redacted]" if key.lower() in {"apikey", "api_key", "token"} else value,
+                    "[redacted]"
+                    if key.lower()
+                    in {
+                        "apikey",
+                        "api_key",
+                        "token",
+                        "access_token",
+                        "refresh_token",
+                        "client_secret",
+                        "password",
+                    }
+                    else value,
                 )
                 for key, value in query
             ]
