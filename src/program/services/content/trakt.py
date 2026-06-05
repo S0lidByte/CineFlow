@@ -13,6 +13,7 @@ from program.db.db_functions import item_exists_by_any_id
 from program.media.item import MediaItem
 from program.settings import settings_manager
 from program.settings.models import TraktModel
+from program.utils.url_sanitizer import sanitize_url_for_logs
 from schemas.trakt import (
     GetCollection200ResponseInner,
     GetMovies200ResponseInnerMovie,
@@ -208,7 +209,7 @@ class TraktContent(Runner[TraktModel]):
             user, list_name = self.api.extract_user_list_from_url(url)
 
             if not user or not list_name:
-                logger.error(f"Invalid list URL: {url}")
+                logger.error(f"Invalid list URL: {sanitize_url_for_logs(url)}")
                 continue
 
             items = self.api.get_user_list(user, list_name)

@@ -1,7 +1,6 @@
 import time
 from http import HTTPStatus
 from typing import Self
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 from kink import di
@@ -14,6 +13,7 @@ from program.services.streaming.exceptions import (
 )
 from program.services.streaming.streaming_constants import PROXY_REQUIRED_PROVIDERS
 from program.settings import settings_manager
+from program.utils.url_sanitizer import sanitize_url_for_logs
 
 
 class RefreshedURLIdenticalException(Exception):
@@ -28,42 +28,7 @@ class DebridCDNUrl:
         """
         Redact sensitive query params before logging URL values.
         """
-        try:
-            parsed = urlsplit(url)
-            if not parsed.query:
-                return url
-
-            query = parse_qsl(parsed.query, keep_blank_values=True)
-            sanitized = [
-                (
-                    key,
-                    "[redacted]"
-                    if key.lower()
-                    in {
-                        "apikey",
-                        "api_key",
-                        "token",
-                        "access_token",
-                        "refresh_token",
-                        "client_secret",
-                        "password",
-                    }
-                    else value,
-                )
-                for key, value in query
-            ]
-
-            return urlunsplit(
-                (
-                    parsed.scheme,
-                    parsed.netloc,
-                    parsed.path,
-                    urlencode(sanitized, doseq=True),
-                    parsed.fragment,
-                )
-            )
-        except Exception:
-            return url
+        return sanitize_url_for_logs(url)
 
     def __init__(self, entry: MediaEntry) -> None:
         self.filename = entry.original_filename

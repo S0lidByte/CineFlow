@@ -11,6 +11,7 @@ from pydantic import BaseModel, field_validator
 
 from program.settings import settings_manager
 from program.utils.request import SmartSession
+from program.utils.url_sanitizer import sanitize_url_for_logs
 
 TMDBID_REGEX = regex.compile(r"tmdb://(\d+)")
 TVDBID_REGEX = regex.compile(r"tvdb://(\d+)")
@@ -140,7 +141,10 @@ class PlexAPI:
                 response = self.session.get(rss_url + "?format=json", timeout=60)
 
                 if not response.ok:
-                    logger.error(f"Failed to fetch Plex RSS feed from {rss_url}")
+                    logger.error(
+                        f"Failed to fetch Plex RSS feed from "
+                        f"{sanitize_url_for_logs(rss_url)}"
+                    )
                     continue
 
                 class RSSResponseData(BaseModel):
@@ -192,7 +196,8 @@ class PlexAPI:
 
             except Exception as e:
                 logger.error(
-                    f"An unexpected error occurred while fetching Plex RSS feed from {rss_url}: {e}"
+                    "An unexpected error occurred while fetching Plex RSS feed "
+                    f"from {sanitize_url_for_logs(rss_url)}: {e}"
                 )
         return rss_items
 

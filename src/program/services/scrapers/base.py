@@ -1,6 +1,5 @@
 import hashlib
 from abc import abstractmethod
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from typing import Literal, TypeVar, cast
 
 import bencodepy
@@ -11,6 +10,7 @@ from program.media.item import Episode, MediaItem, Movie, Season, Show
 from program.settings.models import Observable
 from program.utils.request import SmartSession
 from program.utils.torrent import extract_infohash
+from program.utils.url_sanitizer import sanitize_url_for_logs
 
 T = TypeVar("T", bound=Observable, covariant=True)
 
@@ -80,41 +80,7 @@ class ScraperService(Runner[T, "ScraperService", dict[str, str]]):
         """
         Redact sensitive query params before logging URLs.
         """
-        try:
-            parsed = urlsplit(url)
-            if not parsed.query:
-                return url
-
-            query = parse_qsl(parsed.query, keep_blank_values=True)
-            sanitized = [
-                (
-                    key,
-                    "[redacted]"
-                    if key.lower()
-                    in {
-                        "apikey",
-                        "api_key",
-                        "token",
-                        "access_token",
-                        "refresh_token",
-                        "client_secret",
-                        "password",
-                    }
-                    else value,
-                )
-                for key, value in query
-            ]
-            return urlunsplit(
-                (
-                    parsed.scheme,
-                    parsed.netloc,
-                    parsed.path,
-                    urlencode(sanitized, doseq=True),
-                    parsed.fragment,
-                )
-            )
-        except Exception:
-            return url
+        return sanitize_url_for_logs(url)
 
     @staticmethod
     def get_infohash_from_url(
@@ -176,9 +142,8 @@ class ScraperService(Runner[T, "ScraperService", dict[str, str]]):
 
         except Exception as e:
             logger.debug(
-                "Failed to get infohash from URL %s: %s",
-                ScraperService._sanitize_logged_url(url),
-                e,
+                "Failed to get infohash from URL "
+                f"{ScraperService._sanitize_logged_url(url)}: {e}",
             )
 
         return None
