@@ -2,12 +2,55 @@ import httpx
 import sniffio
 from httpx._client import UseClientDefault
 from httpx._types import AuthTypes
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from loguru import logger
 
 from program.settings import settings_manager
 
 # Sentinel for default values
 USE_CLIENT_DEFAULT = UseClientDefault()
+
+
+def _sanitize_logged_url(url: str) -> str:
+    """
+    Redact sensitive query parameters before logging URL values.
+    """
+    try:
+        parsed = urlsplit(url)
+        if not parsed.query:
+            return url
+
+        query = parse_qsl(parsed.query, keep_blank_values=True)
+        sanitized = [
+            (
+                key,
+                "[redacted]"
+                if key.lower()
+                in {
+                    "apikey",
+                    "api_key",
+                    "token",
+                    "access_token",
+                    "refresh_token",
+                    "client_secret",
+                    "password",
+                }
+                else value,
+            )
+            for key, value in query
+        ]
+
+        return urlunsplit(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                urlencode(sanitized, doseq=True),
+                parsed.fragment,
+            )
+        )
+    except Exception:
+        return url
 
 
 class AsyncClient(httpx.AsyncClient):
@@ -48,9 +91,10 @@ class AsyncClient(httpx.AsyncClient):
         Args:
             request (httpx.Request): The HTTP request to log.
         """
+        sanitized_url = _sanitize_logged_url(str(request.url))
         logger.log(
             "NETWORK",
-            f"Request event hook: {request.method} {request.url} - Waiting for response",
+            f"Request event hook: {request.method} {sanitized_url} - Waiting for response",
         )
 
     async def log_response(self, response: httpx.Response) -> None:
@@ -60,9 +104,10 @@ class AsyncClient(httpx.AsyncClient):
             response (httpx.Response): The HTTP response to log.
         """
 
+        sanitized_url = _sanitize_logged_url(str(response.request.url))
         logger.log(
             "NETWORK",
-            f"Response event hook: {response.request.method} {response.request.url} - Status {response.status_code}",
+            f"Response event hook: {response.request.method} {sanitized_url} - Status {response.status_code}",
         )
 
     async def send(
