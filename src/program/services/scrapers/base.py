@@ -1,5 +1,6 @@
 import hashlib
 from abc import abstractmethod
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from typing import Literal, TypeVar, cast
 
 import bencodepy
@@ -75,6 +76,36 @@ class ScraperService(Runner[T, "ScraperService", dict[str, str]]):
         return identifier, scrape_type, imdb_id
 
     @staticmethod
+    def _sanitize_logged_url(url: str) -> str:
+        """
+        Redact sensitive query params before logging URLs.
+        """
+        try:
+            parsed = urlsplit(url)
+            if not parsed.query:
+                return url
+
+            query = parse_qsl(parsed.query, keep_blank_values=True)
+            sanitized = [
+                (
+                    key,
+                    "[redacted]" if key.lower() in {"apikey", "api_key", "token"} else value,
+                )
+                for key, value in query
+            ]
+            return urlunsplit(
+                (
+                    parsed.scheme,
+                    parsed.netloc,
+                    parsed.path,
+                    urlencode(sanitized, doseq=True),
+                    parsed.fragment,
+                )
+            )
+        except Exception:
+            return url
+
+    @staticmethod
     def get_infohash_from_url(
         url: str,
         session: SmartSession | None = None,
@@ -133,6 +164,10 @@ class ScraperService(Runner[T, "ScraperService", dict[str, str]]):
                 return infohash
 
         except Exception as e:
-            logger.debug(f"Failed to get infohash from URL {url}: {e}")
+            logger.debug(
+                "Failed to get infohash from URL %s: %s",
+                ScraperService._sanitize_logged_url(url),
+                e,
+            )
 
         return None
