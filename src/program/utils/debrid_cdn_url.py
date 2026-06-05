@@ -1,6 +1,7 @@
 import time
 from http import HTTPStatus
 from typing import Self
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 from kink import di
@@ -21,6 +22,48 @@ class RefreshedURLIdenticalException(Exception):
 
 class DebridCDNUrl:
     """DebridCDNUrl class"""
+
+    @staticmethod
+    def _sanitize_logged_url(url: str) -> str:
+        """
+        Redact sensitive query params before logging URL values.
+        """
+        try:
+            parsed = urlsplit(url)
+            if not parsed.query:
+                return url
+
+            query = parse_qsl(parsed.query, keep_blank_values=True)
+            sanitized = [
+                (
+                    key,
+                    "[redacted]"
+                    if key.lower()
+                    in {
+                        "apikey",
+                        "api_key",
+                        "token",
+                        "access_token",
+                        "refresh_token",
+                        "client_secret",
+                        "password",
+                    }
+                    else value,
+                )
+                for key, value in query
+            ]
+
+            return urlunsplit(
+                (
+                    parsed.scheme,
+                    parsed.netloc,
+                    parsed.path,
+                    urlencode(sanitized, doseq=True),
+                    parsed.fragment,
+                )
+            )
+        except Exception:
+            return url
 
     def __init__(self, entry: MediaEntry) -> None:
         self.filename = entry.original_filename
@@ -129,10 +172,13 @@ class DebridCDNUrl:
 
                         return self.url
             except httpx.TimeoutException as e:
-                logger.error(f"Timeout while validating CDN URL {self.url}: {e}")
+                logger.error(
+                    f"Timeout while validating CDN URL {self._sanitize_logged_url(self.url)}: {e}"
+                )
             except httpx.ConnectError as e:
                 logger.error(
-                    f"Connection error while validating CDN URL {self.url}: {e}"
+                    f"Connection error while validating CDN URL "
+                    f"{self._sanitize_logged_url(self.url)}: {e}"
                 )
             except httpx.HTTPStatusError as e:
                 status_code = e.response.status_code
@@ -157,7 +203,8 @@ class DebridCDNUrl:
                 raise
             except Exception as e:
                 logger.error(
-                    f"Unexpected error while validating CDN URL {self.url}: {e}"
+                    f"Unexpected error while validating CDN URL "
+                    f"{self._sanitize_logged_url(self.url)}: {e}"
                 )
 
                 return None
