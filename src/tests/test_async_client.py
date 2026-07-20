@@ -76,3 +76,11 @@ def test_log_response_redacts_sensitive_query_params(monkeypatch):
     assert "refresh_token=%5Bredacted%5D" in message
     assert "abc" not in message
     assert "safe=ok" in message
+
+
+def test_async_client_connection_limits_are_bounded():
+    client = async_client.AsyncClient()
+    pool = client._transport._pool
+    assert pool._max_connections == 200
+    assert pool._max_keepalive_connections == 50
+    asyncio.run(client.aclose())

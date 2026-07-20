@@ -1,3 +1,4 @@
+import asyncio
 import platform
 from datetime import datetime
 from typing import Annotated, Any, Literal
@@ -523,7 +524,7 @@ def _upload_logs_to_paste() -> HttpUrl:
 async def upload_logs() -> UploadLogsResponse:
     """Upload the latest log file to paste.c-net.org"""
     try:
-        url = _upload_logs_to_paste()
+        url = await asyncio.to_thread(_upload_logs_to_paste)
         return UploadLogsResponse(success=True, url=url)
     except HTTPException:
         raise
@@ -635,7 +636,7 @@ async def generate_debug_bundle() -> DebugResponse:
     db_backup_filename: str | None = None
 
     try:
-        log_url = _upload_logs_to_paste()
+        log_url = await asyncio.to_thread(_upload_logs_to_paste)
     except HTTPException as e:
         errors.append(e.detail)
     except Exception as e:
@@ -643,7 +644,7 @@ async def generate_debug_bundle() -> DebugResponse:
         errors.append(f"Failed to upload logs: {str(e)}")
 
     try:
-        db_backup_filename = snapshot_database()
+        db_backup_filename = await asyncio.to_thread(snapshot_database)
         if db_backup_filename:
             logger.info(f"Debug: Created database backup: {db_backup_filename}")
         else:
