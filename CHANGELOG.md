@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.9.4](https://github.com/S0lidByte/CineFlow/compare/v1.9.3...v1.9.4) (2026-07-20)
+
+
+### Bug Fixes
+
+* **docker:** harden Postgres healthcheck and add prod smoke compose ([ffe98f1](https://github.com/S0lidByte/CineFlow/commit/ffe98f1d8c40194c35c83e60a99b48ede04b06ce))
+* **docker:** harden Postgres healthcheck and add prod smoke compose ([f31d98e](https://github.com/S0lidByte/CineFlow/commit/f31d98e6eb6707bd14cc96ef0d5de21fc0ef3e6b))
+* **docker:** resolve riven-db via Compose service DNS ([919845c](https://github.com/S0lidByte/CineFlow/commit/919845c47fce62d2998655f1b173c0743a530dac))
+* **docker:** resolve riven-db via Compose service DNS ([cb156b3](https://github.com/S0lidByte/CineFlow/commit/cb156b3ee13a064a0af226281c67ace345de3c0d))
+* **scheduler:** suppress autoflush during reindex merge ([#84](https://github.com/S0lidByte/CineFlow/issues/84)) ([ba983a8](https://github.com/S0lidByte/CineFlow/commit/ba983a8ddbed10cd31f74995ba51322b8790e371))
+* sync uv.lock package version to 1.9.3 ([d9391bb](https://github.com/S0lidByte/CineFlow/commit/d9391bb08d573af693dc1954c561263da1e35ff3))
+
 ## [1.9.3](https://github.com/S0lidByte/CineFlow/compare/v1.9.2...v1.9.3) (2026-07-20)
 
 
