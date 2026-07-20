@@ -56,7 +56,7 @@ class AsyncClient(httpx.AsyncClient):
         Args:
             request (httpx.Request): The HTTP request to log.
         """
-        sanitized_url = sanitize_url_for_logs(str(request.url))
+        sanitized_url = _sanitize_logged_url(str(request.url))
         logger.log(
             "NETWORK",
             f"Request event hook: {request.method} {sanitized_url} - Waiting for response",
@@ -69,7 +69,7 @@ class AsyncClient(httpx.AsyncClient):
             response (httpx.Response): The HTTP response to log.
         """
 
-        sanitized_url = sanitize_url_for_logs(str(response.request.url))
+        sanitized_url = _sanitize_logged_url(str(response.request.url))
         logger.log(
             "NETWORK",
             f"Response event hook: {response.request.method} {sanitized_url} - Status {response.status_code}",
