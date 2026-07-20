@@ -213,7 +213,8 @@ class Program(threading.Thread):
         except Exception as exc:
             if not is_database_missing_error(exc):
                 logger.error(
-                    "Database connection failed after retries. Is the database running?"
+                    "Database connection failed after retries. Is the database running? "
+                    f"Last error: {exc}"
                 )
                 return False
 
@@ -227,8 +228,10 @@ class Program(threading.Thread):
         try:
             wait_for_database(timeout_seconds=30.0)
             return True
-        except Exception:
-            logger.error("Database still unavailable after create, exiting")
+        except Exception as exc:
+            logger.error(
+                f"Database still unavailable after create, exiting. Last error: {exc}"
+            )
             return False
 
     def start(self):
