@@ -1659,7 +1659,7 @@ dev = [
     { name = "black", specifier = ">=25.9.0,<27" },
     { name = "codecov", specifier = ">=2.1.13,<3" },
     { name = "isort", specifier = ">=5.10.1,<9" },
-    { name = "mypy", specifier = ">=1.11.2,<2" },
+    { name = "mypy", specifier = ">=1.11.2,<3" },
     { name = "openapi-generator-cli", extras = ["jdk4py"], specifier = ">=7.17.0" },
     { name = "pre-commit", specifier = ">=4.3.0,<5" },
     { name = "pyfakefs", specifier = ">=5.4.1,<7" },
