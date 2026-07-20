@@ -6,6 +6,7 @@ from datetime import datetime
 from queue import Empty, Queue
 
 from loguru import logger
+from RTN import Torrent
 
 from program.core.runner import MediaItemGenerator, Runner, RunnerResult
 from program.media.item import MediaItem
@@ -192,7 +193,7 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
         """
         results_queue: Queue[tuple[str, dict[str, str]]] = Queue()
         all_raw_results = dict[str, str]()
-        accumulated_torrents = set()
+        accumulated_torrents: set[Torrent] = set()
         processed_infohashes = set[str]()
         results_lock = threading.RLock()
 
