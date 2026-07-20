@@ -1,4 +1,4 @@
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from functools import cached_property
 from http import HTTPStatus
@@ -223,7 +223,7 @@ class MediaStream:
         self,
         *,
         position: int,
-    ) -> AsyncIterator[StreamConnection]:
+    ) -> AsyncGenerator[StreamConnection, None]:
         """Context manager to handle connection lifecycle."""
 
         try:
@@ -632,7 +632,7 @@ class MediaStream:
         return data[slice_offset : slice_offset + size]
 
     @asynccontextmanager
-    async def capture_stream_errors(self) -> AsyncIterator[None]:
+    async def capture_stream_errors(self) -> AsyncGenerator[None, None]:
         """Context manager to capture and log stream errors."""
 
         # Handle the read request whilst monitoring for stream kill signals, and errors.
@@ -653,7 +653,9 @@ class MediaStream:
             raise self._stream_error.value from None
 
     @asynccontextmanager
-    async def read_lifecycle(self, chunk_range: ChunkRange) -> AsyncIterator[ReadType]:
+    async def read_lifecycle(
+        self, chunk_range: ChunkRange
+    ) -> AsyncGenerator[ReadType, None]:
         """Context manager for managing read lifecycle."""
 
         try:
