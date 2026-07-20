@@ -198,30 +198,15 @@ def get_ranking_overrides(
         return None
 
 
-def parse_results(
+def _prepare_rtn_ranking_context(
     item: MediaItem,
-    results: dict[str, str],
-    log_msg: bool = True,
-    manual: bool = False,
-) -> dict[str, Stream]:
-    """Parse the results from the scrapers into Torrent objects.
+) -> tuple[RTN, SettingsModel, str, dict[str, list[str]]]:
+    """Build RTN instance, settings, title, and aliases for ranking."""
 
-    Args:
-        item: The media item to parse results for.
-        results: Dict mapping infohash to raw title.
-        manual: If True, bypass content filters (for manual scraping).
-    """
-
-    _ = log_msg
-    torrents = set[Torrent]()
-    processed_infohashes = set[str]()
     correct_title = item.top_title
-
-    # Use effective RTN settings (handles explicit overrides/context implicitly)
     active_settings = settings_manager.get_effective_rtn_model()
     _normalize_rtn_language_settings(active_settings)
 
-    # Check if we are diverging from the global singleton `rtn` instance
     is_default_settings = active_settings.model_dump() == ranking_settings.model_dump()
     rtn_instance = rtn if is_default_settings else RTN(active_settings, ranking_model)
 
@@ -231,7 +216,63 @@ def parse_results(
         else {}
     )
 
-    logger.debug(f"Processing {len(results)} results for {item.log_string}")
+    return rtn_instance, active_settings, correct_title, aliases
+
+
+def _streams_from_torrents(
+    item: MediaItem,
+    torrents: set[Torrent],
+    *,
+    manual: bool = False,
+    log_msg: bool = True,
+) -> dict[str, Stream]:
+    """Sort accumulated torrents and map them to Stream objects."""
+
+    if not torrents:
+        return {}
+
+    if log_msg:
+        logger.debug(f"Found {len(torrents)} streams for {item.log_string}")
+
+    sorted_torrents = sort_torrents(
+        torrents,
+        bucket_limit=scraping_settings.bucket_limit if not manual else 0,
+    )
+
+    torrent_stream_map = {
+        torrent.infohash.lower(): Stream(torrent)
+        for torrent in sorted_torrents.values()
+    }
+
+    if log_msg:
+        logger.debug(
+            f"Kept {len(torrent_stream_map)} streams for {item.log_string} "
+            f"after processing bucket limit"
+        )
+
+    return torrent_stream_map
+
+
+def _accumulate_ranked_torrents(
+    item: MediaItem,
+    results: dict[str, str],
+    torrents: set[Torrent],
+    processed_infohashes: set[str],
+    *,
+    manual: bool = False,
+    log_msg: bool = True,
+) -> None:
+    """Rank and filter scraper results into ``torrents`` (mutates in place)."""
+
+    if not results:
+        return
+
+    rtn_instance, active_settings, correct_title, aliases = _prepare_rtn_ranking_context(
+        item
+    )
+
+    if log_msg:
+        logger.debug(f"Processing {len(results)} results for {item.log_string}")
 
     for infohash, raw_title in results.items():
         if infohash in processed_infohashes:
@@ -413,26 +454,63 @@ def parse_results(
             processed_infohashes.add(infohash)
             continue
 
-    if torrents:
-        logger.debug(f"Found {len(torrents)} streams for {item.log_string}")
 
-        sorted_torrents = sort_torrents(
-            torrents,
-            bucket_limit=scraping_settings.bucket_limit if not manual else 0,
-        )
+def parse_results(
+    item: MediaItem,
+    results: dict[str, str],
+    log_msg: bool = True,
+    manual: bool = False,
+) -> dict[str, Stream]:
+    """Parse the results from the scrapers into Torrent objects.
 
-        torrent_stream_map = {
-            torrent.infohash.lower(): Stream(torrent)
-            for torrent in sorted_torrents.values()
-        }
+    Args:
+        item: The media item to parse results for.
+        results: Dict mapping infohash to raw title.
+        log_msg: If False, suppress debug progress logs during ranking/sort.
+        manual: If True, bypass content filters (for manual scraping).
+    """
 
-        logger.debug(
-            f"Kept {len(torrent_stream_map)} streams for {item.log_string} after processing bucket limit"
-        )
+    torrents = set[Torrent]()
+    processed_infohashes = set[str]()
+    _accumulate_ranked_torrents(
+        item,
+        results,
+        torrents,
+        processed_infohashes,
+        manual=manual,
+        log_msg=log_msg,
+    )
+    return _streams_from_torrents(
+        item, torrents, manual=manual, log_msg=log_msg
+    )
 
-        return torrent_stream_map
 
-    return {}
+def merge_parse_results(
+    item: MediaItem,
+    delta_results: dict[str, str],
+    torrents: set[Torrent],
+    processed_infohashes: set[str],
+    *,
+    manual: bool = False,
+    log_msg: bool = True,
+) -> dict[str, Stream]:
+    """Parse only newly seen scraper results and return the full ranked stream map.
+
+    Mutates ``torrents`` and ``processed_infohashes`` so callers can reuse them
+    across streaming scrape completions without re-ranking prior hashes.
+    """
+
+    _accumulate_ranked_torrents(
+        item,
+        delta_results,
+        torrents,
+        processed_infohashes,
+        manual=manual,
+        log_msg=log_msg,
+    )
+    return _streams_from_torrents(
+        item, torrents, manual=manual, log_msg=log_msg
+    )
 
 
 # helper functions
