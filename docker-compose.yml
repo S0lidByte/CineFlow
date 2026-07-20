@@ -33,7 +33,8 @@ services:
             - PGID=1000
             - TZ=America/New_York
             - RIVEN_FORCE_ENV=true
-            - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven-db/riven
+            # Prefer Compose service name for DNS; riven-db remains an alias for older configs.
+            - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
         healthcheck:
             test: curl -s http://localhost:8080 >/dev/null || exit 1
             interval: 30s
@@ -49,6 +50,7 @@ services:
     riven_postgres:
         image: postgres:17-alpine
         container_name: riven-db
+        hostname: riven-db
         environment:
             - PGDATA=/var/lib/postgresql/data/pgdata
             - POSTGRES_USER=postgres
@@ -56,6 +58,11 @@ services:
             - POSTGRES_DB=riven
         volumes:
             - /path/to/riven/db:/var/lib/postgresql/data/pgdata
+        networks:
+            default:
+                aliases:
+                    - riven-db
+                    - riven_postgres
         healthcheck:
             # Accept crash-recovery / startup as "still starting" so compose does not
             # mark the DB unhealthy while Postgres replays WAL (backend retries separately).

@@ -1,0 +1,90 @@
+# Local stack smoke test: postgres + backend + frontend on one Compose network.
+# Usage (from Triven_backend/):
+#   docker compose -f docker-compose.stack-test.yml up -d --build
+#   docker compose -f docker-compose.stack-test.yml ps
+#   docker compose -f docker-compose.stack-test.yml down -v
+name: cineflow-stack-test
+
+services:
+  riven_postgres:
+    image: postgres:17-alpine
+    container_name: cineflow-test-db
+    hostname: riven-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: riven
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5433:5432"
+    volumes:
+      - cineflow_test_pg:/var/lib/postgresql/data
+    networks:
+      default:
+        aliases:
+          - riven-db
+          - riven_postgres
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "err=$$(psql -U postgres -d postgres -c 'SELECT 1' 2>&1) && exit 0; echo \"$$err\" | grep -Eiq 'recovery mode|starting up' && exit 0; exit 1",
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  riven:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cineflow-test-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - PUID=0
+      - PGID=0
+      - TZ=UTC
+      - RIVEN_FORCE_ENV=true
+      - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
+      - API_KEY=abcdefghijklmnopqrstuvwxyz123456
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - cineflow_test_data:/riven/data
+    depends_on:
+      riven_postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  riven-frontend:
+    build:
+      context: ../Triven_frontend
+      dockerfile: Dockerfile
+    container_name: cineflow-test-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://riven:8080
+      - BACKEND_API_KEY=abcdefghijklmnopqrstuvwxyz123456
+      - AUTH_SECRET=local-stack-test-auth-secret-32chars
+      - ORIGIN=http://localhost:3000
+      - DATABASE_URL=/riven/data/riven.db
+    volumes:
+      - cineflow_test_frontend:/riven/data
+    depends_on:
+      riven:
+        condition: service_healthy
+
+volumes:
+  cineflow_test_pg:
+  cineflow_test_data:
+  cineflow_test_frontend:

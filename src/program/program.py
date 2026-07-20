@@ -213,7 +213,8 @@ class Program(threading.Thread):
         except Exception as exc:
             if not is_database_missing_error(exc):
                 logger.error(
-                    "Database connection failed after retries. Is the database running? "
+                    "Database connection failed. Is the database running and reachable "
+                    f"on the Compose network (service name riven_postgres / alias riven-db)? "
                     f"Last error: {exc}"
                 )
                 return False

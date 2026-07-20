@@ -47,6 +47,13 @@ class TestDatabaseErrorClassification:
         )
         assert is_transient_database_error(exc)
 
+    def test_hostname_dns_failure_is_transient(self):
+        exc = _sa_operational(
+            'could not translate host name "riven-db" to address: Name does not resolve'
+        )
+        assert is_transient_database_error(exc)
+        assert not is_database_missing_error(exc)
+
     def test_missing_database_is_not_transient(self):
         exc = _sa_operational('FATAL:  database "riven" does not exist')
         assert is_database_missing_error(exc)
