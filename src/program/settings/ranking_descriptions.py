@@ -7,7 +7,14 @@ are injected into the settings JSON schema so the UI can explain that mapping.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
+
+
+def _as_schema_object(value: Any) -> dict[str, Any] | None:
+    """Narrow JSON-schema nodes to typed dicts for pyright."""
+    if isinstance(value, dict):
+        return cast(dict[str, Any], value)
+    return None
 
 # Log deny key → short explanation (also used as property description text).
 DENY_KEY_HELP: dict[str, str] = {
@@ -210,21 +217,22 @@ def _set_desc(node: dict[str, Any], text: str) -> None:
 
 
 def _enrich_custom_rank_def(defn: dict[str, Any]) -> None:
-    props = defn.get("properties")
-    if not isinstance(props, dict):
+    props = _as_schema_object(defn.get("properties"))
+    if props is None:
         return
     for key, help_text in CUSTOM_RANK_FIELD_HELP.items():
-        prop = props.get(key)
-        if isinstance(prop, dict):
+        prop = _as_schema_object(props.get(key))
+        if prop is not None:
             _set_desc(prop, help_text)
 
 
 def _enrich_rank_model_def(defn: dict[str, Any], category: str) -> None:
-    props = defn.get("properties")
-    if not isinstance(props, dict):
+    props = _as_schema_object(defn.get("properties"))
+    if props is None:
         return
-    for attr, prop in props.items():
-        if not isinstance(prop, dict):
+    for attr, prop_raw in props.items():
+        prop = _as_schema_object(prop_raw)
+        if prop is None:
             continue
         deny_key = f"{category}_{attr}"
         title = ATTRIBUTE_TITLES.get(attr, attr.replace("_", " ").title())
@@ -238,31 +246,34 @@ def _enrich_rank_model_def(defn: dict[str, Any], category: str) -> None:
 
 
 def _enrich_named_props(defn: dict[str, Any], help_map: dict[str, str]) -> None:
-    props = defn.get("properties")
-    if not isinstance(props, dict):
+    props = _as_schema_object(defn.get("properties"))
+    if props is None:
         return
     for key, help_text in help_map.items():
-        prop = props.get(key)
-        if isinstance(prop, dict):
+        prop = _as_schema_object(props.get(key))
+        if prop is not None:
             _set_desc(prop, help_text)
 
 
 def enrich_ranking_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """Mutate (and return) a settings schema fragment to add ranking field docs."""
-    ranking = schema.get("properties", {}).get("ranking")
-    if isinstance(ranking, dict):
-        _set_desc(
-            ranking,
-            "RTN result ranking and trash filters. Reject reasons in logs map to "
-            "custom_ranks.<category>.<attribute> (denied by: <category>_<attribute>).",
-        )
+    properties = _as_schema_object(schema.get("properties"))
+    if properties is not None:
+        ranking = _as_schema_object(properties.get("ranking"))
+        if ranking is not None:
+            _set_desc(
+                ranking,
+                "RTN result ranking and trash filters. Reject reasons in logs map to "
+                "custom_ranks.<category>.<attribute> (denied by: <category>_<attribute>).",
+            )
 
-    defs = schema.get("$defs")
-    if not isinstance(defs, dict):
+    defs = _as_schema_object(schema.get("$defs"))
+    if defs is None:
         return schema
 
-    for def_name, defn in defs.items():
-        if not isinstance(defn, dict):
+    for def_name, defn_raw in defs.items():
+        defn = _as_schema_object(defn_raw)
+        if defn is None:
             continue
         if def_name == "CustomRank":
             _enrich_custom_rank_def(defn)
