@@ -44,8 +44,9 @@ def test_merge_parse_results_matches_full_parse_results():
             manual=True,
         )
 
-    assert set(incremental) == set(full)
-    assert len(processed) >= len(full)
+    expected_hashes = set(combined.keys())
+    assert incremental == full
+    assert processed == expected_hashes
     # Ranking order should match for the shared keys
     assert list(incremental.keys()) == list(full.keys())
 
@@ -71,32 +72,28 @@ def test_merge_parse_results_skips_already_processed_hashes():
 
 
 def test_conflicting_infohash_titles_first_wins():
-    """scrape_streaming must keep the first title for a duplicate infohash."""
+    """scrape_streaming / merge_parse_results must keep the first title for a duplicate infohash."""
     infohash = "d" * 40
     first_title = "Stargate Continuum 2008 1080p BluRay x264-OFT"
     conflict_title = "Totally Different Title 480p CAM"
 
-    all_raw_results: dict[str, str] = {}
-    batches = [
-        {infohash: first_title},
-        {infohash: conflict_title},
-    ]
-
     torrents = set()
     processed = set[str]()
     with settings_manager.override(languages={"required": []}):
-        for raw_results in batches:
-            delta_results = {
-                h: title
-                for h, title in raw_results.items()
-                if h not in all_raw_results
-            }
-            all_raw_results.update(delta_results)
-            merge_parse_results(
-                DummyItem(), delta_results, torrents, processed, manual=True
-            )
+        first = merge_parse_results(
+            DummyItem(), {infohash: first_title}, torrents, processed, manual=True
+        )
+        # Pass conflict into merge path (not filtered by all_raw_results); processed skips re-rank.
+        second = merge_parse_results(
+            DummyItem(),
+            {infohash: conflict_title},
+            torrents,
+            processed,
+            manual=True,
+        )
 
-    assert all_raw_results[infohash] == first_title
     assert infohash in processed
-    # Conflicting title must not create a second ranking pass
     assert len(processed) == 1
+    assert first == second
+    assert infohash in first
+    assert first[infohash].raw_title == first_title

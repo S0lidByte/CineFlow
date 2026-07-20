@@ -1740,14 +1740,17 @@ class RivenVFS(pyfuse3.Operations):
                     logger.trace(f"Validating CDN URL for {node.path}...")
 
                     validate_started = time.perf_counter()
-                    validated_url = DebridCDNUrl.from_filename(
-                        node.original_filename
-                    ).validate()
-                    validate_ms = (time.perf_counter() - validate_started) * 1000
-                    logger.trace(
-                        f"VFS.open CDN validate: path={node.path} "
-                        f"ok={validated_url is not None} elapsed_ms={validate_ms:.1f}"
-                    )
+                    validated_url = None
+                    try:
+                        validated_url = DebridCDNUrl.from_filename(
+                            node.original_filename
+                        ).validate()
+                    finally:
+                        validate_ms = (time.perf_counter() - validate_started) * 1000
+                        logger.trace(
+                            f"VFS.open CDN validate: path={node.path} "
+                            f"ok={validated_url is not None} elapsed_ms={validate_ms:.1f}"
+                        )
 
                     if validated_url is None:
                         logger.error(
