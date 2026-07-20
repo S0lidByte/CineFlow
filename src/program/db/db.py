@@ -1,3 +1,4 @@
+import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
@@ -21,11 +22,112 @@ from . import db, db_host, engine_options
 #     cursor.execute("SET statement_timeout = 300000")
 #     cursor.close()
 
+# Postgres / network states that usually clear if we wait (crash recovery, boot, brief outages).
+_TRANSIENT_DB_ERROR_MARKERS = (
+    "in recovery mode",
+    "is starting up",
+    "connection refused",
+    "could not connect to server",
+    "server closed the connection unexpectedly",
+    "connection timed out",
+    "timeout expired",
+    "temporarily unavailable",
+    "too many connections",
+    "remaining connection slots are reserved",
+)
+
+DEFAULT_DB_WAIT_TIMEOUT_SECONDS = 120.0
+DEFAULT_DB_WAIT_INITIAL_DELAY_SECONDS = 1.0
+DEFAULT_DB_WAIT_MAX_DELAY_SECONDS = 8.0
+
 
 @contextmanager
 def db_session() -> Generator[Session, Any, None]:
     with db.Session() as session:
         yield session
+
+
+def _error_text(exc: BaseException) -> str:
+    return str(exc).lower()
+
+
+def is_transient_database_error(exc: BaseException) -> bool:
+    """Return True when the failure is likely temporary (recovery, boot, refused)."""
+
+    msg = _error_text(exc)
+    return any(marker in msg for marker in _TRANSIENT_DB_ERROR_MARKERS)
+
+
+def is_database_missing_error(exc: BaseException) -> bool:
+    """Return True when the server is reachable but the target database does not exist."""
+
+    msg = _error_text(exc)
+    return "database" in msg and "does not exist" in msg
+
+
+def is_database_already_exists_error(exc: BaseException) -> bool:
+    """Return True when CREATE DATABASE raced with another creator."""
+
+    msg = _error_text(exc)
+    return "already exists" in msg
+
+
+def probe_database() -> None:
+    """Execute a simple query against the configured database. Raises on failure."""
+
+    with db_session() as session:
+        session.execute(text("SELECT 1"))
+
+
+def wait_for_database(
+    *,
+    timeout_seconds: float = DEFAULT_DB_WAIT_TIMEOUT_SECONDS,
+    initial_delay: float = DEFAULT_DB_WAIT_INITIAL_DELAY_SECONDS,
+    max_delay: float = DEFAULT_DB_WAIT_MAX_DELAY_SECONDS,
+) -> None:
+    """Block until the configured database accepts queries.
+
+    Retries with exponential backoff on transient errors (recovery mode, connection
+    refused, starting up). Re-raises immediately when the database is missing so the
+    caller can attempt CREATE DATABASE. Re-raises other permanent errors immediately.
+    """
+
+    deadline = time.monotonic() + timeout_seconds
+    delay = initial_delay
+    attempt = 0
+
+    while True:
+        attempt += 1
+        try:
+            probe_database()
+            if attempt > 1:
+                logger.success("Database is ready")
+            return
+        except Exception as exc:
+            if is_database_missing_error(exc):
+                raise
+
+            if not is_transient_database_error(exc):
+                raise
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.error(
+                    f"Database still unavailable after {timeout_seconds:.0f}s: {exc}"
+                )
+                raise
+
+            sleep_for = min(delay, remaining, max_delay)
+            logger.warning(
+                f"Database not ready yet ({exc}); retrying in {sleep_for:.1f}s "
+                f"(attempt {attempt})"
+            )
+            try:
+                db.engine.dispose()
+            except Exception:
+                pass
+            time.sleep(sleep_for)
+            delay = min(delay * 2, max_delay)
 
 
 def create_database_if_not_exists():
@@ -44,6 +146,9 @@ def create_database_if_not_exists():
 
         return True
     except Exception as e:
+        if is_database_already_exists_error(e):
+            logger.log("DATABASE", f"Database {db_name} already exists")
+            return True
         logger.error(f"Failed to create database {db_name}: {e}")
         return False
 

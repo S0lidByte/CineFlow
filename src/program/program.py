@@ -14,7 +14,9 @@ from program.db import db_functions
 from program.db.db import (
     create_database_if_not_exists,
     db_session,
+    is_database_missing_error,
     run_migrations,
+    wait_for_database,
 )
 from program.managers.event_manager import EventManager
 from program.media.filesystem_entry import FilesystemEntry
@@ -189,7 +191,7 @@ class Program(threading.Thread):
         return all(s.initialized for s in self.services.enabled_services)
 
     def validate_database(self) -> bool:
-        """Validate that the database is accessible."""
+        """Validate that the database is accessible (single probe, no retry)."""
 
         try:
             with db_session() as session:
@@ -197,6 +199,36 @@ class Program(threading.Thread):
                 return True
         except Exception:
             logger.error("Database connection failed. Is the database running?")
+            return False
+
+    def _ensure_database_ready(self) -> bool:
+        """Wait for Postgres readiness; create the DB only when it is truly missing.
+
+        Returns False when startup should abort (exhausted retries or create failed).
+        """
+
+        try:
+            wait_for_database()
+            return True
+        except Exception as exc:
+            if not is_database_missing_error(exc):
+                logger.error(
+                    "Database connection failed after retries. Is the database running?"
+                )
+                return False
+
+        # TODO: We should really make this configurable via frontend...
+        logger.log("PROGRAM", "Database not found, trying to create database")
+        if not create_database_if_not_exists():
+            logger.error("Failed to create database, exiting")
+            return False
+        logger.success("Database created successfully")
+
+        try:
+            wait_for_database(timeout_seconds=30.0)
+            return True
+        except Exception:
+            logger.error("Database still unavailable after create, exiting")
             return False
 
     def start(self):
@@ -221,13 +253,8 @@ class Program(threading.Thread):
 
         self.initialize_apis()
 
-        if not self.validate_database():
-            # TODO: We should really make this configurable via frontend...
-            logger.log("PROGRAM", "Database not found, trying to create database")
-            if not create_database_if_not_exists():
-                logger.error("Failed to create database, exiting")
-                return
-            logger.success("Database created successfully")
+        if not self._ensure_database_ready():
+            return
 
         run_migrations()
 

@@ -57,10 +57,17 @@ services:
         volumes:
             - /path/to/riven/db:/var/lib/postgresql/data/pgdata
         healthcheck:
-            test: ["CMD-SHELL", "pg_isready -U postgres"]
-            interval: 10s
+            # pg_isready alone can succeed while Postgres is still in crash recovery;
+            # require a real query so depends_on waits until the DB accepts work.
+            test:
+                [
+                    "CMD-SHELL",
+                    "pg_isready -U postgres -d riven && psql -U postgres -d riven -c 'SELECT 1'",
+                ]
+            interval: 5s
             timeout: 5s
-            retries: 5
+            retries: 30
+            start_period: 20s
 
     jellyfin:
         image: jellyfin/jellyfin
