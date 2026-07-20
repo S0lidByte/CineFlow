@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from program.db.db import db_session
 from program.managers.sse_manager import sse_manager
 from program.media.item import MediaItem
-from program.services.streaming.media_stream import PROXY_REQUIRED_PROVIDERS
+from program.services.streaming.streaming_constants import PROXY_REQUIRED_PROVIDERS
 from program.settings import settings_manager
 from program.utils.async_client import AsyncClient
 from program.utils.proxy_client import ProxyClient

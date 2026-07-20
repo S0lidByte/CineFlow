@@ -33,12 +33,14 @@ from program.services.downloaders.models import (
     TorrentContainer,
     TorrentInfo,
 )
+from program.services.downloaders.shared import DownloaderBase
 from program.services.scrapers import Scraping
 from program.services.scrapers.shared import get_ranking_overrides
 from program.settings import settings_manager
 from program.settings.models import RTNSettingsModel
 from program.types import Event
 from program.utils.locking import ItemLock
+from program.utils.request import CircuitBreakerOpen
 from program.utils.torrent import extract_infohash
 
 from ..models.shared import MessageResponse
@@ -174,6 +176,7 @@ class ScrapingSession:
         self.torrent_id: int | str | None = None
         self.torrent_info: TorrentInfo | None = None
         self.containers: TorrentContainer | None = None
+        self.downloader_service: str | None = None
         self.selected_files: dict[str, dict[str, str | int]] | None = None
         self.created_at: datetime = datetime.now()
         self.expires_at: datetime = datetime.now() + timedelta(minutes=5)
@@ -198,6 +201,7 @@ class ScrapingSessionManager:
         tvdb_id: str | None = None,
         min_filesize_override: int | None = None,
         max_filesize_override: int | None = None,
+        downloader_service: str | None = None,
     ) -> ScrapingSession:
         """Create a new scraping session"""
         session_id = str(uuid4())
@@ -212,8 +216,24 @@ class ScrapingSessionManager:
             min_filesize_override,
             max_filesize_override,
         )
+        session.downloader_service = downloader_service
         self.sessions[session_id] = session
         return session
+
+    @staticmethod
+    def get_session_service(
+        downloader: Downloader | None,
+        service_key: str | None,
+    ) -> DownloaderBase | None:
+        if not downloader or not downloader.initialized_services:
+            return downloader.service if downloader else None
+
+        if service_key:
+            for service in downloader.initialized_services:
+                if service.key == service_key:
+                    return service
+
+        return downloader.service
 
     def get_session(self, session_id: str) -> ScrapingSession | None:
         """Get a scraping session by ID"""
@@ -248,9 +268,14 @@ class ScrapingSessionManager:
 
         session = self.sessions.pop(session_id, None)
 
-        if session and session.torrent_id and self.downloader:
+        if (
+            session
+            and session.torrent_id
+            and self.downloader
+            and (service := self.get_session_service(self.downloader, session.downloader_service))
+        ):
             try:
-                self.downloader.delete_torrent(session.torrent_id)
+                service.delete_torrent(session.torrent_id)
                 logger.debug(f"Deleted torrent for aborted session {session_id}")
             except Exception as e:
                 logger.error(f"Failed to delete torrent for session {session_id}: {e}")
@@ -299,7 +324,7 @@ async def resolve_torrent_container(
     item_type: ProcessedItemType = "movie",
     min_filesize_override: int | None = None,
     max_filesize_override: int | None = None,
-) -> tuple[TorrentContainer | None, str | None]:
+) -> tuple[TorrentContainer | None, str | None, DownloaderBase | None]:
     """
     Resolve a magnet infohash to a TorrentContainer.
 
@@ -314,14 +339,14 @@ async def resolve_torrent_container(
         max_filesize_override: Optional max filesize override
 
     Returns:
-        Tuple of (container, error_message). If container is None, error_message explains why.
+        Tuple of (container, error_message, service). If container is None,
+        error_message explains why.
     """
     import asyncio
 
     from program.services.downloaders.models import InvalidDebridFileException
 
-    container = None
-    last_error = None
+    service_errors: list[tuple[str, str]] = []
 
     overrides = {}
     if min_filesize_override is not None:
@@ -329,71 +354,143 @@ async def resolve_torrent_container(
     if max_filesize_override is not None:
         overrides["max_filesize"] = max_filesize_override
 
+    services = (
+        downloader.initialized_services
+        if getattr(downloader, "initialized_services", None)
+        else ([downloader.service] if downloader.service else [])
+    )
+
+    if not services:
+        return None, "No downloader services available", None
+
     with settings_manager.override(**overrides):
-        # Try instant availability check first
-        try:
-            container = await asyncio.to_thread(
-                downloader.get_instant_availability, infohash, item_type
-            )
-            if container and container.files:
-                return container, None
+        for service in services:
+            service_key = service.key
+            service_name = service.key
+            service_container: TorrentContainer | None = None
 
-        except InvalidDebridFileException as e:
-            last_error = str(e)
-            logger.debug(f"Invalid debrid file: {e}")
-        except Exception as e:
-            last_error = f"Service error: {str(e)}"
-            logger.debug(f"Error checking instant availability: {e}")
-
-        # Fallback: probe torrent by adding temporarily
-        if not container or not container.files:
             try:
-                tid = await asyncio.to_thread(downloader.add_torrent, infohash)
-                try:
-                    info = await asyncio.to_thread(downloader.get_torrent_info, tid)
-                    if info and info.files:
-                        valid_files = list[DebridFile]()
-                        for f in info.files.values():
-                            try:
-                                df = DebridFile.create(
-                                    path=f.path,
-                                    filename=f.filename,
-                                    filesize_bytes=f.bytes,
-                                    filetype=item_type,
-                                    file_id=f.id,
-                                )
-                                valid_files.append(df)
-                            except InvalidDebridFileException as e:
-                                logger.debug(f"Skipping file {f.filename}: {e}")
-                                continue
+                # Try instant availability check first
+                service_container = await asyncio.to_thread(
+                    service.get_instant_availability, infohash, item_type
+                )
+                if service_container and service_container.files:
+                    return service_container, None, service
 
-                        if valid_files:
-                            container = TorrentContainer(
-                                infohash=infohash,
-                                files=valid_files,
-                                torrent_id=tid,
-                                torrent_info=info,
-                            )
-                        else:
-                            last_error = "No valid video files found (all files filtered by type or size)"
-                except Exception as e:
-                    logger.error(f"Error getting torrent info: {e}")
-                    last_error = f"Unable to get torrent info: {str(e)}"
-                finally:
-                    # Clean up temporary torrent if we're just probing
-                    if not container or not container.files:
-                        try:
-                            await asyncio.to_thread(downloader.delete_torrent, tid)
-                        except Exception:
-                            pass
+            except InvalidDebridFileException as e:
+                service_errors.append(
+                    (service_name, f"Invalid debrid file from {service_key}: {e}")
+                )
+                logger.debug(
+                    f"Invalid debrid file from {service_key} for {infohash}: {e}"
+                )
+            except CircuitBreakerOpen as e:
+                service_errors.append((service_name, f"{service_key} circuit breaker open: {e}"))
+                logger.warning(
+                    f"Circuit breaker OPEN for {service_key} while checking {infohash}: {e}"
+                )
             except Exception as e:
-                logger.error(f"Magnet resolution error: {e}")
-                return None, f"Unable to resolve magnet: {str(e)}"
+                service_errors.append((service_name, f"{service_key} service error: {e}"))
+                logger.debug(f"Error checking instant availability: {e}")
 
-    if container and container.files:
-        return container, None
+            # Fallback: probe torrent by adding temporarily
+            if not service_container or not service_container.files:
+                try:
+                    tid = await asyncio.to_thread(service.add_torrent, infohash)
+                    try:
+                        info = await asyncio.to_thread(service.get_torrent_info, tid)
+                        if info and info.files:
+                            valid_files = list[DebridFile]()
+                            for f in info.files.values():
+                                try:
+                                    df = DebridFile.create(
+                                        path=f.path,
+                                        filename=f.filename,
+                                        filesize_bytes=f.bytes,
+                                        filetype=item_type,
+                                        file_id=f.id,
+                                    )
+                                    valid_files.append(df)
+                                except InvalidDebridFileException as e:
+                                    logger.debug(
+                                        f"Skipping file {f.filename} from {service_key}: {e}"
+                                    )
+                                    continue
 
-    return None, last_error or "No files found in torrent"
+                            if valid_files:
+                                service_container = TorrentContainer(
+                                    infohash=infohash,
+                                    files=valid_files,
+                                    torrent_id=tid,
+                                    torrent_info=info,
+                                )
+                                return service_container, None, service
+                            else:
+                                service_errors.append(
+                                    (
+                                        service_name,
+                                        "No valid video files found (all files filtered by type or size)",
+                                    )
+                                )
+                    except CircuitBreakerOpen as e:
+                        service_errors.append(
+                            (
+                                service_name,
+                                f"Unable to get torrent info: {service_key} circuit breaker open ({e})",
+                            )
+                        )
+                        logger.error(
+                            f"Circuit breaker OPEN while getting torrent info for {infohash} on {service_key}: {e}"
+                        )
+                    except Exception as e:
+                        logger.error(f"Error getting torrent info from {service_key}: {e}")
+                        service_errors.append(
+                            (
+                                service_name,
+                                f"Unable to get torrent info from {service_key}: {str(e)}",
+                            )
+                        )
+                    finally:
+                        # Clean up temporary torrent if we're just probing
+                        if not service_container or not service_container.files:
+                            try:
+                                await asyncio.to_thread(service.delete_torrent, tid)
+                            except Exception:
+                                pass
+                except CircuitBreakerOpen as e:
+                    service_errors.append(
+                        (
+                            service_name,
+                            f"Unable to resolve magnet on {service_key}: circuit breaker open ({e})",
+                        )
+                    )
+                    logger.error(
+                        f"Circuit breaker OPEN while resolving magnet {infohash} on {service_key}: {e}"
+                    )
+                except Exception as e:
+                    logger.error(f"Magnet resolution error on {service_key}: {e}")
+                    service_errors.append(
+                        (
+                            service_name,
+                            f"Unable to resolve magnet on {service_key}: {str(e)}",
+                        )
+                    )
+
+    if service_errors:
+        sorted_errors = ", ".join([f"{svc}: {msg}" for svc, msg in service_errors])
+        breaker_only = all("circuit breaker open" in msg for _, msg in service_errors)
+        if breaker_only:
+            return (
+                None,
+                (
+                    "All enabled downloader services are currently in circuit breaker mode: "
+                    f"{sorted_errors}"
+                ),
+                None,
+            )
+        return None, sorted_errors, None
+
+    return None, "No files found in torrent", None
 
 
 def resolve_media_item(
@@ -775,7 +872,7 @@ async def start_manual_session(
         item_type: ProcessedItemType = (
             item.type if item.type != "mediaitem" else "movie"
         )
-        container, error = await resolve_torrent_container(
+        container, error, used_service = await resolve_torrent_container(
             info_hash,
             downloader,
             item_type=item_type,
@@ -796,18 +893,27 @@ async def start_manual_session(
             imdb_id=imdb_id,
             tmdb_id=tmdb_id,
             tvdb_id=tvdb_id,
+            downloader_service=used_service.key if used_service else None,
         )
 
         try:
             # Use torrent_id from container if available (from fallback probing)
             if container.torrent_id:
                 torrent_id = container.torrent_id
-                torrent_info = container.torrent_info or downloader.get_torrent_info(
-                    torrent_id
-                )
+                if container.torrent_info:
+                    torrent_info = container.torrent_info
+                elif used_service:
+                    torrent_info = used_service.get_torrent_info(torrent_id)
+                else:
+                    torrent_info = downloader.get_torrent_info(torrent_id)
             else:
-                torrent_id = downloader.add_torrent(info_hash)
-                torrent_info = downloader.get_torrent_info(torrent_id)
+                if not used_service:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="No available downloader service to resolve torrent",
+                    )
+                torrent_id = used_service.add_torrent(info_hash)
+                torrent_info = used_service.get_torrent_info(torrent_id)
 
             scraping_session_manager.update_session(
                 session_id=session_obj.id,
@@ -907,6 +1013,15 @@ async def session_action(
             scraping_session_manager.abort_session(session_id)
             raise HTTPException(status_code=500, detail="No torrent ID found")
 
+        session_service = scraping_session_manager.get_session_service(
+            downloader,
+            scraping_session.downloader_service,
+        )
+        if not session_service:
+            raise HTTPException(
+                status_code=500, detail="Could not resolve downloader service for session"
+            )
+
         download_type: Literal["cached", "uncached"] = "uncached"
         if (
             scraping_session.containers
@@ -916,7 +1031,7 @@ async def session_action(
 
         try:
             file_ids = [int(fid) for fid in request.files.root.keys() if fid.isdigit()]
-            downloader.select_files(scraping_session.torrent_id, file_ids)
+            session_service.select_files(scraping_session.torrent_id, file_ids)
             scraping_session.selected_files = request.files.model_dump()
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -994,13 +1109,22 @@ async def session_action(
             )
             stream = ItemStream(torrent)
 
-            assert downloader.service
+            session_service = scraping_session_manager.get_session_service(
+                downloader,
+                scraping_session.downloader_service,
+            )
+
+            if not session_service:
+                raise HTTPException(
+                    status_code=500, detail="Could not resolve downloader service for session"
+                )
+
             # Start Manual Download via Downloader Service
             # This handles validation, downloading, and attribute updates in one go
             success = downloader.start_manual_download(
                 item=item,
                 stream=stream,
-                service=downloader.service,  # Use primary service
+                service=session_service,  # Use service selected in session
                 file_ids=file_ids,
             )
 
@@ -1089,9 +1213,7 @@ def _normalize_episode_numbers(
             continue
 
         cleaned = {
-            episode_number
-            for episode_number in numbers
-            if isinstance(episode_number, int) and episode_number > 0
+            episode_number for episode_number in numbers if episode_number > 0
         }
         if cleaned:
             normalized[season_number] = cleaned
@@ -1103,7 +1225,7 @@ def _requested_season_numbers(request: AutoScrapeRequest) -> set[int]:
     season_numbers = {
         season_number
         for season_number in (request.season_numbers or [])
-        if isinstance(season_number, int) and season_number > 0
+        if season_number > 0
     }
     return season_numbers | set(_normalize_episode_numbers(request.episode_numbers))
 

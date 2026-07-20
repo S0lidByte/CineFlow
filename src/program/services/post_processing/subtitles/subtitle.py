@@ -68,7 +68,14 @@ class SubtitleService(AnalysisService[SubtitleConfig]):
         # Initialize OpenSubtitles provider
         if provider_configs.opensubtitles.enabled:
             try:
-                provider = OpenSubtitlesProvider()
+                opensubtitles_config = provider_configs.opensubtitles
+                provider = OpenSubtitlesProvider(
+                    username=opensubtitles_config.username,
+                    password=opensubtitles_config.password,
+                    user_agent=opensubtitles_config.user_agent,
+                    allow_anonymous=opensubtitles_config.allow_anonymous,
+                )
+                provider.initialize()
                 self.providers.append(provider)
                 logger.debug("OpenSubtitles provider initialized")
             except Exception as e:

@@ -1,11 +1,10 @@
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from functools import cached_property
 from http import HTTPStatus
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
-import pyfuse3
 import trio
 import trio_util
 from kink import di
@@ -19,6 +18,7 @@ from program.utils.proxy_client import ProxyClient
 
 from .chunker import Chunk, ChunkCacheNotifier, Chunker, ChunkRange
 from .config import Config
+from .streaming_constants import PROXY_REQUIRED_PROVIDERS
 from .exceptions import (
     ByteLengthMismatchException,
     CacheDataNotFoundException,
@@ -42,9 +42,6 @@ from .recent_reads import Read, RecentReads
 from .session_statistics import SessionStatistics
 from .stream_connection import StreamConnection
 
-# Providers that require proxy connections for streaming
-PROXY_REQUIRED_PROVIDERS = {"alldebrid"}
-
 # Guard against transient short scan reads from unstable debrid/CDN responses.
 DISCRETE_SCAN_MAX_INTEGRITY_ATTEMPTS = 3
 DISCRETE_SCAN_RETRY_BACKOFF_SECONDS = [0.1, 0.25]
@@ -61,6 +58,12 @@ type ReadType = Literal[
 ]
 
 
+if TYPE_CHECKING:
+    from pyfuse3 import FileHandleT
+else:
+    FileHandleT = Any
+
+
 class MediaStream:
     """
     Represents an active streaming session for a file.
@@ -72,7 +75,7 @@ class MediaStream:
     def __init__(
         self,
         *,
-        fh: pyfuse3.FileHandleT,
+        fh: FileHandleT,
         file_size: int,
         path: str,
         original_filename: str,
@@ -220,7 +223,7 @@ class MediaStream:
         self,
         *,
         position: int,
-    ) -> AsyncIterator[StreamConnection]:
+    ) -> AsyncGenerator[StreamConnection, None]:
         """Context manager to handle connection lifecycle."""
 
         try:
@@ -629,7 +632,7 @@ class MediaStream:
         return data[slice_offset : slice_offset + size]
 
     @asynccontextmanager
-    async def capture_stream_errors(self) -> AsyncIterator[None]:
+    async def capture_stream_errors(self) -> AsyncGenerator[None, None]:
         """Context manager to capture and log stream errors."""
 
         # Handle the read request whilst monitoring for stream kill signals, and errors.
@@ -650,7 +653,9 @@ class MediaStream:
             raise self._stream_error.value from None
 
     @asynccontextmanager
-    async def read_lifecycle(self, chunk_range: ChunkRange) -> AsyncIterator[ReadType]:
+    async def read_lifecycle(
+        self, chunk_range: ChunkRange
+    ) -> AsyncGenerator[ReadType, None]:
         """Context manager for managing read lifecycle."""
 
         try:

@@ -821,7 +821,7 @@ async def reset_items(
 class RetryResponse(MessageResponse):
     ids: Annotated[
         Sequence[int],
-        Field(description="The IDs to retry", min_length=1),
+        Field(description="The IDs to retry", min_length=0),
     ]
 
 

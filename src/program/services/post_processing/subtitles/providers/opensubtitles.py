@@ -149,13 +149,22 @@ class OpenSubtitlesProvider(SubtitleProvider):
     """
     OpenSubtitles XML-RPC provider implementation.
 
-    Uses anonymous authentication and searches only by moviehash.
-    This ensures reliable subtitle matching without requiring user credentials.
+    Supports credentialed login by default and optional anonymous fallback.
+    Searches by multiple strategies, with moviehash-first matching when available.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        username: str = "",
+        password: str = "",
+        user_agent: str = "VLSub 0.11.1",
+        allow_anonymous: bool = False,
+    ):
         self.server_url = "https://api.opensubtitles.org/xml-rpc"
-        self.user_agent = "VLSub 0.11.1"
+        self.username = username.strip()
+        self.password = password
+        self.user_agent = user_agent.strip() or "VLSub 0.11.1"
+        self.allow_anonymous = allow_anonymous
         self.token = None
         self.login_time = None
         self.server = ServerProxy(self.server_url, allow_none=True)
@@ -165,24 +174,50 @@ class OpenSubtitlesProvider(SubtitleProvider):
         return "opensubtitles"
 
     def initialize(self):
-        """Initialize the provider session with anonymous authentication."""
+        """Initialize the provider session."""
 
-        logger.debug(f"Logging in anonymously with user agent: {self.user_agent}")
-
-        # Anonymous login: empty username and password
-        response = OpenSubtitlesLoginResponse.model_validate(
-            self.server.LogIn(
-                "",
-                "",
-                "eng",
-                self.user_agent,
+        has_username = bool(self.username)
+        has_password = bool(self.password)
+        if has_username != has_password:
+            raise Exception(
+                "OpenSubtitles credentials are incomplete: provide both username and password."
             )
-        )
+
+        if has_username:
+            logger.debug(
+                f"Logging in to OpenSubtitles as '{self.username or '<anonymous>'}' with user agent: {self.user_agent}"
+            )
+            response = OpenSubtitlesLoginResponse.model_validate(
+                self.server.LogIn(
+                    self.username,
+                    self.password,
+                    "eng",
+                    self.user_agent,
+                )
+            )
+        elif self.allow_anonymous:
+            logger.debug(
+                f"Logging in anonymously to OpenSubtitles with user agent: {self.user_agent}"
+            )
+
+            # Anonymous login: empty username and password
+            response = OpenSubtitlesLoginResponse.model_validate(
+                self.server.LogIn(
+                    "",
+                    "",
+                    "eng",
+                    self.user_agent,
+                )
+            )
+        else:
+            raise Exception(
+                "No OpenSubtitles credentials configured and anonymous login is disabled."
+            )
 
         self.token = response.token
         self.login_time = time.time()
 
-        logger.debug("Authenticated to OpenSubtitles (anonymous)")
+        logger.debug("Authenticated to OpenSubtitles")
 
     def _ensure_authenticated(self) -> bool:
         """Ensure we have a valid session token."""
@@ -198,7 +233,11 @@ class OpenSubtitlesProvider(SubtitleProvider):
             if self.login_time:
                 logger.debug("Token expired (>10 minutes), re-authenticating...")
 
-            self.initialize()
+            try:
+                self.initialize()
+            except Exception as e:
+                logger.error(f"OpenSubtitles login error: {e}")
+                return False
 
         return True
 
