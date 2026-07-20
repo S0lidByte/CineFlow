@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/S0lidByte/CineFlow/compare/v1.9.0...v1.9.1) (2026-07-20)
+
+
+### Performance Improvements
+
+* retry batch, I/O hygiene, incremental scrape parse ([#75](https://github.com/S0lidByte/CineFlow/issues/75)) ([0043b6f](https://github.com/S0lidByte/CineFlow/commit/0043b6f02008c9a4dbbd7df7f97b90147b3c137c))
+
 ## [1.9.0](https://github.com/S0lidByte/CineFlow/compare/v1.8.0...v1.9.0) (2026-07-20)
 
 
