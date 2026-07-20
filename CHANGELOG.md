@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.2](https://github.com/S0lidByte/CineFlow/compare/v1.9.1...v1.9.2) (2026-07-20)
+
+
+### Bug Fixes
+
+* retry Postgres connections during recovery mode ([#77](https://github.com/S0lidByte/CineFlow/issues/77)) ([6394df1](https://github.com/S0lidByte/CineFlow/commit/6394df10d165b2f4dda036aa4061919e884a0e96))
+
 ## [1.9.1](https://github.com/S0lidByte/CineFlow/compare/v1.9.0...v1.9.1) (2026-07-20)
 
 
