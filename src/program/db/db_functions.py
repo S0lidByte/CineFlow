@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -26,7 +26,9 @@ if TYPE_CHECKING:
 
 
 @contextmanager
-def _maybe_session(session: Session | None) -> Iterator[tuple[Session, bool]]:
+def _maybe_session(
+    session: Session | None,
+) -> Generator[tuple[Session, bool], None, None]:
     """
     Yield a (session, owns_session) pair.
 
