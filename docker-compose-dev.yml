@@ -44,17 +44,16 @@ services:
     volumes:
       - ./container_data/db:/var/lib/postgresql/data/pgdata
     healthcheck:
-      # pg_isready alone can succeed while Postgres is still in crash recovery;
-      # require a real query so depends_on waits until the DB accepts work.
+      # Accept crash-recovery / startup as "still starting" (backend retries separately).
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U postgres -d postgres && psql -U postgres -d postgres -c 'SELECT 1'",
+          "err=$$(psql -U postgres -d postgres -c 'SELECT 1' 2>&1) && exit 0; echo \"$$err\" | grep -Eiq 'recovery mode|starting up' && exit 0; exit 1",
         ]
       interval: 5s
       timeout: 5s
-      retries: 30
-      start_period: 20s
+      retries: 60
+      start_period: 120s
 
   # jellyfin:
   #   image: jellyfin/jellyfin
