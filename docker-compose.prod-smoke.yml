@@ -1,14 +1,14 @@
-# Local stack smoke test: postgres + backend + frontend on one Compose network.
-# Usage (from Triven_backend/):
-#   docker compose -f docker-compose.stack-test.yml up -d --build
-#   docker compose -f docker-compose.stack-test.yml ps
-#   docker compose -f docker-compose.stack-test.yml down -v
-name: cineflow-stack-test
+# Mirrors production naming on PlexServer: container riven-db, aliases, prebuilt images.
+# From Triven_backend/:
+#   docker compose -f docker-compose.prod-smoke.yml up -d
+#   docker compose -f docker-compose.prod-smoke.yml ps
+#   docker compose -f docker-compose.prod-smoke.yml logs -f riven
+name: cineflow-prod-smoke
 
 services:
   riven_postgres:
     image: postgres:17-alpine
-    container_name: cineflow-test-db
+    container_name: riven-db
     hostname: riven-db
     environment:
       POSTGRES_USER: postgres
@@ -16,30 +16,30 @@ services:
       POSTGRES_DB: riven
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
-      - cineflow_test_pg:/var/lib/postgresql/data
+      - cineflow_prod_smoke_pg:/var/lib/postgresql/data
     networks:
       default:
         aliases:
           - riven-db
           - riven_postgres
     healthcheck:
+      # Prefer pg_isready for boot/recovery; SELECT 1 when accepting queries.
+      # Any recovery/starting FATAL still counts as "starting" (not unhealthy).
       test:
         [
           "CMD-SHELL",
           "pg_isready -U postgres -d postgres >/dev/null 2>&1 || exit 1; err=$$(psql -U postgres -d postgres -c 'SELECT 1' 2>&1) && exit 0; echo \"$$err\" | grep -Eiq 'recovery mode|starting up|the database system is' && exit 0; exit 1",
         ]
-      interval: 3s
+      interval: 5s
       timeout: 5s
-      retries: 30
-      start_period: 30s
+      retries: 60
+      start_period: 180s
 
   riven:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: cineflow-test-backend
+    image: coldspirit/cineflow:dev
+    container_name: riven
     ports:
       - "8080:8080"
     environment:
@@ -54,37 +54,35 @@ services:
     security_opt:
       - apparmor:unconfined
     volumes:
-      - cineflow_test_data:/riven/data
+      - cineflow_prod_smoke_data:/riven/data
     depends_on:
       riven_postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/docs >/dev/null || curl -fsS http://127.0.0.1:8080/ >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 30
-      start_period: 60s
+      retries: 36
+      start_period: 90s
 
   riven-frontend:
-    build:
-      context: ../Triven_frontend
-      dockerfile: Dockerfile
-    container_name: cineflow-test-frontend
+    image: coldspirit/cineflow-frontend:dev
+    container_name: riven-frontend
     ports:
       - "3000:3000"
     environment:
       - BACKEND_URL=http://riven:8080
       - BACKEND_API_KEY=abcdefghijklmnopqrstuvwxyz123456
-      - AUTH_SECRET=local-stack-test-auth-secret-32chars
+      - AUTH_SECRET=local-prod-smoke-auth-secret-32ch
       - ORIGIN=http://localhost:3000
       - DATABASE_URL=/riven/data/riven.db
     volumes:
-      - cineflow_test_frontend:/riven/data
+      - cineflow_prod_smoke_frontend:/riven/data
     depends_on:
       riven:
         condition: service_healthy
 
 volumes:
-  cineflow_test_pg:
-  cineflow_test_data:
-  cineflow_test_frontend:
+  cineflow_prod_smoke_pg:
+  cineflow_prod_smoke_data:
+  cineflow_prod_smoke_frontend:
