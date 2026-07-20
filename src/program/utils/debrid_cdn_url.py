@@ -24,10 +24,12 @@ class DebridCDNUrl:
     """DebridCDNUrl class"""
 
     @staticmethod
-    def _sanitize_logged_url(url: str) -> str:
+    def _sanitize_logged_url(url: str | None) -> str:
         """
         Redact sensitive query params before logging URL values.
         """
+        if url is None:
+            return "<no-url>"
         return sanitize_url_for_logs(url)
 
     def __init__(self, entry: MediaEntry) -> None:

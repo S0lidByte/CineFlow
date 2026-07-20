@@ -20,9 +20,8 @@ class SettingsManager:
         self.observers = list[Callable[[], Any]]()
         self.filename = os.environ.get("SETTINGS_FILENAME", "settings.json")
         self.settings_file = data_dir_path / self.filename
-        self._overrides_ctx = contextvars.ContextVar(
-            "settings_overrides",
-            default=None,
+        self._overrides_ctx: contextvars.ContextVar[dict[str, Any] | None] = (
+            contextvars.ContextVar("settings_overrides", default=None)
         )
 
         Observable.set_notify_observers(self.notify_observers)
