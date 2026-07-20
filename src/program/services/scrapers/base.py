@@ -10,6 +10,7 @@ from program.media.item import Episode, MediaItem, Movie, Season, Show
 from program.settings.models import Observable
 from program.utils.request import SmartSession
 from program.utils.torrent import extract_infohash
+from program.utils.url_sanitizer import sanitize_url_for_logs
 
 T = TypeVar("T", bound=Observable, covariant=True)
 
@@ -75,6 +76,13 @@ class ScraperService(Runner[T, "ScraperService", dict[str, str]]):
         return identifier, scrape_type, imdb_id
 
     @staticmethod
+    def _sanitize_logged_url(url: str) -> str:
+        """
+        Redact sensitive query params before logging URLs.
+        """
+        return sanitize_url_for_logs(url)
+
+    @staticmethod
     def get_infohash_from_url(
         url: str,
         session: SmartSession | None = None,
@@ -133,6 +141,9 @@ class ScraperService(Runner[T, "ScraperService", dict[str, str]]):
                 return infohash
 
         except Exception as e:
-            logger.debug(f"Failed to get infohash from URL {url}: {e}")
+            logger.debug(
+                "Failed to get infohash from URL "
+                f"{ScraperService._sanitize_logged_url(url)}: {e}",
+            )
 
         return None

@@ -1,4 +1,5 @@
 import contextvars
+import copy
 import json
 import os
 from collections.abc import Callable, Generator
@@ -19,7 +20,9 @@ class SettingsManager:
         self.observers = list[Callable[[], Any]]()
         self.filename = os.environ.get("SETTINGS_FILENAME", "settings.json")
         self.settings_file = data_dir_path / self.filename
-        self._overrides_ctx = contextvars.ContextVar("settings_overrides", default={})
+        self._overrides_ctx: contextvars.ContextVar[dict[str, Any] | None] = (
+            contextvars.ContextVar("settings_overrides", default=None)
+        )
 
         Observable.set_notify_observers(self.notify_observers)
 
@@ -109,9 +112,22 @@ class SettingsManager:
             self.settings = AppModel.model_validate(settings_dict)
             self.save()
         except ValidationError as e:
-            formatted_error = format_validation_error(e)
-            logger.error(f"Settings validation failed:\n{formatted_error}")
-            raise
+            recovered_settings = self._recover_invalid_opensubtitles_settings(
+                settings_dict=settings_dict,
+                validation_error=e,
+            )
+            if recovered_settings is not None:
+                self.settings = AppModel.model_validate(recovered_settings)
+                self.save()
+                logger.warning(
+                    "Recovered invalid OpenSubtitles settings: "
+                    "enabled + missing credentials with allow_anonymous=False. "
+                    "OpenSubtitles will run in anonymous mode until credentials are configured."
+                )
+            else:
+                formatted_error = format_validation_error(e)
+                logger.error(f"Settings validation failed:\n{formatted_error}")
+                raise
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing settings file: {e}")
             raise
@@ -122,6 +138,53 @@ class SettingsManager:
             raise
         self.notify_observers()
 
+    def _recover_invalid_opensubtitles_settings(
+        self,
+        settings_dict: dict[str, Any] | None,
+        validation_error: ValidationError,
+    ) -> dict[str, Any] | None:
+        """Recover known-safe OpenSubtitles misconfigurations while keeping startup running."""
+
+        if not settings_dict:
+            return None
+
+        errors = validation_error.errors()
+        if not errors:
+            return None
+
+        # Only recover when all validation failures are related to OpenSubtitles.
+        opensubtitles_errors = [
+            error
+            for error in errors
+            if tuple(error.get("loc", ()))[:4]
+            == ("post_processing", "subtitle", "providers", "opensubtitles")
+        ]
+        if len(opensubtitles_errors) != len(errors):
+            return None
+
+        opensubtitles_cfg = copy.deepcopy(settings_dict)
+
+        try:
+            config = opensubtitles_cfg["post_processing"]["subtitle"]["providers"][
+                "opensubtitles"
+            ]
+        except (TypeError, KeyError):
+            return None
+
+        if not isinstance(config, dict):
+            return None
+
+        if (
+            config.get("enabled") is True
+            and not config.get("username")
+            and not config.get("password")
+            and config.get("allow_anonymous") is False
+        ):
+            config["allow_anonymous"] = True
+            return opensubtitles_cfg
+
+        return None
+
     def save(self):
         """Save settings to file, using Pydantic model for JSON serialization."""
         with open(self.settings_file, "w", encoding="utf-8") as file:
@@ -130,7 +193,7 @@ class SettingsManager:
     @contextmanager
     def override(self, **overrides: Any) -> Generator[None, None, None]:
         """Context manager to temporarily override settings."""
-        old_overrides = self._overrides_ctx.get()
+        old_overrides = self._overrides_ctx.get() or {}
         token = self._overrides_ctx.set({**old_overrides, **overrides})
         try:
             yield
