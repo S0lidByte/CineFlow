@@ -1213,9 +1213,7 @@ def _normalize_episode_numbers(
             continue
 
         cleaned = {
-            episode_number
-            for episode_number in numbers
-            if isinstance(episode_number, int) and episode_number > 0
+            episode_number for episode_number in numbers if episode_number > 0
         }
         if cleaned:
             normalized[season_number] = cleaned
@@ -1227,7 +1225,7 @@ def _requested_season_numbers(request: AutoScrapeRequest) -> set[int]:
     season_numbers = {
         season_number
         for season_number in (request.season_numbers or [])
-        if isinstance(season_number, int) and season_number > 0
+        if season_number > 0
     }
     return season_numbers | set(_normalize_episode_numbers(request.episode_numbers))
 
