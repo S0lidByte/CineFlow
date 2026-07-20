@@ -317,7 +317,11 @@ class ProgramScheduler:
         updated = next(indexer_service.run(item, log_msg=False), None)
 
         if updated:
-            session.merge(updated.media_items[0])
+            # Indexed Show graphs include detached Season/Episode children.
+            # Suppress autoflush during merge to avoid SAWarnings and skipped
+            # relationship adds (same pattern as IndexerService.reindex_ongoing).
+            with session.no_autoflush:
+                session.merge(updated.media_items[0])
             session.commit()
 
             logger.info(f"Reindexed {item.log_string} from scheduler")
