@@ -64,17 +64,18 @@ services:
                     - riven-db
                     - riven_postgres
         healthcheck:
-            # Accept crash-recovery / startup as "still starting" so compose does not
-            # mark the DB unhealthy while Postgres replays WAL (backend retries separately).
+            # Prefer pg_isready for boot/recovery; SELECT 1 when accepting queries.
+            # Any recovery/starting FATAL still counts as "starting" (not unhealthy).
+            # NOTE: this lives in compose on the host — docker compose pull does NOT update it.
             test:
                 [
                     "CMD-SHELL",
-                    "err=$$(psql -U postgres -d postgres -c 'SELECT 1' 2>&1) && exit 0; echo \"$$err\" | grep -Eiq 'recovery mode|starting up' && exit 0; exit 1",
+                    "pg_isready -U postgres -d postgres >/dev/null 2>&1 || exit 1; err=$$(psql -U postgres -d postgres -c 'SELECT 1' 2>&1) && exit 0; echo \"$$err\" | grep -Eiq 'recovery mode|starting up|the database system is' && exit 0; exit 1",
                 ]
             interval: 5s
             timeout: 5s
             retries: 60
-            start_period: 120s
+            start_period: 180s
 
     jellyfin:
         image: jellyfin/jellyfin
