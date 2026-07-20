@@ -536,6 +536,22 @@ class EventManager:
 
         return any(event.item_id == _id for event in self._queued_events)
 
+    def queue_depth(self) -> int:
+        """Return the number of events waiting in the queue."""
+
+        with self.mutex:
+            return len(self._queued_events)
+
+    def get_active_item_ids(self) -> set[int]:
+        """Return item IDs currently queued or running."""
+
+        with self.mutex:
+            return {
+                event.item_id
+                for event in (*self._queued_events, *self._running_events)
+                if event.item_id is not None
+            }
+
     def _id_in_running_events(self, _id: int) -> bool:
         """
         Checks if an item with the given ID is in the running events.

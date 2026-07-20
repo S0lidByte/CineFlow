@@ -1,4 +1,5 @@
 import threading
+import time
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -228,10 +229,17 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
                         with results_lock:
                             all_raw_results.update(raw_results)
 
+                        parse_started = time.perf_counter()
                         parsed_streams = parse_results(
                             item,
                             all_raw_results,
                             manual=manual,
+                        )
+                        parse_ms = (time.perf_counter() - parse_started) * 1000
+                        logger.trace(
+                            f"scrape_streaming parse_results: service={service_name} "
+                            f"raw={len(all_raw_results)} parsed={len(parsed_streams)} "
+                            f"elapsed_ms={parse_ms:.1f}"
                         )
 
                         yield (service_name, parsed_streams)

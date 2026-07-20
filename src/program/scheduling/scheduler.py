@@ -159,20 +159,48 @@ class ProgramScheduler:
             )
 
     def _retry_library(self) -> None:
-        """Retry items that failed to download by emitting events into the EM."""
+        """Retry incomplete library items in bounded batches to avoid queue storms."""
 
-        item_ids = db_functions.retry_library()
+        import time
 
+        started = time.perf_counter()
+        batch_size = settings_manager.settings.retry_library_batch_size
+        active_ids = self.program.em.get_active_item_ids()
+        queue_before = self.program.em.queue_depth()
+
+        item_ids = db_functions.retry_library(
+            limit=batch_size,
+            exclude_ids=active_ids,
+        )
+
+        enqueued = 0
+        skipped = 0
         for item_id in item_ids:
-            self.program.em.add_event(Event(emitted_by="RetryLibrary", item_id=item_id))
+            if self.program.em.add_event(
+                Event(emitted_by="RetryLibrary", item_id=item_id)
+            ):
+                enqueued += 1
+            else:
+                skipped += 1
+
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        queue_after = self.program.em.queue_depth()
 
         if item_ids:
             logger.log(
                 "PROGRAM",
-                f"Successfully retried {len(item_ids)} incomplete items",
+                f"RetryLibrary batch: candidates={len(item_ids)} enqueued={enqueued} "
+                f"skipped={skipped} excluded_active={len(active_ids)} "
+                f"queue={queue_before}->{queue_after} batch_size={batch_size} "
+                f"elapsed_ms={elapsed_ms:.1f}",
             )
         else:
-            logger.log("NOT_FOUND", "No items required retrying")
+            logger.log(
+                "NOT_FOUND",
+                f"No items required retrying "
+                f"(excluded_active={len(active_ids)} batch_size={batch_size} "
+                f"elapsed_ms={elapsed_ms:.1f})",
+            )
 
     def _get_pending_scheduled_tasks(self, session: Session) -> Sequence[ScheduledTask]:
         """Return all pending scheduled tasks."""

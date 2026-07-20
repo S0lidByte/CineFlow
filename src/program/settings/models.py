@@ -995,6 +995,14 @@ class AppModel(Observable):
         ge=0,
         description="Interval in seconds to retry failed library items (24 hours default, 0 to disable)",
     )
+    retry_library_batch_size: int = Field(
+        default=50,
+        ge=1,
+        description=(
+            "Max incomplete movie/show IDs to enqueue per scheduled retry_library tick "
+            "(caps queue storms; manual API retry remains uncapped)"
+        ),
+    )
     tracemalloc: bool = Field(
         default=False, description="Enable Python memory tracking (debug)"
     )
