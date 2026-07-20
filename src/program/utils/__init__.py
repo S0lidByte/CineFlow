@@ -36,7 +36,12 @@ def generate_api_key():
 
         # Generate the API key
         api_key = "".join(secrets.choice(characters) for _ in range(32))
-        logger.warning(f"New api key: {api_key}")
+        logger.warning(
+            "New api key generated with length=%d and prefix=%s, suffix=%s",
+            32,
+            api_key[:4],
+            api_key[-4:],
+        )
     else:
         api_key = API_KEY
 

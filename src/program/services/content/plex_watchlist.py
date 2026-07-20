@@ -10,6 +10,7 @@ from program.db.db_functions import item_exists_by_any_id
 from program.media.item import MediaItem
 from program.settings import settings_manager
 from program.settings.models import PlexWatchlistModel
+from program.utils.url_sanitizer import sanitize_url_for_logs
 
 
 class PlexWatchlist(Runner[PlexWatchlistModel]):
@@ -64,19 +65,22 @@ class PlexWatchlist(Runner[PlexWatchlistModel]):
                 except HTTPError as e:
                     if e.response.status_code == 404:
                         logger.warning(
-                            f"Plex RSS URL {rss_url} is Not Found. Please check your RSS URL in settings."
+                            f"Plex RSS URL {sanitize_url_for_logs(rss_url)} is Not Found. "
+                            "Please check your RSS URL in settings."
                         )
 
                         return False
                     else:
                         logger.warning(
-                            f"Plex RSS URL {rss_url} is not reachable (HTTP status code: {e.response.status_code})."
+                            f"Plex RSS URL {sanitize_url_for_logs(rss_url)} is not reachable "
+                            f"(HTTP status code: {e.response.status_code})."
                         )
 
                         return False
                 except Exception as e:
                     logger.error(
-                        f"Failed to validate Plex RSS URL {rss_url}: {e}", exc_info=True
+                        f"Failed to validate Plex RSS URL {sanitize_url_for_logs(rss_url)}: {e}",
+                        exc_info=True,
                     )
 
                     return False

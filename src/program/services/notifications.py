@@ -12,6 +12,7 @@ from program.media.item import Episode, MediaItem, Season
 from program.media.state import States
 from program.settings import settings_manager
 from program.settings.models import NotificationsModel
+from program.utils.url_sanitizer import sanitize_url_for_logs
 
 
 class NotificationService(Runner[NotificationsModel, None, None]):
@@ -48,9 +49,15 @@ class NotificationService(Runner[NotificationsModel, None, None]):
                 if "discord" in service_url:
                     service_url = f"{service_url}?format=markdown"
                 self.apprise.add(service_url)
-                logger.debug(f"Added notification service: {service_url[:50]}...")
+                logger.debug(
+                    f"Added notification service: "
+                    f"{sanitize_url_for_logs(service_url)[:50]}..."
+                )
             except Exception as e:
-                logger.debug(f"Failed to add service URL {service_url}: {e}")
+                logger.debug(
+                    f"Failed to add service URL "
+                    f"{sanitize_url_for_logs(service_url)}: {e}"
+                )
                 continue
 
         if len(self.apprise) > 0:

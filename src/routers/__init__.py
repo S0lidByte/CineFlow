@@ -10,6 +10,7 @@ from routers.secure.items import router as items_router
 from routers.secure.scrape import router as scrape_router
 from routers.secure.settings import router as settings_router
 from routers.secure.stream import router as stream_router
+from routers.secure.tmdb import router as tmdb_router
 from routers.secure.webhooks import router as webhooks_router
 from routers.secure.ws import router as ws_router
 
@@ -34,3 +35,4 @@ app_router.include_router(settings_router, dependencies=[Depends(resolve_api_key
 app_router.include_router(webhooks_router, dependencies=[Depends(resolve_api_key)])
 app_router.include_router(ws_router, dependencies=[Depends(resolve_ws_api_key)])
 app_router.include_router(stream_router, dependencies=[Depends(resolve_api_key)])
+app_router.include_router(tmdb_router, dependencies=[Depends(resolve_api_key)])

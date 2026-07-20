@@ -11,8 +11,9 @@ from program.media.media_entry import MediaEntry
 from program.services.streaming.exceptions import (
     DebridServiceLinkUnavailable,
 )
-from program.services.streaming.media_stream import PROXY_REQUIRED_PROVIDERS
+from program.services.streaming.streaming_constants import PROXY_REQUIRED_PROVIDERS
 from program.settings import settings_manager
+from program.utils.url_sanitizer import sanitize_url_for_logs
 
 
 class RefreshedURLIdenticalException(Exception):
@@ -21,6 +22,15 @@ class RefreshedURLIdenticalException(Exception):
 
 class DebridCDNUrl:
     """DebridCDNUrl class"""
+
+    @staticmethod
+    def _sanitize_logged_url(url: str | None) -> str:
+        """
+        Redact sensitive query params before logging URL values.
+        """
+        if url is None:
+            return "<no-url>"
+        return sanitize_url_for_logs(url)
 
     def __init__(self, entry: MediaEntry) -> None:
         self.filename = entry.original_filename
@@ -129,10 +139,13 @@ class DebridCDNUrl:
 
                         return self.url
             except httpx.TimeoutException as e:
-                logger.error(f"Timeout while validating CDN URL {self.url}: {e}")
+                logger.error(
+                    f"Timeout while validating CDN URL {self._sanitize_logged_url(self.url)}: {e}"
+                )
             except httpx.ConnectError as e:
                 logger.error(
-                    f"Connection error while validating CDN URL {self.url}: {e}"
+                    f"Connection error while validating CDN URL "
+                    f"{self._sanitize_logged_url(self.url)}: {e}"
                 )
             except httpx.HTTPStatusError as e:
                 status_code = e.response.status_code
@@ -157,7 +170,8 @@ class DebridCDNUrl:
                 raise
             except Exception as e:
                 logger.error(
-                    f"Unexpected error while validating CDN URL {self.url}: {e}"
+                    f"Unexpected error while validating CDN URL "
+                    f"{self._sanitize_logged_url(self.url)}: {e}"
                 )
 
                 return None
