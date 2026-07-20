@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.9.0](https://github.com/S0lidByte/CineFlow/compare/v1.8.0...v1.9.0) (2026-07-20)
+
+
+### Features
+
+* make opensubtitles subtitle config dynamic ([3890374](https://github.com/S0lidByte/CineFlow/commit/3890374a76619f776a01edf99d470e2a0f5a8c9a))
+
+
+### Bug Fixes
+
+* add secure tmdb proxy ([e3ae3af](https://github.com/S0lidByte/CineFlow/commit/e3ae3afa5aa201a978c3a46365534530b6420ccb))
+* allow empty ids on retry_library response ([194df4c](https://github.com/S0lidByte/CineFlow/commit/194df4c23a8eabb38f6983e7003d71d0851d6642))
+* allow empty ids on retry_library response ([69ac807](https://github.com/S0lidByte/CineFlow/commit/69ac8077a71428f4e90b102060a13e70aa470612))
+* clear remaining Verify pyright errors ([251301c](https://github.com/S0lidByte/CineFlow/commit/251301c813d96faeba454b14988a78474fb904a0))
+* default opensubtitles to anonymous fallback ([e726663](https://github.com/S0lidByte/CineFlow/commit/e72666377f89c4b394908f96996e9b2d8d56781e))
+* stabilize Verify pyright gate ([7a5ab9f](https://github.com/S0lidByte/CineFlow/commit/7a5ab9fd8f526b2c839783783685678123d3fdde))
+* stabilize Verify pyright gate ([391cfcd](https://github.com/S0lidByte/CineFlow/commit/391cfcdff7b10d8ffc44577407a179c6aa005ddb))
+
 ## [1.8.0](https://github.com/S0lidByte/CineFlow/compare/v1.7.5...v1.8.0) (2026-05-24)
 
 
