@@ -5,6 +5,14 @@ from httpx._types import AuthTypes
 from loguru import logger
 
 from program.settings import settings_manager
+from program.utils.url_sanitizer import sanitize_url_for_logs
+
+
+def _sanitize_logged_url(url: str) -> str:
+    """
+    Backward-compatible helper for module-level URL sanitization tests.
+    """
+    return sanitize_url_for_logs(url)
 
 # Sentinel for default values
 USE_CLIENT_DEFAULT = UseClientDefault()
@@ -48,9 +56,10 @@ class AsyncClient(httpx.AsyncClient):
         Args:
             request (httpx.Request): The HTTP request to log.
         """
+        sanitized_url = _sanitize_logged_url(str(request.url))
         logger.log(
             "NETWORK",
-            f"Request event hook: {request.method} {request.url} - Waiting for response",
+            f"Request event hook: {request.method} {sanitized_url} - Waiting for response",
         )
 
     async def log_response(self, response: httpx.Response) -> None:
@@ -60,9 +69,10 @@ class AsyncClient(httpx.AsyncClient):
             response (httpx.Response): The HTTP response to log.
         """
 
+        sanitized_url = _sanitize_logged_url(str(response.request.url))
         logger.log(
             "NETWORK",
-            f"Response event hook: {response.request.method} {response.request.url} - Status {response.status_code}",
+            f"Response event hook: {response.request.method} {sanitized_url} - Status {response.status_code}",
         )
 
     async def send(

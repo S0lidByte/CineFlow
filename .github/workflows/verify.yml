@@ -35,4 +35,5 @@ jobs:
 
       - uses: jakebailey/pyright-action@v1
         with:
-          pylance-version: latest-release
+          # Pin pyright so Verify does not drift with Pylance latest-release.
+          version: 1.1.400
