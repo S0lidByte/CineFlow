@@ -883,19 +883,31 @@ async def retry_items(
     response_model=RetryResponse,
 )
 async def retry_library_items() -> RetryResponse:
+    import time
+
+    started = time.perf_counter()
+    # Manual API remains uncapped; scheduled retries use retry_library_batch_size.
     item_ids = db_functions.retry_library()
 
+    enqueued_ids: list[int] = []
     for item_id in item_ids:
-        di[Program].em.add_event(
+        if di[Program].em.add_event(
             Event(
                 emitted_by="RetryLibrary",
                 item_id=item_id,
             )
-        )
+        ):
+            enqueued_ids.append(item_id)
+
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    logger.debug(
+        f"retry_library API: candidates={len(item_ids)} enqueued={len(enqueued_ids)} "
+        f"queue_depth={di[Program].em.queue_depth()} elapsed_ms={elapsed_ms:.1f}"
+    )
 
     return RetryResponse(
-        message=f"Retried {len(item_ids)} items",
-        ids=item_ids,
+        message=f"Retried {len(enqueued_ids)} items",
+        ids=enqueued_ids,
     )
 
 

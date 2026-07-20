@@ -32,8 +32,8 @@ class AsyncClient(httpx.AsyncClient):
             http2=True,
             follow_redirects=True,
             limits=httpx.Limits(
-                max_keepalive_connections=100,
-                max_connections=1000,
+                max_keepalive_connections=50,
+                max_connections=200,
                 keepalive_expiry=60,
             ),
             event_hooks={"response": [self.raise_on_4xx_5xx]},

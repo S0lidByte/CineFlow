@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Collection, Generator, Sequence
 from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -232,32 +232,57 @@ def get_item_ids(session: Session, item_id: int) -> tuple[int, list[int]]:
 # --------------------------------------------------------------------------- #
 
 
-def retry_library(session: Session | None = None) -> Sequence[int]:
+def retry_library(
+    session: Session | None = None,
+    *,
+    limit: int | None = None,
+    exclude_ids: Collection[int] | None = None,
+) -> Sequence[int]:
     """
-    Return IDs of items that should be retried. Single query, no pre-count.
+    Return IDs of incomplete movie/show items that should be retried.
+
+    Args:
+        session: Optional existing SQLAlchemy session.
+        limit: Optional max number of IDs to return (newest requested_at first).
+        exclude_ids: Optional IDs to skip (already queued/running).
     """
 
     from program.media.item import MediaItem
 
+    if limit is not None and limit < 1:
+        raise ValueError("retry_library limit must be >= 1 when provided")
+
+    started = time.perf_counter()
+
     with _maybe_session(session) as (s, _owns):
-        ids = (
-            s.execute(
-                select(MediaItem.id)
-                .where(
-                    MediaItem.last_state.not_in(
-                        [
-                            States.Completed,
-                            States.Unreleased,
-                            States.Paused,
-                            States.Failed,
-                        ]
-                    )
+        query = (
+            select(MediaItem.id)
+            .where(
+                MediaItem.last_state.not_in(
+                    [
+                        States.Completed,
+                        States.Unreleased,
+                        States.Paused,
+                        States.Failed,
+                    ]
                 )
-                .where(MediaItem.type.in_(["movie", "show"]))
-                .order_by(MediaItem.requested_at.desc())
             )
-            .scalars()
-            .all()
+            .where(MediaItem.type.in_(["movie", "show"]))
+            .order_by(MediaItem.requested_at.desc())
+        )
+
+        if exclude_ids:
+            query = query.where(MediaItem.id.not_in(list(exclude_ids)))
+
+        if limit is not None:
+            query = query.limit(limit)
+
+        ids = s.execute(query).scalars().all()
+
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        logger.debug(
+            f"retry_library query returned {len(ids)} id(s) "
+            f"(limit={limit}, excluded={len(exclude_ids or [])}) in {elapsed_ms:.1f}ms"
         )
 
         return ids

@@ -1,10 +1,12 @@
 import threading
+import time
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from queue import Empty, Queue
 
 from loguru import logger
+from RTN import Torrent
 
 from program.core.runner import MediaItemGenerator, Runner, RunnerResult
 from program.media.item import MediaItem
@@ -18,7 +20,7 @@ from program.services.scrapers.mediafusion import Mediafusion
 from program.services.scrapers.orionoid import Orionoid
 from program.services.scrapers.prowlarr import Prowlarr
 from program.services.scrapers.rarbg import Rarbg
-from program.services.scrapers.shared import parse_results
+from program.services.scrapers.shared import merge_parse_results, parse_results
 from program.services.scrapers.torrentio import Torrentio
 from program.services.scrapers.zilean import Zilean
 from program.settings import settings_manager
@@ -191,6 +193,8 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
         """
         results_queue: Queue[tuple[str, dict[str, str]]] = Queue()
         all_raw_results = dict[str, str]()
+        accumulated_torrents: set[Torrent] = set()
+        processed_infohashes = set[str]()
         results_lock = threading.RLock()
 
         def run_service_streaming(
@@ -226,12 +230,27 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
 
                     if raw_results:
                         with results_lock:
-                            all_raw_results.update(raw_results)
+                            # First title wins for a given infohash; ignore later conflicts.
+                            delta_results = {
+                                infohash: title
+                                for infohash, title in raw_results.items()
+                                if infohash not in all_raw_results
+                            }
+                            all_raw_results.update(delta_results)
 
-                        parsed_streams = parse_results(
+                        parse_started = time.perf_counter()
+                        parsed_streams = merge_parse_results(
                             item,
-                            all_raw_results,
+                            delta_results,
+                            accumulated_torrents,
+                            processed_infohashes,
                             manual=manual,
+                        )
+                        parse_ms = (time.perf_counter() - parse_started) * 1000
+                        logger.trace(
+                            f"scrape_streaming merge_parse_results: service={service_name} "
+                            f"delta={len(delta_results)} total_raw={len(all_raw_results)} "
+                            f"parsed={len(parsed_streams)} elapsed_ms={parse_ms:.1f}"
                         )
 
                         yield (service_name, parsed_streams)
