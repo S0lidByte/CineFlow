@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.3](https://github.com/S0lidByte/CineFlow/compare/v1.9.2...v1.9.3) (2026-07-20)
+
+
+### Bug Fixes
+
+* **docker:** tolerate Postgres recovery in DB healthcheck ([#79](https://github.com/S0lidByte/CineFlow/issues/79)) ([6a77050](https://github.com/S0lidByte/CineFlow/commit/6a77050b5872bf163f7586a6155d9844f525ffbb))
+
 ## [1.9.2](https://github.com/S0lidByte/CineFlow/compare/v1.9.1...v1.9.2) (2026-07-20)
 
 
