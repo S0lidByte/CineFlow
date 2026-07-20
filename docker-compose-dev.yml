@@ -17,6 +17,8 @@ services:
       - PGID=1000
       - TZ=UTC
       - ORIGIN=${RIVEN_ORIGIN:-http://localhost:8080}
+      - RIVEN_FORCE_ENV=true
+      - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
     devices:
       - /dev/fuse
     cap_add:
@@ -32,7 +34,8 @@ services:
 
   riven_postgres:
     image: postgres:17-alpine
-    container_name: postgres
+    container_name: riven-db
+    hostname: riven-db
     ports:
       - "5432:5432"
     restart: unless-stopped
@@ -43,6 +46,12 @@ services:
       POSTGRES_DB: riven
     volumes:
       - ./container_data/db:/var/lib/postgresql/data/pgdata
+    networks:
+      default:
+        aliases:
+          - riven-db
+          - riven_postgres
+          - postgres
     healthcheck:
       # Accept crash-recovery / startup as "still starting" (backend retries separately).
       test:
