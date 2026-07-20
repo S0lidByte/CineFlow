@@ -48,7 +48,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U postgres -d postgres || exit 1; psql -U postgres -d postgres -c 'SELECT 1' >/dev/null 2>&1 && exit 0; err=$$(psql -U postgres -d postgres -c 'SELECT 1' 2>&1 || true); echo \"$$err\" | grep -Eiq 'recovery mode|starting up' && exit 0; exit 1",
+          "err=$$(psql -U postgres -d postgres -c 'SELECT 1' 2>&1) && exit 0; echo \"$$err\" | grep -Eiq 'recovery mode|starting up' && exit 0; exit 1",
         ]
       interval: 5s
       timeout: 5s
