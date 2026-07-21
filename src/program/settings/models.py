@@ -1027,7 +1027,11 @@ class AppModel(Observable):
     )
     ranking: RTNSettingsModel = Field(
         default_factory=lambda: RTNSettingsModel(),
-        description="Result ranking configuration",
+        description=(
+            "RTN ranking and trash filters. DEBUG rejects map to "
+            "custom_ranks.<category>.<attribute> as denied by: <category>_<attribute> "
+            "(e.g. audio_dolby_digital_plus)."
+        ),
     )
     indexer: IndexerModel = Field(
         default_factory=lambda: IndexerModel(), description="Indexer configuration"

@@ -6,6 +6,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from program.settings import settings_manager
 from program.settings.models import AppModel
+from program.settings.ranking_descriptions import enrich_ranking_schema
 
 from ..models.shared import MessageResponse
 
@@ -27,7 +28,9 @@ async def get_settings_schema() -> dict[str, Any]:
     """Get the JSON schema for the settings. Cached for faster repeated loads."""
     global _schema_cache
     if _schema_cache is None:
-        _schema_cache = settings_manager.settings.model_json_schema()
+        schema = settings_manager.settings.model_json_schema()
+        enrich_ranking_schema(schema)
+        _schema_cache = schema
     return _schema_cache
 
 
@@ -98,6 +101,9 @@ async def get_settings_schema_for_keys(
 
     if all_defs:
         filtered_schema["$defs"] = all_defs
+
+    if "ranking" in properties:
+        enrich_ranking_schema(filtered_schema)
 
     return filtered_schema
 
