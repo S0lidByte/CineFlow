@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/S0lidByte/CineFlow/compare/v1.9.4...v1.10.0) (2026-07-21)
+
+
+### Features
+
+* **settings:** enrich ranking schema with deny-key descriptions ([#85](https://github.com/S0lidByte/CineFlow/issues/85)) ([9fa1fc1](https://github.com/S0lidByte/CineFlow/commit/9fa1fc1ebb640c2885143d57bd84479dd655d991))
+
 ## [1.9.4](https://github.com/S0lidByte/CineFlow/compare/v1.9.3...v1.9.4) (2026-07-20)
 
 
