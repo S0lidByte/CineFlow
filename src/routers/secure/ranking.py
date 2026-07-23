@@ -11,8 +11,8 @@ from RTN import RTN, DefaultRanking, parse
 from RTN.exceptions import GarbageTorrent
 
 from program.services.scrapers.shared import (
-    _normalize_rtn_language_settings,
     get_ranking_overrides,
+    normalize_rtn_language_settings,
     ranking_model,
     ranking_settings,
 )
@@ -91,7 +91,7 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
                 if overridden is not None:
                     settings_model = RTNSettingsModel(**overridden.model_dump())
 
-        _normalize_rtn_language_settings(settings_model)
+        normalize_rtn_language_settings(settings_model)
         rtn_instance = RTN(settings_model, ranking_model or DefaultRanking())
         infohash = (body.infohash or "0" * 40).lower()
         if len(infohash) != 40:
