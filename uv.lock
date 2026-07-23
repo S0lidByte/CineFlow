@@ -1634,7 +1634,7 @@ requires-dist = [
     { name = "ordered-set", specifier = ">=4.1.0" },
     { name = "parsett", specifier = ">=1.8.2,<2" },
     { name = "plexapi", specifier = ">=4.17.1,<5" },
-    { name = "prometheus-client", specifier = ">=0.20.0,<0.25" },
+    { name = "prometheus-client", specifier = ">=0.20.0,<0.26" },
     { name = "psutil", specifier = ">=7.1.0,<8" },
     { name = "psycopg2-binary", specifier = ">=2.9.9,<3" },
     { name = "pydantic", specifier = ">=2.12.0,<3" },
