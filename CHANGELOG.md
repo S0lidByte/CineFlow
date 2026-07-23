@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/S0lidByte/CineFlow/compare/v1.11.0...v1.11.1) (2026-07-23)
+
+
+### Performance Improvements
+
+* **tmdb,items:** persistent httpx client pool, cache headers, retry_library exclusion ([1582a2c](https://github.com/S0lidByte/CineFlow/commit/1582a2c60f388b2b89b319a86a7cfef329cddac0))
+
 ## [1.11.0](https://github.com/S0lidByte/CineFlow/compare/v1.10.0...v1.11.0) (2026-07-23)
 
 
