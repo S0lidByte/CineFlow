@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/S0lidByte/CineFlow/compare/v1.11.1...v1.12.0) (2026-07-23)
+
+
+### Features
+
+* **api:** ranking meta and release tester endpoints ([#93](https://github.com/S0lidByte/CineFlow/issues/93)) ([981eaf7](https://github.com/S0lidByte/CineFlow/commit/981eaf7428baecf0d2bcdd4593cc1443097a56f4))
+
 ## [1.11.1](https://github.com/S0lidByte/CineFlow/compare/v1.11.0...v1.11.1) (2026-07-23)
 
 
