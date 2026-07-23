@@ -3,7 +3,14 @@
     "last-release-sha": "ab50759441e4522d895522d1fceadb6d98cd22f6",
     "packages": {
         ".": {
-            "release-type": "python"
+            "release-type": "python",
+            "extra-files": [
+                {
+                    "path": "uv.lock",
+                    "type": "toml",
+                    "jsonpath": "$.package[?(@.name.value=='riven')].version"
+                }
+            ]
         }
     }
 }

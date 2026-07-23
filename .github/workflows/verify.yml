@@ -30,6 +30,13 @@ jobs:
           sudo apt update
           sudo apt install -y libfuse3-dev pkg-config
 
+      - name: Check uv.lock is in sync
+        run: |
+          if ! uv lock --check; then
+            echo "::error::uv.lock is out of sync with pyproject.toml. Run 'uv lock' and commit the result."
+            exit 1
+          fi
+
       - name: Install the project
         run: uv sync --locked --all-extras --dev
 
