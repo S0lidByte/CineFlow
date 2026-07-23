@@ -55,7 +55,7 @@ dev = [
     "pyperf>=2.2.0,<3",
     "pytest>=9.0.3,<10",
     "pytest-mock>=3.14.0,<4",
-    "responses==0.26.1",
+    "responses==0.26.2",
     "pyfakefs>=5.4.1,<7",
     "ruff>=0.13.3,<0.16",
     "isort>=5.10.1,<9",
