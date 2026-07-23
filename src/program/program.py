@@ -176,6 +176,18 @@ class Program(threading.Thread):
                 "No Updater service initialized, you must enable at least one."
             )
 
+        # Warn about optional content that failed init without blocking the pipeline
+        failed_content = [
+            s.key
+            for s in self.services.enabled_services
+            if s.is_content_service and not s.initialized
+        ]
+        if failed_content:
+            logger.warning(
+                "Content services failed to initialize and will be skipped: "
+                f"{', '.join(failed_content)}"
+            )
+
         if self.enable_trace:
             import tracemalloc
 
@@ -183,12 +195,56 @@ class Program(threading.Thread):
 
     @property
     def is_valid(self) -> bool:
-        """Validate that all required services are initialized."""
+        """Validate that core pipeline services are initialized.
+
+        Optional content sources (Trakt, Overseerr, Mdblist, etc.) must not
+        block scraping/download when they fail to initialize while remaining
+        enabled in settings.
+        """
 
         if not self.services:
             return True
 
-        return all(s.initialized for s in self.services.enabled_services)
+        core = (
+            self.services.indexer,
+            self.services.scraping,
+            self.services.downloader,
+            self.services.filesystem,
+            self.services.updater,
+        )
+        return all(s.initialized for s in core if s.enabled)
+
+    def _log_pipeline_blockers(self) -> None:
+        """Log once which services are preventing the main loop from draining."""
+
+        if not self.services:
+            return
+
+        failed_core = [
+            s.key
+            for s in (
+                self.services.indexer,
+                self.services.scraping,
+                self.services.downloader,
+                self.services.filesystem,
+                self.services.updater,
+            )
+            if s.enabled and not s.initialized
+        ]
+        failed_content = [
+            s.key
+            for s in self.services.enabled_services
+            if s.is_content_service and not s.initialized
+        ]
+        if failed_core:
+            logger.error(
+                f"Pipeline paused; core services not ready: {', '.join(failed_core)}"
+            )
+        if failed_content:
+            logger.warning(
+                "Content services failed to initialize and will be skipped: "
+                f"{', '.join(failed_content)}"
+            )
 
     def validate_database(self) -> bool:
         """Validate that the database is accessible (single probe, no retry)."""
@@ -355,10 +411,15 @@ class Program(threading.Thread):
             self.display_top_allocators(snapshot)
 
     def run(self):
+        logged_invalid = False
         while self.initialized:
             if not self.is_valid:
+                if not logged_invalid:
+                    self._log_pipeline_blockers()
+                    logged_invalid = True
                 time.sleep(1)
                 continue
+            logged_invalid = False
 
             try:
                 event = self.em.next()

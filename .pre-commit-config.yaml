@@ -28,3 +28,14 @@ repos:
       - id: check-yaml
       - id: check-added-large-files
         args: ["--maxkb=2000"]
+
+  # Re-lock when pyproject.toml (or the lock itself) is staged so CI --locked never drifts.
+  - repo: local
+    hooks:
+      - id: uv-lock
+        name: sync uv.lock with pyproject.toml
+        entry: /bin/sh ./dev/hooks/uv_lock.sh
+        language: system
+        files: ^(pyproject\.toml|uv\.lock)$
+        pass_filenames: false
+        require_serial: true

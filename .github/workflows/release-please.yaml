@@ -17,6 +17,8 @@ concurrency:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      pr: ${{ steps.release.outputs.pr }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -26,3 +28,59 @@ jobs:
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Belt-and-suspenders: if release-please opened/updated a PR, ensure uv.lock
+  # matches pyproject (covers cases beyond the version line extra-files bump).
+  sync-uv-lock:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.pr }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Resolve release PR branch
+        id: branch
+        env:
+          PR_JSON: ${{ needs.release-please.outputs.pr }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BRANCH="$(printf '%s' "$PR_JSON" | jq -r '.headBranchName // .head.ref // empty')"
+          if [ -z "$BRANCH" ] || [ "$BRANCH" = "null" ]; then
+            PR_NUMBER="$(printf '%s' "$PR_JSON" | jq -r '.number // empty')"
+            if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+              BRANCH="$(gh pr view "$PR_NUMBER" --json headRefName -q .headRefName)"
+            fi
+          fi
+          if [ -z "$BRANCH" ] || [ "$BRANCH" = "null" ]; then
+            echo "Could not resolve release PR branch from: $PR_JSON"
+            exit 1
+          fi
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout release PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.branch.outputs.name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Sync and commit uv.lock if needed
+        run: |
+          set -euo pipefail
+          uv lock
+          if git diff --quiet uv.lock; then
+            echo "uv.lock already in sync"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "chore(lock): sync uv.lock after release-please"
+          git push
