@@ -7,6 +7,7 @@ from routers.models.shared import RootResponse
 from routers.secure.database import router as database_router
 from routers.secure.default import router as default_router
 from routers.secure.items import router as items_router
+from routers.secure.ranking import router as ranking_router
 from routers.secure.scrape import router as scrape_router
 from routers.secure.settings import router as settings_router
 from routers.secure.stream import router as stream_router
@@ -30,6 +31,7 @@ async def root(_: Request) -> RootResponse:
 app_router.include_router(database_router, dependencies=[Depends(resolve_api_key)])
 app_router.include_router(default_router, dependencies=[Depends(resolve_api_key)])
 app_router.include_router(items_router, dependencies=[Depends(resolve_api_key)])
+app_router.include_router(ranking_router, dependencies=[Depends(resolve_api_key)])
 app_router.include_router(scrape_router, dependencies=[Depends(resolve_api_key)])
 app_router.include_router(settings_router, dependencies=[Depends(resolve_api_key)])
 app_router.include_router(webhooks_router, dependencies=[Depends(resolve_api_key)])

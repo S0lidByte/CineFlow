@@ -96,6 +96,11 @@ def _normalize_rtn_language_settings(settings: SettingsModel) -> None:
     )
 
 
+def normalize_rtn_language_settings(settings: SettingsModel) -> None:
+    """Public wrapper for RTN language code normalization."""
+    _normalize_rtn_language_settings(settings)
+
+
 def _should_retry_as_untagged_english(
     error: GarbageTorrent, settings: SettingsModel, raw_title: str
 ) -> bool:
