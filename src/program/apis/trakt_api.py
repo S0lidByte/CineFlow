@@ -100,7 +100,17 @@ class TraktAPI:
 
         from schemas.trakt import GetList200Response
 
-        GetList200Response.model_validate(response.json())
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            # Empty or non-JSON body (proxy HTML, gateway error, etc.)
+            body_preview = (response.text or "")[:120]
+            raise RequestException(
+                f"Trakt returned non-JSON response (status={response.status_code}): "
+                f"{body_preview!r}"
+            ) from exc
+
+        GetList200Response.model_validate(payload)
 
         return True
 
