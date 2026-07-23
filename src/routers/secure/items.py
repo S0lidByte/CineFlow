@@ -667,6 +667,11 @@ async def get_item(
             item = session.execute(query).unique().scalar_one_or_none()
 
             if not item:
+                logger.warning(
+                    f"Item not found: id={id!r} media_type={media_type!r} — "
+                    "client requested an ID that does not exist in DB. "
+                    "Check frontend explore/library page link construction."
+                )
                 raise HTTPException(status_code=404, detail="Item not found")
 
             if extended:
@@ -886,8 +891,11 @@ async def retry_library_items() -> RetryResponse:
     import time
 
     started = time.perf_counter()
-    # Manual API remains uncapped; scheduled retries use retry_library_batch_size.
-    item_ids = db_functions.retry_library()
+    # Mirror the scheduler's behaviour: exclude items already active in the
+    # event queue so we don't spam add_event with duplicates (which was
+    # causing 50/97 skips and ~4 s elapsed time in logs).
+    active_ids = di[Program].em.get_active_item_ids()
+    item_ids = db_functions.retry_library(exclude_ids=active_ids)
 
     enqueued_ids: list[int] = []
     for item_id in item_ids:
@@ -902,7 +910,8 @@ async def retry_library_items() -> RetryResponse:
     elapsed_ms = (time.perf_counter() - started) * 1000
     logger.debug(
         f"retry_library API: candidates={len(item_ids)} enqueued={len(enqueued_ids)} "
-        f"queue_depth={di[Program].em.queue_depth()} elapsed_ms={elapsed_ms:.1f}"
+        f"queue_depth={di[Program].em.queue_depth()} excluded_active={len(active_ids)} "
+        f"elapsed_ms={elapsed_ms:.1f}"
     )
 
     return RetryResponse(

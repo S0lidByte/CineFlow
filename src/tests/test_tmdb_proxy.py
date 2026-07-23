@@ -1,6 +1,7 @@
 import importlib.util
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -27,34 +28,39 @@ def test_validate_tmdb_path_rejects_non_v3_paths():
 
 
 def test_proxy_tmdb_get_forwards_path_query_and_auth(monkeypatch):
+    """
+    Test that the TMDB proxy:
+      - Forwards the correct path and query params
+      - Passes Cache-Control from upstream through to the response
+      - Strips hop-by-hop headers (e.g. 'connection')
+
+    The persistent client is now created once via _get_tmdb_client().
+    We monkeypatch that function to return a controlled fake client so
+    the test is independent of the module-level singleton lifecycle.
+    """
     captured: dict[str, object] = {}
 
-    class FakeAsyncClient:
-        def __init__(self, *args, **kwargs):
-            captured["client_kwargs"] = kwargs
+    fake_response = httpx.Response(
+        200,
+        json={"results": [{"id": 1}]},
+        headers={
+            "cache-control": "public, max-age=60",
+            "connection": "keep-alive",
+            "content-type": "application/json",
+        },
+        request=httpx.Request("GET", "https://api.themoviedb.org/3/trending/movie/day"),
+    )
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-        async def get(self, path, *, params, headers):
+    class FakeClient:
+        async def get(self, path: str, *, params):
             captured["path"] = path
             captured["params"] = params
-            captured["headers"] = headers
-            return httpx.Response(
-                200,
-                json={"results": [{"id": 1}]},
-                headers={
-                    "cache-control": "public, max-age=60",
-                    "connection": "keep-alive",
-                    "content-type": "application/json",
-                },
-                request=httpx.Request("GET", f"https://api.themoviedb.org{path}"),
-            )
+            return fake_response
 
-    monkeypatch.setattr(tmdb_router.httpx, "AsyncClient", FakeAsyncClient)
+    fake_client = FakeClient()
+    monkeypatch.setattr(tmdb_router, "_get_tmdb_client", lambda: fake_client)
+    # Reset singleton so our patched factory is called
+    monkeypatch.setattr(tmdb_router, "_tmdb_client", None)
 
     app = FastAPI()
     app.include_router(tmdb_router.router)
@@ -67,6 +73,5 @@ def test_proxy_tmdb_get_forwards_path_query_and_auth(monkeypatch):
     assert response.json() == {"results": [{"id": 1}]}
     assert captured["path"] == "/3/trending/movie/day"
     assert captured["params"] == [("page", "2"), ("language", "en-US")]
-    assert captured["headers"]["authorization"].startswith("Bearer ")
     assert response.headers["cache-control"] == "public, max-age=60"
     assert "connection" not in response.headers

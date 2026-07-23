@@ -28,6 +28,7 @@ from program.utils.async_client import AsyncClient
 from program.utils.cli import handle_args
 from program.utils.proxy_client import ProxyClient
 from routers import app_router
+from routers.secure.tmdb import close_tmdb_client
 
 
 class LoguruMiddleware(BaseHTTPMiddleware):
@@ -71,6 +72,7 @@ async def lifespan(_: FastAPI):
     yield
 
     await di[AsyncClient].aclose()
+    await close_tmdb_client()
 
     if ProxyClient in di:
         await di[ProxyClient].aclose()
