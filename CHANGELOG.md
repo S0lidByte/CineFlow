@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.1](https://github.com/S0lidByte/CineFlow/compare/v1.12.0...v1.12.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **program:** stop optional content from freezing the scrape queue ([#95](https://github.com/S0lidByte/CineFlow/issues/95)) ([871d42a](https://github.com/S0lidByte/CineFlow/commit/871d42a5c565e0c4c2756f95f8812eb42282fd4a))
+
 ## [1.12.0](https://github.com/S0lidByte/CineFlow/compare/v1.11.1...v1.12.0) (2026-07-23)
 
 
