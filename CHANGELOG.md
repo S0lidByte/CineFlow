@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.11.0](https://github.com/S0lidByte/CineFlow/compare/v1.10.0...v1.11.0) (2026-07-23)
+
+
+### Features
+
+* **settings:** enrich ranking schema with deny-key descriptions and pyright typing ([91f39ce](https://github.com/S0lidByte/CineFlow/commit/91f39ce64e87ff8874bbeb35132fc4df08fd69ff))
+
+
+### Bug Fixes
+
+* **scheduler:** suppress autoflush during reindex merge ([6a14195](https://github.com/S0lidByte/CineFlow/commit/6a141959bb1144cb1a01db1df000e1daa86b3116))
+
+
+### Performance Improvements
+
+* batch retry_library, offload sync FastAPI I/O, and RTN parse optimizations ([0207895](https://github.com/S0lidByte/CineFlow/commit/020789554d3c674f5e56765916a01a28d1bdd8a0))
+
 ## [1.10.0](https://github.com/S0lidByte/CineFlow/compare/v1.9.4...v1.10.0) (2026-07-21)
 
 
