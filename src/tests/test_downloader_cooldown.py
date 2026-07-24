@@ -122,6 +122,19 @@ def test_circuit_breaker_does_not_blacklist_stream_single_provider(
     mock_item.blacklist_stream.assert_not_called()
 
 
+def test_rate_limit_from_availability_does_not_blacklist(downloader, mock_item):
+    """RD 429 surfaced as CircuitBreakerOpen via get_instant_availability must not blacklist."""
+    cb_exc = CircuitBreakerOpen("api.real-debrid.com", retry_after_seconds=30.0)
+    downloader.service.get_instant_availability.side_effect = cb_exc
+
+    results = list(downloader.run(mock_item))
+
+    mock_item.blacklist_stream.assert_not_called()
+    assert "realdebrid" in downloader._service_cooldowns
+    assert len(results) == 1
+    assert results[0].run_at is not None
+
+
 def test_circuit_breaker_breaks_early_not_all_streams(downloader, mock_item):
     """CB should stop after first stream, not try all remaining streams."""
     stream2 = Mock(spec=Stream)
