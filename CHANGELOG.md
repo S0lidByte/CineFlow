@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.3](https://github.com/S0lidByte/CineFlow/compare/v1.12.2...v1.12.3) (2026-07-24)
+
+
+### Bug Fixes
+
+* **downloader:** apply exhaustion backoff when MAX_STREAMS empties streams ([#99](https://github.com/S0lidByte/CineFlow/issues/99)) ([1001183](https://github.com/S0lidByte/CineFlow/commit/1001183846f33e761839d98fd6662404bed57db4))
+
 ## [1.12.2](https://github.com/S0lidByte/CineFlow/compare/v1.12.1...v1.12.2) (2026-07-24)
 
 
