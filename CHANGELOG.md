@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.5](https://github.com/S0lidByte/CineFlow/compare/v1.12.4...v1.12.5) (2026-07-24)
+
+
+### Bug Fixes
+
+* **security:** harden CORS, auth, DB reset, HLS, and CI gates ([#103](https://github.com/S0lidByte/CineFlow/issues/103)) ([cfda088](https://github.com/S0lidByte/CineFlow/commit/cfda0884e7b9f7435a33d9a33ef5bc0e357de1c2))
+
 ## [1.12.4](https://github.com/S0lidByte/CineFlow/compare/v1.12.3...v1.12.4) (2026-07-24)
 
 
