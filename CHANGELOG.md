@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.2](https://github.com/S0lidByte/CineFlow/compare/v1.12.1...v1.12.2) (2026-07-24)
+
+
+### Bug Fixes
+
+* **downloader:** stop scrape/download hot loop on stream exhaustion ([#97](https://github.com/S0lidByte/CineFlow/issues/97)) ([ff07ae7](https://github.com/S0lidByte/CineFlow/commit/ff07ae7d4a3160ae4e7e23a383d7095eb03f8011))
+
 ## [1.12.1](https://github.com/S0lidByte/CineFlow/compare/v1.12.0...v1.12.1) (2026-07-23)
 
 
