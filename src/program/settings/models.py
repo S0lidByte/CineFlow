@@ -538,6 +538,14 @@ class OverseerrModel(Updatable):
     use_webhook: bool = Field(
         default=False, description="Use webhook instead of polling"
     )
+    webhook_secret: str = Field(
+        default="",
+        description=(
+            "Optional shared secret for POST /webhook/overseerr. When set, "
+            "requests must include matching X-Webhook-Secret header "
+            "(in addition to API auth)."
+        ),
+    )
     update_interval: int = Field(
         default=60, ge=1, description="Update interval in seconds"
     )
@@ -979,6 +987,14 @@ class StreamModel(Observable):
 class AppModel(Observable):
     version: str = Field(default_factory=get_version, description="Application version")
     api_key: str = Field(default="", description="API key for Riven API access")
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description=(
+            "Allowed CORS origins. Use ['*'] for all origins "
+            "(credentials disabled). Prefer explicit origins in production "
+            "(e.g. ['http://localhost:3000'])."
+        ),
+    )
     log_level: Literal["TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = (
         Field(default="INFO", description="Logging level")
     )

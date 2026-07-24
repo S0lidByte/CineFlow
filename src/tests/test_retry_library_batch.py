@@ -57,9 +57,10 @@ class TestRetryLibraryBatch:
 
 class TestEventManagerActiveIds:
     def test_get_active_item_ids_and_queue_depth(self):
+        from threading import Lock
+
         from program.managers.event_manager import EventManager
         from program.types import Event
-        from threading import Lock
 
         em = EventManager.__new__(EventManager)
         em.mutex = Lock()

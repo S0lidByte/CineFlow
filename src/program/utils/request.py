@@ -308,6 +308,11 @@ class SmartResponse(requests.Response):
         return ns if ns is not None else SimpleNamespace()
 
 
+# Cap Retry-After / backoff sleeps so a hostile or misconfigured upstream
+# cannot park a ThreadPoolExecutor worker for minutes.
+MAX_RETRY_AFTER_SECONDS = 30.0
+
+
 class SmartSession:
     """
     SmartSession adds automatic SmartResponse wrapping, rate limiting, circuit breaker, proxies, and retries.
@@ -791,25 +796,30 @@ class SmartSession:
     def _compute_retry_delay(
         self, httpx_response: httpx.Response, attempt: int
     ) -> float:
-        # Honour Retry-After if present
+        # Honour Retry-After if present (capped to protect worker threads)
 
         try:
             ra = httpx_response.headers.get("Retry-After")
         except Exception:
             ra = None
 
+        delay: float | None = None
         if ra:
             try:
-                return max(0.0, float(int(ra)))
+                delay = max(0.0, float(int(ra)))
             except Exception:
                 try:
                     dt = cast(datetime, parsedate_to_datetime(ra))
-                    return max(0.0, float(int(round(dt.timestamp() - time.time()))))
+                    delay = max(
+                        0.0, float(int(round(dt.timestamp() - time.time())))
+                    )
                 except Exception:
-                    pass
+                    delay = None
 
-        # Fallback to exponential backoff
-        return self._backoff(attempt)
+        if delay is None:
+            delay = self._backoff(attempt)
+
+        return min(delay, MAX_RETRY_AFTER_SECONDS)
 
     def _backoff(self, attempt: int) -> float:
         """
@@ -820,7 +830,10 @@ class SmartSession:
 
         base = float(self.backoff_factor) * (2 ** (max(0, attempt - 1)))
         # Equal jitter: random between 50% and 100% of the backoff window
-        return base * (0.5 + 0.5 * random.random())
+        return min(
+            base * (0.5 + 0.5 * random.random()),
+            MAX_RETRY_AFTER_SECONDS,
+        )
 
     def _raise_requests_timeout(self, e: httpx.TimeoutException):
         # Map to requests.exceptions.Timeout

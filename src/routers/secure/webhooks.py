@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Request
+import hmac
+
+from fastapi import APIRouter, HTTPException, Request, status
 from kink import di
 from loguru import logger
 from pydantic import BaseModel
@@ -6,6 +8,7 @@ from pydantic import BaseModel
 from program.media.item import MediaItem
 from program.program import Program
 from program.services.content.overseerr import Overseerr
+from program.settings import settings_manager
 
 from ..models.overseerr import OverseerrWebhook
 
@@ -14,10 +17,29 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
+WEBHOOK_SECRET_HEADER = "x-webhook-secret"
+
 
 class OverseerrWebhookResponse(BaseModel):
     success: bool
     message: str | None = None
+
+
+def verify_overseerr_webhook_secret(request: Request) -> None:
+    """When configured, require X-Webhook-Secret to match Overseerr webhook_secret."""
+
+    expected = (
+        settings_manager.settings.content.overseerr.webhook_secret or ""
+    ).strip()
+    if not expected:
+        return
+
+    provided = request.headers.get(WEBHOOK_SECRET_HEADER)
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid webhook secret",
+        )
 
 
 @router.post(
@@ -28,6 +50,7 @@ async def overseerr(request: Request) -> OverseerrWebhookResponse:
     """Webhook for Overseerr"""
 
     try:
+        verify_overseerr_webhook_secret(request)
         response = await request.json()
 
         if response.get("subject") == "Test Notification":
@@ -95,6 +118,8 @@ async def overseerr(request: Request) -> OverseerrWebhookResponse:
         )
 
         return OverseerrWebhookResponse(success=True)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to process request: {e}")
 

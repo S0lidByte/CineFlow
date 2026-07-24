@@ -1,5 +1,6 @@
-import httpx
 import asyncio
+
+import httpx
 
 from program.utils import async_client
 

@@ -1,7 +1,7 @@
-from .cache import Cache, CacheConfig
-from .chunker import ChunkCacheNotifier
 from typing import TYPE_CHECKING
 
+from .cache import Cache, CacheConfig
+from .chunker import ChunkCacheNotifier
 from .exceptions.chunk_exception import (
     ChunkException,
     ChunksTooSlowException,
