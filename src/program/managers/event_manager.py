@@ -207,6 +207,12 @@ class EventManager:
                     )
                     return  # finally still runs
 
+                # Clear running before handoff. submit_job marks the item running for
+                # in-flight dedupe; if we leave it running here, add_event self-skips
+                # and Scraped items never reach Downloader.
+                if future_with_event.event:
+                    self.remove_event_from_running(future_with_event.event)
+
                 # Propagate overrides to the new event to maintain setting context across service transitions
                 event_overrides = (
                     future_with_event.event.overrides
@@ -232,8 +238,8 @@ class EventManager:
 
         finally:
             # Always clean up regardless of success, failure, or cancellation.
-            # NOTE: do NOT call remove_event_from_running anywhere else in this method
-            # to avoid a double-removal ValueError.
+            # remove_event_from_running is idempotent (membership check), so an
+            # earlier clear before add_event handoff is safe.
             if future_with_event in self._futures:
                 self._futures.remove(future_with_event)
 
