@@ -229,3 +229,71 @@ def test_stream_exhaustion_preserves_blacklist_and_reschedules(downloader, mock_
     assert mock_item.scraped_times == 1
     mock_item.store_state.assert_called_with(States.Indexed)
     mock_item.blacklist_stream.assert_called()
+
+
+def test_max_streams_early_exit_when_more_remain(downloader, mock_item):
+    """With leftover streams, MAX_STREAMS_PER_RUN yields without Indexed reset."""
+    extras = []
+    for i, infohash in enumerate(("def456", "ghi789", "jkl012"), start=2):
+        s = Mock(spec=Stream)
+        s.infohash = infohash
+        s.raw_title = f"Test.Movie.2023.{i}"
+        s.rank = 100 - i
+        s.resolution = "1080p"
+        extras.append(s)
+    mock_item.streams = [mock_item.streams[0], *extras]
+    mock_item.blacklisted_streams = []
+
+    def _blacklist(stream):
+        if stream in mock_item.streams:
+            mock_item.streams.remove(stream)
+        if stream not in mock_item.blacklisted_streams:
+            mock_item.blacklisted_streams.append(stream)
+
+    mock_item.blacklist_stream = Mock(side_effect=_blacklist)
+
+    with patch.object(downloader, "validate_stream_on_service", return_value=None):
+        results = list(downloader.run(mock_item))
+
+    assert len(results) == 1
+    assert results[0].run_at is None
+    assert len(mock_item.streams) == 1  # 4 - 3 tried
+    mock_item.store_state.assert_not_called()
+
+
+def test_max_streams_exhaustion_applies_backoff_when_none_remain(
+    downloader, mock_item
+):
+    """When ≤3 streams all fail, apply exhaustion backoff (not bare early yield)."""
+    from program.media.state import States
+
+    streams = []
+    for i, infohash in enumerate(("abc123", "def456", "ghi789")):
+        s = Mock(spec=Stream)
+        s.infohash = infohash
+        s.raw_title = f"Test.Movie.2023.{i}"
+        s.rank = 100 - i
+        s.resolution = "1080p"
+        streams.append(s)
+    mock_item.streams = streams
+    mock_item.blacklisted_streams = []
+    mock_item.scraped_times = 1
+
+    def _blacklist(stream):
+        if stream in mock_item.streams:
+            mock_item.streams.remove(stream)
+        if stream not in mock_item.blacklisted_streams:
+            mock_item.blacklisted_streams.append(stream)
+
+    mock_item.blacklist_stream = Mock(side_effect=_blacklist)
+
+    with patch.object(downloader, "validate_stream_on_service", return_value=None):
+        results = list(downloader.run(mock_item))
+
+    assert len(results) == 1
+    assert results[0].run_at is not None
+    expected = datetime.now() + timedelta(minutes=30)
+    assert abs((results[0].run_at - expected).total_seconds()) < 5
+    assert len(mock_item.streams) == 0
+    assert len(mock_item.blacklisted_streams) == 3
+    mock_item.store_state.assert_called_with(States.Indexed)

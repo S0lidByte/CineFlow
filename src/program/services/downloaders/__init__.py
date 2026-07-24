@@ -252,10 +252,15 @@ class Downloader(Runner[None, DownloaderBase]):
                 tried_streams += 1
 
                 if tried_streams >= MAX_STREAMS_PER_RUN:
-                    # Yield early: releases the thread and re-queues the item.
-                    # The next Downloader run will skip blacklisted streams and try the next one.
-                    yield RunnerResult(media_items=[item])
-                    return
+                    # Yield early only when more streams remain for a later run.
+                    # blacklist_stream() removes from item.streams; if none are
+                    # left, fall through to exhaustion backoff (preserve
+                    # blacklist + schedule run_at) instead of Indexed with an
+                    # immediate re-queue (Descendants 3 / ≤3-stream case).
+                    if item.streams:
+                        yield RunnerResult(media_items=[item])
+                        return
+                    break
 
                 # If all services hit circuit breaker, stop trying more streams
                 if hit_circuit_breaker and not any(
