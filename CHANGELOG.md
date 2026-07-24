@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.4](https://github.com/S0lidByte/CineFlow/compare/v1.12.3...v1.12.4) (2026-07-24)
+
+
+### Bug Fixes
+
+* **scraper:** require season match for episode torrents ([#101](https://github.com/S0lidByte/CineFlow/issues/101)) ([955673d](https://github.com/S0lidByte/CineFlow/commit/955673d2978799cf67d4171f8ca06f18e9b2d3eb))
+
 ## [1.12.3](https://github.com/S0lidByte/CineFlow/compare/v1.12.2...v1.12.3) (2026-07-24)
 
 
