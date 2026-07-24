@@ -261,18 +261,31 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
                     logger.warning("Timeout waiting for scraper results")
                     break
 
-    def should_submit(self, item: MediaItem) -> bool:
-        """Check if an item should be submitted for scraping."""
+    @staticmethod
+    def scrape_cooldown_seconds(scraped_times: int) -> float:
+        """Return scrape backoff seconds for a given scraped_times count.
+
+        Must stay aligned with should_submit() so scheduled retries fire when
+        the item is actually eligible again.
+        """
 
         settings = settings_manager.settings.scraping
         scrape_time = 30 * 60  # 30 minutes by default
 
-        if item.scraped_times >= 2 and item.scraped_times <= 5:
+        if scraped_times >= 2 and scraped_times <= 5:
             scrape_time = settings.after_2 * 60 * 60
-        elif item.scraped_times > 5 and item.scraped_times <= 10:
+        elif scraped_times > 5 and scraped_times <= 10:
             scrape_time = settings.after_5 * 60 * 60
-        elif item.scraped_times > 10:
+        elif scraped_times > 10:
             scrape_time = settings.after_10 * 60 * 60
+
+        return float(scrape_time)
+
+    def should_submit(self, item: MediaItem) -> bool:
+        """Check if an item should be submitted for scraping."""
+
+        settings = settings_manager.settings.scraping
+        scrape_time = self.scrape_cooldown_seconds(item.scraped_times)
 
         is_scrapeable = (
             not item.scraped_at

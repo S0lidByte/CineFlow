@@ -289,20 +289,29 @@ class Downloader(Runner[None, DownloaderBase]):
                 )
                 # All streams exhausted: fall back to Indexed so the Scraper can
                 # search for new streams instead of looping in the Downloader forever.
-                # IMPORTANT: also clear blacklisted_streams — without this, the blacklist
-                # persists across the reset and the scraper can never re-add those hashes
-                # as "new" streams, causing the item to loop at Indexed indefinitely.
+                #
+                # Keep blacklisted_streams and scraped_at cooldown. Clearing either
+                # caused a scrape→download→451→reset hot loop: the same RD-rejected
+                # hashes were rediscovered immediately and retried forever.
+                # Scrapers already skip blacklisted hashes; after cooldown they only
+                # add truly new ones (or increment failed_attempts when none appear).
+                from program.services.scrapers import Scraping
+
+                blacklist_count = len(item.blacklisted_streams)
+                item.streams.clear()
+                now = datetime.now()
+                item.scraped_at = now
+                item.scraped_times = max(int(getattr(item, "scraped_times", 0) or 0), 1)
+                cooldown = Scraping.scrape_cooldown_seconds(item.scraped_times)
+                next_attempt = now + timedelta(seconds=cooldown)
+                item.store_state(States.Indexed)
                 logger.debug(
                     f"All streams exhausted for {item.log_string} ({item.id}), "
-                    f"clearing {len(item.streams)} streams and "
-                    f"{len(item.blacklisted_streams)} blacklisted streams, resetting to Indexed"
+                    f"preserving {blacklist_count} blacklisted streams, "
+                    f"resetting to Indexed; next scrape at "
+                    f"{next_attempt.strftime('%m/%d/%y %H:%M:%S')}"
                 )
-                item.streams.clear()
-                item.blacklisted_streams.clear()
-                item.scraped_at = None
-                item.scraped_times = 1
-                item.store_state(States.Indexed)
-                yield RunnerResult(media_items=[item])
+                yield RunnerResult(media_items=[item], run_at=next_attempt)
         else:
             # Clear service cooldowns on successful download
             self._service_cooldowns.clear()
