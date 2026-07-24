@@ -2,11 +2,18 @@ from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
 
 import pytest
+from loguru import logger
 
 from program.media.item import Movie
 from program.media.stream import Stream
 from program.services.downloaders import Downloader
 from program.utils.request import CircuitBreakerOpen
+
+# Register custom log levels used by Downloader (normally done at app startup).
+try:
+    logger.level("DEBRID")
+except ValueError:
+    logger.level("DEBRID", no=20)
 
 
 @pytest.fixture
@@ -37,10 +44,15 @@ def mock_item():
     item.type = "movie"
     item.log_string = "Test Movie (2023)"
     item.active_stream = None
+    item.scraped_at = None
+    item.scraped_times = 1
+    item.store_state = Mock()
 
     stream = Mock(spec=Stream)
     stream.infohash = "abc123"
     stream.raw_title = "Test.Movie.2023.1080p"
+    stream.rank = 100
+    stream.resolution = "1080p"
     item.streams = [stream]
     item.blacklisted_streams = []
     item.blacklist_stream = Mock()
@@ -115,6 +127,8 @@ def test_circuit_breaker_breaks_early_not_all_streams(downloader, mock_item):
     stream2 = Mock(spec=Stream)
     stream2.infohash = "def456"
     stream2.raw_title = "Test.Movie.2023.720p"
+    stream2.rank = 50
+    stream2.resolution = "720p"
     mock_item.streams = [mock_item.streams[0], stream2]
 
     call_count = 0
@@ -177,3 +191,41 @@ def test_expired_cooldown_allows_processing(downloader, mock_item):
 
     # Service SHOULD have been called
     downloader.service.get_instant_availability.assert_not_called()  # we mocked validate_stream_on_service directly
+
+
+def test_stream_exhaustion_preserves_blacklist_and_reschedules(downloader, mock_item):
+    """Exhausted streams must not clear blacklist or scrape cooldown (hot-loop fix)."""
+    from program.media.state import States
+
+    blacklisted = Mock(spec=Stream)
+    blacklisted.infohash = "deadbeef"
+    mock_item.blacklisted_streams = [blacklisted]
+    mock_item.scraped_at = None
+    mock_item.scraped_times = 1
+    mock_item.store_state = Mock()
+
+    # Real blacklist_stream moves the stream onto blacklisted_streams
+    def _blacklist(stream):
+        if stream in mock_item.streams:
+            mock_item.streams.remove(stream)
+        if stream not in mock_item.blacklisted_streams:
+            mock_item.blacklisted_streams.append(stream)
+
+    mock_item.blacklist_stream = Mock(side_effect=_blacklist)
+
+    with patch.object(downloader, "validate_stream_on_service", return_value=None):
+        results = list(downloader.run(mock_item))
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.run_at is not None
+    # Default scrape cooldown for scraped_times=1 is 30 minutes
+    expected = datetime.now() + timedelta(minutes=30)
+    assert abs((result.run_at - expected).total_seconds()) < 5
+
+    assert len(mock_item.streams) == 0
+    assert blacklisted in mock_item.blacklisted_streams
+    assert mock_item.scraped_at is not None
+    assert mock_item.scraped_times == 1
+    mock_item.store_state.assert_called_with(States.Indexed)
+    mock_item.blacklist_stream.assert_called()
