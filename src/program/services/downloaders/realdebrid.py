@@ -123,6 +123,21 @@ class RealDebridError(Exception):
     """Base exception for Real-Debrid related errors."""
 
 
+class RealDebridTransientError(RealDebridError):
+    """Provider-side 429/5xx — cooldown/retry, do not blacklist streams."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        retry_after_seconds: float = 60.0,
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after_seconds = retry_after_seconds
+
+
 class RealDebridCircuitBreakerOpenError(RealDebridError):
     """Raised when Real-Debrid circuit breaker is OPEN and requests are fail-fast."""
 
@@ -291,6 +306,24 @@ class RealDebridDownloader(DownloaderBase):
                     pass
 
             raise
+        except RealDebridTransientError as e:
+            # 429/5xx must not become "not cached" → blacklist. Surface as CB so
+            # Downloader sets a service cooldown and retries the same streams.
+            logger.warning(
+                f"Availability check transient failure [{infohash}]: {e}; "
+                "raising circuit breaker for cooldown (stream not blacklisted)"
+            )
+
+            if torrent_id:
+                try:
+                    self.delete_torrent(torrent_id)
+                except Exception:
+                    pass
+
+            raise CircuitBreakerOpen(
+                "api.real-debrid.com",
+                retry_after_seconds=e.retry_after_seconds,
+            ) from e
         except RealDebridError as e:
             # add_torrent/select_files/delete_torrent surface HTTP error context via _handle_error
             logger.warning(f"Availability check failed [{infohash}]: {e}")
@@ -581,19 +614,25 @@ class RealDebridDownloader(DownloaderBase):
 
     def _maybe_backoff(self, response: SmartResponse) -> None:
         """
-        Raise on Real-Debrid 429/5xx so the caller surfaces the error.
+        Raise on Real-Debrid 429/5xx so the caller surfaces a transient error.
 
         Note: SmartSession's circuit breaker already tracks 429/5xx failures
         via after_request(success=False) and will trip OPEN after
         failure_threshold (default 5) consecutive failures. We must NOT
         raise CircuitBreakerOpen here because that bypasses the breaker's
         failure counting, causing it to never enter OPEN state properly.
+        Callers (e.g. get_instant_availability) convert RealDebridTransientError
+        into CircuitBreakerOpen for Downloader cooldown without blacklisting.
         """
 
         code = response.status_code
 
         if code == 429 or (500 <= code < 600):
-            raise RealDebridError(self._handle_error(response))
+            raise RealDebridTransientError(
+                self._handle_error(response),
+                status_code=code,
+                retry_after_seconds=60.0,
+            )
 
     def _handle_error(self, response: SmartResponse) -> str:
         """
