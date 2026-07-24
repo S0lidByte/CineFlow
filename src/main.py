@@ -26,6 +26,7 @@ from program.settings import settings_manager
 from program.settings.models import get_version
 from program.utils.async_client import AsyncClient
 from program.utils.cli import handle_args
+from program.utils.cors import build_cors_config
 from program.utils.proxy_client import ProxyClient
 from routers import app_router
 from routers.secure.tmdb import close_tmdb_client
@@ -104,10 +105,7 @@ di[Program] = riven
 app.add_middleware(LoguruMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    **build_cors_config(settings_manager.settings.cors_origins),
 )
 
 app.include_router(app_router)

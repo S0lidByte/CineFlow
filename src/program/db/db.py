@@ -1,3 +1,4 @@
+import os
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -169,8 +170,29 @@ def vacuum_and_analyze_index_maintenance() -> None:
         logger.error(f"Error during VACUUM and ANALYZE: {e}")
 
 
+def db_reset_allowed() -> bool:
+    """Return True when an explicit env flag permits destructive DB reset."""
+
+    return os.getenv("RIVEN_ALLOW_DB_RESET", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
 def reset_database():
-    """Reset the database by dropping and recreating the public schema."""
+    """Reset the database by dropping and recreating the public schema.
+
+    Requires ``RIVEN_ALLOW_DB_RESET=1`` (or true/yes) to proceed. This prevents
+    accidental data loss when an unfamiliar alembic revision is detected.
+    """
+
+    if not db_reset_allowed():
+        logger.error(
+            "Database reset blocked: unfamiliar alembic revision would DROP SCHEMA. "
+            "Set RIVEN_ALLOW_DB_RESET=1 to allow a one-time destructive upgrade."
+        )
+        return False
 
     logger.warning("Resetting database - all data will be lost!")
 
@@ -262,7 +284,11 @@ def run_migrations(database_url: str | None = None):
             )
 
             if not reset_database():
-                raise Exception("Failed to reset database for v1 upgrade")
+                raise Exception(
+                    "Failed to reset database for v1 upgrade. "
+                    "Set RIVEN_ALLOW_DB_RESET=1 to permit DROP SCHEMA public CASCADE, "
+                    "or restore a compatible alembic_version."
+                )
 
             logger.info("Creating v1 schema from scratch...")
 

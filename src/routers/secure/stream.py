@@ -20,6 +20,11 @@ from program.media.item import MediaItem
 from program.services.streaming.streaming_constants import PROXY_REQUIRED_PROVIDERS
 from program.settings import settings_manager
 from program.utils.async_client import AsyncClient
+from program.utils.hls_params import (
+    FFPROBE_TIMEOUT_SECONDS,
+    scale_filter_for_resolution,
+    validate_hls_params,
+)
 from program.utils.proxy_client import ProxyClient
 
 router = APIRouter(
@@ -225,8 +230,10 @@ def _get_video_duration(path: str) -> float:
                 "default=noprint_wrappers=1:nokey=1",
                 path,
             ],
-            check=False, stdout=subprocess.PIPE,
+            check=False,
+            stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            timeout=FFPROBE_TIMEOUT_SECONDS,
         )
         return float(result.stdout)
     except Exception:
@@ -246,6 +253,12 @@ async def get_hls_playlist(
     level: str | None = None,
     resolution: str | None = None,
 ):
+    pix_fmt, video_profile, level, resolution = validate_hls_params(
+        pix_fmt=pix_fmt,
+        video_profile=video_profile,
+        level=level,
+        resolution=resolution,
+    )
     url, _provider, _filename = _get_media_info(item_id)
     duration = _get_video_duration(url)
 
@@ -300,6 +313,12 @@ async def get_hls_segment(
     level: str | None = None,
     resolution: str | None = None,
 ):
+    pix_fmt, video_profile, level, resolution = validate_hls_params(
+        pix_fmt=pix_fmt,
+        video_profile=video_profile,
+        level=level,
+        resolution=resolution,
+    )
     url, _, _ = _get_media_info(item_id)
 
     segment_duration = 12
@@ -319,11 +338,7 @@ async def get_hls_segment(
     ]
 
     if resolution:
-        if "x" in resolution:
-            width, height = resolution.split("x")
-            args.extend(["-vf", f"scale={width}:{height}"])
-        else:
-            args.extend(["-vf", f"scale=-2:{resolution}"])
+        args.extend(["-vf", scale_filter_for_resolution(resolution)])
 
     args.extend(["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"])
 

@@ -18,7 +18,6 @@ from program.utils.proxy_client import ProxyClient
 
 from .chunker import Chunk, ChunkCacheNotifier, Chunker, ChunkRange
 from .config import Config
-from .streaming_constants import PROXY_REQUIRED_PROVIDERS
 from .exceptions import (
     ByteLengthMismatchException,
     CacheDataNotFoundException,
@@ -41,6 +40,7 @@ from .file_metadata import FileMetadata
 from .recent_reads import Read, RecentReads
 from .session_statistics import SessionStatistics
 from .stream_connection import StreamConnection
+from .streaming_constants import PROXY_REQUIRED_PROVIDERS
 
 # Guard against transient short scan reads from unstable debrid/CDN responses.
 DISCRETE_SCAN_MAX_INTEGRITY_ATTEMPTS = 3

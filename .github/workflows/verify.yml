@@ -40,7 +40,32 @@ jobs:
       - name: Install the project
         run: uv sync --locked --all-extras --dev
 
+      - name: Ruff
+        run: uv run ruff check src
+
       - uses: jakebailey/pyright-action@v1
         with:
           # Pin pyright so Verify does not drift with Pylance latest-release.
           version: 1.1.400
+
+      - name: Pytest (unit)
+        run: |
+          uv run pytest -q \
+            src/tests/test_security_phase1.py \
+            src/tests/test_security_phase3.py \
+            src/tests/test_event_manager.py \
+            src/tests/test_hls_params.py \
+            src/tests/test_scraper_episode_season_match.py \
+            src/tests/test_downloader_cooldown.py \
+            src/tests/test_scraper_base.py \
+            src/tests/test_scraper_language_settings.py \
+            src/tests/test_utils.py \
+            src/tests/test_tmdb_proxy.py \
+            src/tests/test_ranking.py \
+            src/tests/test_ranking_descriptions.py \
+            src/tests/test_async_client.py \
+            src/tests/test_opensubtitles_settings.py \
+            src/tests/test_debrid_cdn_url.py \
+            src/tests/test_requests.py \
+            src/tests/test_incremental_parse_results.py \
+            src/tests/test_alldebrid_downloader.py

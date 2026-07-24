@@ -24,6 +24,23 @@ if TYPE_CHECKING:
     from program.program import Program
 
 
+def compute_transient_retry_delay(
+    failure_count: int,
+    *,
+    rate_limit_retry_after: float | int | None = None,
+    base_delay: int = 60,
+) -> float:
+    """Seconds to wait before re-queueing after a transient EventManager failure.
+
+    Uses RateLimitError.retry_after when provided; otherwise exponential backoff
+    of base_delay * 2^(n-1) for failure_count n (1m, 2m, 4m, 8m, ...).
+    """
+
+    if rate_limit_retry_after is not None:
+        return float(rate_limit_retry_after)
+    return float(base_delay * (2 ** max(0, failure_count - 1)))
+
+
 class EventUpdate(BaseModel):
     item_id: int
     emitted_by: str
@@ -146,13 +163,13 @@ class EventManager:
                                 item.store_state(States.Failed)
                                 session.commit()
                     else:
-                        base_delay = 60  # 1 minute base
-
-                        if isinstance(e, RateLimitError) and e.retry_after:
-                            delay = e.retry_after
-                        else:
-                            # Exponential backoff: 1m, 2m, 4m, 8m
-                            delay = base_delay * (2 ** (event.failure_count - 1))
+                        retry_after = (
+                            e.retry_after if isinstance(e, RateLimitError) else None
+                        )
+                        delay = compute_transient_retry_delay(
+                            event.failure_count,
+                            rate_limit_retry_after=retry_after,
+                        )
 
                         logger.warning(
                             f"Transient error for {event.log_message}: {e.__class__.__name__}. "

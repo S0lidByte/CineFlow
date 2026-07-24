@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-
 SENSITIVE_URL_QUERY_PARAMS: frozenset[str] = frozenset(
     {
         "apikey",

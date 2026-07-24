@@ -213,9 +213,9 @@ def episode_release_matches(
 ) -> bool:
     """Return True when a parsed release matches this episode's identity.
 
-    Episode number alone is insufficient: S08E14 must not match S06E14.
-    When the release includes season tags, the episode's parent season must
-    appear in them. Season packs without episode lists are allowed when they
+    Relative episode numbers (E14) require a matching parent season tag so
+    S08E14 cannot match S06E14. Absolute-number matches (anime) may omit
+    season tags. Season packs without episode lists are allowed when they
     contain the parent season.
     """
 
@@ -223,14 +223,20 @@ def episode_release_matches(
     seasons = parsed_seasons or []
 
     if episodes:
-        episode_ok = episode_number in episodes or (
-            absolute_number is not None and absolute_number in episodes
+        # Relative E## requires an explicit matching season tag.
+        # Absolute match is evaluated independently so E1/abs=1 without a
+        # season tag can still match anime-style absolute numbering.
+        relative_ok = (
+            episode_number in episodes
+            and bool(seasons)
+            and season_number in seasons
         )
-        if not episode_ok:
-            return False
-        if seasons and season_number not in seasons:
-            return False
-        return True
+        absolute_ok = (
+            absolute_number is not None
+            and absolute_number in episodes
+            and (not seasons or season_number in seasons)
+        )
+        return relative_ok or absolute_ok
 
     if seasons:
         return season_number in seasons

@@ -1,5 +1,4 @@
 import re
-
 from unittest.mock import Mock
 
 from program import utils

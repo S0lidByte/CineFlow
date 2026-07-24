@@ -143,7 +143,30 @@ ignore = [
   "T201",   # print used intentionally in websocket debug paths
   "E402",   # load_dotenv() must precede other imports in main.py
   "S102",   # exec used intentionally in main.py runtime bootstrap
+  # Pre-existing style debt — enable the ruff CI gate without a mass rewrite.
+  "PLW0108", # unnecessary-lambda (settings defaults / DI factories)
+  "SIM105",  # suppressible-exception (cleanup paths)
+  "SIM102",  # collapsible-if
+  "SIM117",  # multiple-with-statements
+  "RET504",  # unnecessary-assign
+  "PLW2901", # redefined-loop-name
+  "PLW0406", # import-self (sqla_wrapper db package pattern)
+  "SIM103",  # needless-bool
+  "SIM108",  # if-else-block-instead-of-if-exp
+  "PLC0105", # TypeVar covariance naming
+  "ARG001",  # unused function args in callbacks / API shims
+  "ARG005",  # unused lambda args in done callbacks
+  "B023",    # loop variable binding in nested callbacks (intentional capture)
+  "B005",    # strip multi-char (legacy imdb id cleanup)
+  "E712",    # SQLAlchemy == False comparisons
+  "E721",    # type(...) == type(...) in MediaItem.__eq__
+  "E741",    # ambiguous name from AllDebrid API field `l`
+  "PLE1310", # lstrip duplicate chars (legacy)
+  "SIM118",  # .keys() iteration (pydantic root models)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"src/tests/**" = ["S105", "S106"]
 extend-select = [
   "I",   # isort
   "C90", # mccabe complexity
