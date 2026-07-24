@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.7](https://github.com/S0lidByte/CineFlow/compare/v1.12.6...v1.12.7) (2026-07-24)
+
+
+### Bug Fixes
+
+* **event-manager:** clear running before next-stage handoff ([#107](https://github.com/S0lidByte/CineFlow/issues/107)) ([468dc42](https://github.com/S0lidByte/CineFlow/commit/468dc4234c782a5ef8e0c29212d6212210c48a96))
+
 ## [1.12.6](https://github.com/S0lidByte/CineFlow/compare/v1.12.5...v1.12.6) (2026-07-24)
 
 
