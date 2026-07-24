@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.8](https://github.com/S0lidByte/CineFlow/compare/v1.12.7...v1.12.8) (2026-07-24)
+
+
+### Bug Fixes
+
+* **realdebrid:** treat 429/5xx as cooldown, not stream blacklist ([#109](https://github.com/S0lidByte/CineFlow/issues/109)) ([d9187f1](https://github.com/S0lidByte/CineFlow/commit/d9187f1399679922fb41cb22bff5766c58a5cae3))
+
 ## [1.12.7](https://github.com/S0lidByte/CineFlow/compare/v1.12.6...v1.12.7) (2026-07-24)
 
 
