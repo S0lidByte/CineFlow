@@ -203,6 +203,41 @@ def get_ranking_overrides(
         return None
 
 
+def episode_release_matches(
+    *,
+    episode_number: int,
+    absolute_number: int | None,
+    season_number: int,
+    parsed_episodes: list[int] | None,
+    parsed_seasons: list[int] | None,
+) -> bool:
+    """Return True when a parsed release matches this episode's identity.
+
+    Episode number alone is insufficient: S08E14 must not match S06E14.
+    When the release includes season tags, the episode's parent season must
+    appear in them. Season packs without episode lists are allowed when they
+    contain the parent season.
+    """
+
+    episodes = parsed_episodes or []
+    seasons = parsed_seasons or []
+
+    if episodes:
+        episode_ok = episode_number in episodes or (
+            absolute_number is not None and absolute_number in episodes
+        )
+        if not episode_ok:
+            return False
+        if seasons and season_number not in seasons:
+            return False
+        return True
+
+    if seasons:
+        return season_number in seasons
+
+    return False
+
+
 def _prepare_rtn_ranking_context(
     item: MediaItem,
 ) -> tuple[RTN, SettingsModel, str, dict[str, list[str]]]:
@@ -386,30 +421,16 @@ def _accumulate_ranked_torrents(
                     continue
 
             if isinstance(item, Episode) and not manual:
-                # Disregard torrents with incorrect episode number logic:
-                skip = False
-
-                # If the torrent has episodes, but the episode number is not present
-                if torrent.data.episodes:
-                    if (
-                        item.number not in torrent.data.episodes
-                        and item.absolute_number not in torrent.data.episodes
-                    ):
-                        skip = True
-
-                # If the torrent does not have episodes, but has seasons, and the parent season is not present
-                elif torrent.data.seasons:
-                    # item is confirmed to be Episode at line 197
-                    # Episode.parent is a Season, and Season has a 'number' attribute
-                    parent_season = cast(Season, item.parent)
-                    if parent_season.number not in torrent.data.seasons:
-                        skip = True
-
-                # If the torrent has neither episodes nor seasons, skip (junk)
-                else:
-                    skip = True
-
-                if skip:
+                # Disregard torrents with incorrect episode/season identity.
+                # Episode number alone is not enough: S08E14 must not match S06E14.
+                parent_season = cast(Season, item.parent)
+                if not episode_release_matches(
+                    episode_number=item.number,
+                    absolute_number=item.absolute_number,
+                    season_number=parent_season.number,
+                    parsed_episodes=torrent.data.episodes,
+                    parsed_seasons=torrent.data.seasons,
+                ):
                     logger.trace(
                         f"Skipping incorrect episode torrent for {item.log_string}: {raw_title}"
                     )
