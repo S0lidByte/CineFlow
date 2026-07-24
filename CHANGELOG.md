@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.6](https://github.com/S0lidByte/CineFlow/compare/v1.12.5...v1.12.6) (2026-07-24)
+
+
+### Bug Fixes
+
+* **event-manager:** track running jobs before execution ([#105](https://github.com/S0lidByte/CineFlow/issues/105)) ([bfe694b](https://github.com/S0lidByte/CineFlow/commit/bfe694b75ef6d50edba3fc453ab365f52f6480d5))
+
 ## [1.12.5](https://github.com/S0lidByte/CineFlow/compare/v1.12.4...v1.12.5) (2026-07-24)
 
 
