@@ -397,14 +397,22 @@ class EventManager:
 
         runner = program.services[service.get_key()]
 
-        future = executor.submit(
-            db_functions.run_thread_with_db_item,
-            runner.run,
-            service,
-            program,
-            event,
-            cancellation_event,
-        )
+        if event:
+            self.add_event_to_running(event)
+
+        try:
+            future = executor.submit(
+                db_functions.run_thread_with_db_item,
+                runner.run,
+                service,
+                program,
+                event,
+                cancellation_event,
+            )
+        except Exception:
+            if event:
+                self.remove_event_from_running(event)
+            raise
 
         future_with_event = FutureWithEvent(
             future=future,
