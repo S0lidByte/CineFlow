@@ -9,7 +9,7 @@ from threading import Lock
 from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from RTN import RTN, DefaultRanking, parse
 from RTN.exceptions import GarbageTorrent
 
@@ -46,6 +46,9 @@ router = APIRouter(
 
 _DENY_KEY_RE = re.compile(r"denied by:\s*([a-z0-9_]+)", re.IGNORECASE)
 _INFOHASH_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+_MAX_ALIAS_COUNTRIES = 32
+_MAX_ALIASES_PER_COUNTRY = 32
+_MAX_ALIAS_LENGTH = 200
 
 # Soft rate limit for expensive ranking helper endpoints (per process).
 _RATE_LIMIT_LOCK = Lock()
@@ -93,6 +96,37 @@ class RankingTestRequest(BaseModel):
             "Empty dict disables aliases for this test."
         ),
     )
+
+    @field_validator("aliases")
+    @classmethod
+    def _validate_aliases(
+        cls, value: dict[str, list[str]] | None
+    ) -> dict[str, list[str]] | None:
+        if value is None:
+            return value
+        if len(value) > _MAX_ALIAS_COUNTRIES:
+            raise ValueError(
+                f"aliases may include at most {_MAX_ALIAS_COUNTRIES} country keys"
+            )
+        cleaned: dict[str, list[str]] = {}
+        for country, names in value.items():
+            if len(names) > _MAX_ALIASES_PER_COUNTRY:
+                raise ValueError(
+                    f"aliases[{country}] may include at most "
+                    f"{_MAX_ALIASES_PER_COUNTRY} names"
+                )
+            cleaned_names: list[str] = []
+            for name in names:
+                text = str(name).strip()
+                if not text:
+                    continue
+                if len(text) > _MAX_ALIAS_LENGTH:
+                    raise ValueError(
+                        f"alias strings must be <= {_MAX_ALIAS_LENGTH} characters"
+                    )
+                cleaned_names.append(text)
+            cleaned[str(country)] = cleaned_names
+        return cleaned
 
 
 class RankingTestResponse(BaseModel):

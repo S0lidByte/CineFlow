@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any, Literal
+import math
 
 import regex
 from pydantic import BaseModel, Field
@@ -71,8 +72,8 @@ class BitrateLimitExceededException(InvalidDebridFileException):
 def calculate_average_bitrate(filesize_bytes: int, runtime_minutes: float) -> float:
     """Average bitrate proxy used by riven-ts (MiB per minute of runtime)."""
 
-    if runtime_minutes <= 0:
-        raise ValueError("runtime_minutes must be positive")
+    if not math.isfinite(runtime_minutes) or runtime_minutes <= 0:
+        raise ValueError("runtime_minutes must be a positive finite number")
     return filesize_bytes / runtime_minutes / (1024 * 1024)
 
 
@@ -155,7 +156,11 @@ class DebridFile(BaseModel):
                 except (TypeError, ValueError):
                     effective_runtime = None
 
-        if effective_runtime and effective_runtime > 0:
+        if (
+            effective_runtime is not None
+            and math.isfinite(effective_runtime)
+            and effective_runtime > 0
+        ):
             if filetype == "movie":
                 min_bitrate = settings_manager.settings.downloaders.movie_min_avg_bitrate
             elif filetype in ["show", "season", "episode"]:
