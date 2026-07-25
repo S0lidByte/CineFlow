@@ -290,11 +290,11 @@ async def trakt_oauth_callback(
 
     trakt_api_key = settings_manager.settings.content.trakt.api_key
 
-    if not trakt_api_key:
+    if not (trakt_api_key or "").strip():
         # Prefer oauth client id when api_key field is empty (same as header resolution).
         trakt_api_key = trakt_api.client_id
 
-    if not trakt_api_key:
+    if not (trakt_api_key or "").strip():
         raise HTTPException(
             status_code=404, detail="Trakt Api key not found in settings"
         )

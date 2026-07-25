@@ -1,8 +1,19 @@
 from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from program.program import Program
 from program.settings import settings_manager
+
+
+@pytest.fixture(autouse=True)
+def _restore_changed_top_keys():
+    previous = settings_manager.last_changed_top_keys
+    try:
+        yield
+    finally:
+        settings_manager.last_changed_top_keys = previous
 
 
 def _mock_service(*, enabled: bool = True, initialized: bool = True) -> MagicMock:

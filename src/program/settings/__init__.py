@@ -48,11 +48,13 @@ class SettingsManager:
         self.observers.append(observer)
 
     def notify_observers(self):
-        for observer in self.observers:
-            observer()
-        # Clear after a full notify cycle so opportunistic setattr paths
-        # default to a conservative full reinit next time.
-        self.last_changed_top_keys = None
+        try:
+            for observer in self.observers:
+                observer()
+        finally:
+            # Clear after a full notify cycle so opportunistic setattr paths
+            # default to a conservative full reinit next time.
+            self.last_changed_top_keys = None
 
     def check_environment(
         self,
@@ -102,7 +104,7 @@ class SettingsManager:
         """Load settings from file, validating against the AppModel schema."""
 
         previous_dump: dict[str, Any] | None = None
-        if hasattr(self, "settings") and self.settings is not None:
+        if hasattr(self, "settings"):
             try:
                 previous_dump = self.settings.model_dump()
             except Exception:

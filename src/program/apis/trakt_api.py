@@ -518,6 +518,7 @@ class TraktAPI:
         object.__setattr__(self.settings.oauth, "access_token", "")
         object.__setattr__(self.settings.oauth, "refresh_token", "")
         self.headers.pop("Authorization", None)
+        self.session.headers.pop("Authorization", None)
         settings_manager.save()
 
     def oauth_connected(self) -> bool:

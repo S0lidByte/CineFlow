@@ -124,10 +124,12 @@ def _collect_item_alias_names(
 ) -> set[str]:
     """All known titles for an item (canonical + alias values), normalized."""
 
-    names = {_normalize_alias_title(correct_title)} if correct_title else set()
+    names: set[str] = set()
+    if correct_title:
+        names.add(_normalize_alias_title(correct_title))
     for values in aliases.values():
-        for name in values or []:
-            if isinstance(name, str) and name.strip():
+        for name in values:
+            if name.strip():
                 names.add(_normalize_alias_title(name))
     names.discard("")
     return names
@@ -147,7 +149,7 @@ def _merge_remake_aliases(
     if not scraping.enable_remake_aliases:
         return aliases
 
-    groups = scraping.remake_alias_groups or []
+    groups: list[list[str]] = list(scraping.remake_alias_groups)
     if not groups:
         return aliases
 
@@ -156,19 +158,16 @@ def _merge_remake_aliases(
         return aliases
 
     extras: list[str] = []
-    seen_extra = {
-        _normalize_alias_title(n)
-        for values in aliases.values()
-        for n in (values or [])
-        if isinstance(n, str)
+    seen_extra: set[str] = {
+        _normalize_alias_title(n) for values in aliases.values() for n in values
     }
     if correct_title:
         seen_extra.add(_normalize_alias_title(correct_title))
 
     for group in groups:
-        if not isinstance(group, list) or len(group) < 2:
+        if len(group) < 2:
             continue
-        members = [m.strip() for m in group if isinstance(m, str) and m.strip()]
+        members = [m.strip() for m in group if m.strip()]
         if len(members) < 2:
             continue
         member_norms = {_normalize_alias_title(m) for m in members}
@@ -185,9 +184,9 @@ def _merge_remake_aliases(
         return aliases
 
     merged = {k: list(v) for k, v in aliases.items()}
-    existing = merged.get("xx") or []
+    existing = list(merged.get("xx") or [])
     # Preserve operator-configured aliases; append remake extras without dupes.
-    existing_norms = {_normalize_alias_title(n) for n in existing if isinstance(n, str)}
+    existing_norms = {_normalize_alias_title(n) for n in existing}
     for name in extras:
         if _normalize_alias_title(name) not in existing_norms:
             existing.append(name)
@@ -214,7 +213,7 @@ def _resolve_scrape_aliases(
     aliases = {
         k: list(v)
         for k, v in raw.items()
-        if k not in active_settings.languages.exclude and isinstance(v, list)
+        if k not in active_settings.languages.exclude
     }
     return _merge_remake_aliases(item.top_title or "", aliases)
 
