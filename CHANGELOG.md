@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/S0lidByte/CineFlow/compare/v1.17.0...v1.18.0) (2026-07-25)
+
+
+### Features
+
+* **ranking:** scrape funnel API, matching modes, and bitrate floors ([#130](https://github.com/S0lidByte/CineFlow/issues/130)) ([4368047](https://github.com/S0lidByte/CineFlow/commit/4368047717cd335f622251e1f534e5e8551a8361))
+
 ## [1.17.0](https://github.com/S0lidByte/CineFlow/compare/v1.16.3...v1.17.0) (2026-07-25)
 
 
