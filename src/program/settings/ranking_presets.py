@@ -18,9 +18,10 @@ RankingPresetId = Literal[
     "kids_safe",
 ]
 
-# Title-matching modes for remake / alias diagnose (Ranking Studio UX).
-# These only document recommended title_similarity + alias expectations —
-# they never silently accept mismatched titles.
+# Title-matching modes for Ranking Studio.
+# Modes with diagnose_only=False write ranking.options.title_similarity (scrape-
+# applied when saved). remake_diagnose is tester-only — live remakes use Scraping
+# → enable_remake_aliases + remake_alias_groups (never the default).
 TitleMatchingModeId = Literal["strict", "balanced", "aliases_friendly", "remake_diagnose"]
 
 TITLE_MATCHING_MODES: list[dict[str, Any]] = [
@@ -29,16 +30,24 @@ TITLE_MATCHING_MODES: list[dict[str, Any]] = [
         "label": "Strict",
         "title_similarity": 0.9,
         "enable_aliases": True,
-        "description": "Tight Levenshtein match. Best default when titles are stable.",
+        "description": (
+            "Tight Levenshtein match. Writes ranking.options.title_similarity when "
+            "saved — applies to live scrape. Best default when titles are stable."
+        ),
         "diagnose_only": False,
+        "scrape_applied": True,
     },
     {
         "id": "balanced",
         "label": "Balanced",
         "title_similarity": 0.85,
         "enable_aliases": True,
-        "description": "Default RTN threshold with aliases enabled.",
+        "description": (
+            "Default RTN threshold. Writes ranking.options.title_similarity when "
+            "saved — applies to live scrape. Keep Scraping → enable_aliases on."
+        ),
         "diagnose_only": False,
+        "scrape_applied": True,
     },
     {
         "id": "aliases_friendly",
@@ -46,10 +55,12 @@ TITLE_MATCHING_MODES: list[dict[str, Any]] = [
         "title_similarity": 0.8,
         "enable_aliases": True,
         "description": (
-            "Slightly looser match while relying on Trakt/TMDB aliases. "
-            "Keep Scraping → enable_aliases on."
+            "Slightly looser match for Trakt/TMDB aliases. Writes "
+            "ranking.options.title_similarity when saved — applies to live scrape. "
+            "For remakes, also enable Scraping → enable_remake_aliases."
         ),
         "diagnose_only": False,
+        "scrape_applied": True,
     },
     {
         "id": "remake_diagnose",
@@ -57,11 +68,13 @@ TITLE_MATCHING_MODES: list[dict[str, Any]] = [
         "title_similarity": 0.7,
         "enable_aliases": True,
         "description": (
-            "Temporary diagnose mode for remakes (e.g. Saint Seiya vs Knights of "
-            "the Zodiac). Shows whether aliases / lower similarity would accept "
-            "a release — do not leave this low permanently."
+            "Tester-only temporary threshold for remakes (e.g. Saint Seiya vs "
+            "Knights of the Zodiac). Does not change live scrape by itself — for "
+            "production remakes use Scraping → enable_remake_aliases + "
+            "remake_alias_groups. Do not leave this low permanently."
         ),
         "diagnose_only": True,
+        "scrape_applied": False,
     },
 ]
 

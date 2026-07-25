@@ -511,3 +511,14 @@ class TraktAPI:
         else:
             logger.error(f"Failed to obtain OAuth token: {response.status_code}")
             return False
+
+    def clear_oauth_tokens(self) -> None:
+        """Clear stored OAuth tokens without notifying observers (no VFS remount)."""
+
+        object.__setattr__(self.settings.oauth, "access_token", "")
+        object.__setattr__(self.settings.oauth, "refresh_token", "")
+        self.headers.pop("Authorization", None)
+        settings_manager.save()
+
+    def oauth_connected(self) -> bool:
+        return bool((self.settings.oauth.access_token or "").strip())

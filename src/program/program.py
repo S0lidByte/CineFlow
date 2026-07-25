@@ -115,17 +115,43 @@ class Program(threading.Thread):
     def initialize_apis(self):
         bootstrap_apis()
 
-    def initialize_services(self):
-        """Initialize all services."""
+    # Top-level settings keys that require closing and remounting RivenVFS.
+    # Content / ranking / scraping / notifications / etc. only rebuild services.
+    _VFS_REINIT_TOP_KEYS = frozenset({"filesystem", "downloaders"})
 
-        if self.services:
+    def initialize_services(self):
+        """Initialize all services.
+
+        Skips filesystem.close() + VFS remount when the last settings load only
+        changed non-VFS keys (e.g. content.trakt lists). Unknown / full reloads
+        (startup, setattr path) still remount.
+        """
+
+        changed = settings_manager.last_changed_top_keys
+        remount_filesystem = changed is None or bool(
+            changed & self._VFS_REINIT_TOP_KEYS
+        )
+
+        previous = self.services
+        if previous and remount_filesystem:
             try:
-                self.services.filesystem.close()
+                previous.filesystem.close()
             except Exception:
                 logger.exception("Failed to close previous filesystem service")
+        elif previous and not remount_filesystem:
+            logger.debug(
+                "Skipping VFS remount; changed settings keys do not affect "
+                f"filesystem/downloaders: {sorted(changed) if changed else []}"
+            )
 
         # Instantiate services fresh on each settings change; settings_manager observers handle reinit
-        _downloader = Downloader()
+        if remount_filesystem or previous is None:
+            _downloader = Downloader()
+            _filesystem = FilesystemService(_downloader)
+        else:
+            # Keep mounted VFS + its downloader; rebuild everything else.
+            _downloader = previous.downloader
+            _filesystem = previous.filesystem
 
         self.services = Services(
             overseerr=Overseerr(),
@@ -137,7 +163,7 @@ class Program(threading.Thread):
             scraping=Scraping(),
             updater=Updater(),
             downloader=_downloader,
-            filesystem=FilesystemService(_downloader),
+            filesystem=_filesystem,
             post_processing=PostProcessing(),
             notifications=NotificationService(),
         )
