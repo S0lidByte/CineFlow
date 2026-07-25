@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.3](https://github.com/S0lidByte/CineFlow/compare/v1.16.2...v1.16.3) (2026-07-25)
+
+
+### Bug Fixes
+
+* **scrapers:** bucket RTN title mismatches + quiet Trakt skip logs ([#125](https://github.com/S0lidByte/CineFlow/issues/125)) ([3cb7b79](https://github.com/S0lidByte/CineFlow/commit/3cb7b79f252f56e5f2eb5892cd77f7442c95b760))
+
 ## [1.16.2](https://github.com/S0lidByte/CineFlow/compare/v1.16.1...v1.16.2) (2026-07-25)
 
 
