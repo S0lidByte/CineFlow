@@ -9,6 +9,7 @@ from loguru import logger
 from program.db.db import db_session
 from program.media.media_entry import MediaEntry
 from program.services.streaming.exceptions import (
+    DebridServiceFairUsageLimitException,
     DebridServiceLinkUnavailable,
 )
 from program.services.streaming.streaming_constants import PROXY_REQUIRED_PROVIDERS
@@ -75,6 +76,13 @@ class DebridCDNUrl:
 
         try:
             return self._refresh()
+        except DebridServiceFairUsageLimitException as e:
+            # Fair usage must propagate so VFS.open can fail fast with a clear errno.
+            # Still record cooldown so a reused DebridCDNUrl instance won't re-enter refresh.
+            retry_after = getattr(e, "retry_after_seconds", None)
+            if isinstance(retry_after, (int, float)):
+                self._set_refresh_cooldown(float(retry_after))
+            raise
         except Exception as e:
             retry_after = getattr(e, "retry_after_seconds", None)
 

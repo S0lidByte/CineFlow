@@ -63,7 +63,15 @@ class Observable(MigratableBaseModel):
 
 
 class RealDebridModel(Observable):
-    enabled: bool = Field(default=False, description="Enable Real-Debrid")
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable Real-Debrid. RD enforces account-side fair usage on "
+            "unrestrict/streaming; when hit, CineFlow cools down ~5 minutes and "
+            "skips further unrestricts. Wait out the cooldown and avoid "
+            "simultaneous streams."
+        ),
+    )
     api_key: str = Field(default="", description="Real-Debrid API key")
 
 

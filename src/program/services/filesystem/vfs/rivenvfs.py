@@ -1816,11 +1816,26 @@ class RivenVFS(pyfuse3.Operations):
                     return await self.open(inode, flags, ctx)
                 except pyfuse3.FUSEError:
                     raise
-                except DebridServiceFairUsageLimitException:
-                    logger.warning(
-                        f"Fair usage limit reached for {node.path}; unable to validate CDN URL."
+                except DebridServiceFairUsageLimitException as e:
+                    # Rate-limit: Plex/clients retry open every ~2s during cooldown.
+                    retry_after = getattr(e, "retry_after_seconds", None)
+                    retry_after_s = (
+                        float(retry_after)
+                        if isinstance(retry_after, (int, float))
+                        else 300.0
                     )
-                    raise pyfuse3.FUSEError(errno.EACCES)
+                    now = time.time()
+                    if now >= getattr(self, "_fair_usage_open_log_until", 0.0):
+                        self._fair_usage_open_log_until = now + max(
+                            30.0, min(retry_after_s, 300.0)
+                        )
+                        logger.warning(
+                            f"Fair usage limit reached for {node.path}; unable to "
+                            f"validate CDN URL (retry after ~{retry_after_s:.0f}s). "
+                            f"This is Real-Debrid account policy — wait out the "
+                            f"cooldown; avoid simultaneous streams."
+                        )
+                    raise pyfuse3.FUSEError(errno.EIO)
                 except Exception as e:
                     logger.exception(f"Unexpected error whilst validating CDN URL: {e}")
 

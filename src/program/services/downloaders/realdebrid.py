@@ -677,6 +677,50 @@ class RealDebridDownloader(DownloaderBase):
 
         return DownloadList.model_validate({"data": response.json()}).data
 
+    def _fair_usage_remaining(self) -> float:
+        """Seconds remaining on the fair-usage cooldown, or 0 if inactive."""
+
+        until = float(getattr(self, "_fair_usage_until", 0) or 0)
+        return max(0.0, until - time.time())
+
+    def _raise_fair_usage(self, *, from_api: bool = False) -> None:
+        """
+        Raise FairUsage with retry_after, logging WARNING only once per cooldown window.
+
+        Plex/clients often retry open() every ~2s while blocked; without rate-limiting
+        this floods logs even though the RD API call is already skipped.
+        """
+
+        remaining = self._fair_usage_remaining()
+        until = float(getattr(self, "_fair_usage_until", 0) or 0)
+        until_iso = (
+            datetime.fromtimestamp(until).isoformat() if until > 0 else "unknown"
+        )
+
+        if not getattr(self, "_fair_usage_warned", False):
+            self._fair_usage_warned = True
+            if from_api:
+                logger.warning(
+                    f"Fair usage limit reached for {self.key}: cooling down until "
+                    f"{until_iso} (~{remaining:.0f}s). Further unrestrict attempts "
+                    f"will be skipped until then."
+                )
+            else:
+                logger.warning(
+                    f"Skipping unrestrict: Fair usage limit active for {self.key} "
+                    f"until {until_iso} (~{remaining:.0f}s)"
+                )
+        else:
+            logger.debug(
+                f"Fair usage cooldown active for {self.key} until {until_iso} "
+                f"(~{remaining:.0f}s remaining)"
+            )
+
+        raise DebridServiceFairUsageLimitException(
+            provider=self.key,
+            retry_after_seconds=remaining or 300.0,
+        )
+
     def unrestrict_link(self, link: str) -> UnrestrictedLink | None:
         """
         Unrestrict a link using direct requests library, bypassing SmartSession rate limiting.
@@ -693,11 +737,8 @@ class RealDebridDownloader(DownloaderBase):
             assert self.api
 
             # Check if we are currently rate-limited by fair usage
-            if getattr(self, "_fair_usage_until", 0) > time.time():
-                logger.warning(
-                    f"Skipping unrestrict for {link}: Fair usage limit active until {datetime.fromtimestamp(self._fair_usage_until).isoformat()}"
-                )
-                raise DebridServiceFairUsageLimitException(provider=self.key)
+            if self._fair_usage_remaining() > 0:
+                self._raise_fair_usage(from_api=False)
 
             response = self.api.session.post(
                 f"{self.api.BASE_URL}/unrestrict/link",
@@ -711,14 +752,11 @@ class RealDebridDownloader(DownloaderBase):
                 data = RealDebridErrorResponse.model_validate(response.json())
 
                 if data.error_code == RealDebridErrorCode.FAIR_USAGE_LIMIT:
-                    logger.warning(
-                        f"Fair usage limit reached for {self.key}: {data.error}"
-                    )
-
                     # Cache the fair usage limit for 5 minutes (300 seconds)
                     self._fair_usage_until = time.time() + 300
+                    self._fair_usage_warned = False
 
-                    raise DebridServiceFairUsageLimitException(provider=self.key)
+                    self._raise_fair_usage(from_api=True)
                 if data.error_code in (
                     RealDebridErrorCode.RESOURCE_UNREACHABLE,
                     RealDebridErrorCode.RESOURCE_NOT_FOUND,
