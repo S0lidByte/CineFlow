@@ -462,7 +462,12 @@ class TraktAPI:
         return f"{self.OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
 
     def handle_oauth_callback(self, api_key: str, code: str) -> bool:
-        """Handle the OAuth callback and exchange the code for an access token."""
+        """Handle the OAuth callback and exchange the code for an access token.
+
+        Trakt requires a JSON body with ``Content-Type: application/json``.
+        Passing ``data=`` (form-urlencoded) while advertising JSON causes Trakt to
+        reject the exchange (400/412) and surfaces as "Failed to obtain OAuth token".
+        """
 
         if (
             not self.oauth_client_id
@@ -482,10 +487,15 @@ class TraktAPI:
             "grant_type": "authorization_code",
         }
 
+        # trakt-api-key must be the same Client ID used in the authorize + token body.
+        # Prefer oauth_client_id over settings api_key so a mismatched Api Key field
+        # cannot break an otherwise valid OAuth exchange.
         headers = self.headers.copy()
-        headers["trakt-api-key"] = api_key or self.client_id
+        headers["trakt-api-key"] = self.oauth_client_id or api_key or self.client_id
+        # Token exchange is unauthenticated; a stale Bearer confuses some gateways.
+        headers.pop("Authorization", None)
 
-        response = self.session.post(token_url, data=payload, headers=headers)
+        response = self.session.post(token_url, json=payload, headers=headers)
 
         if response.ok:
 
@@ -509,7 +519,10 @@ class TraktAPI:
 
             return True
         else:
-            logger.error(f"Failed to obtain OAuth token: {response.status_code}")
+            body_preview = (getattr(response, "text", None) or "")[:300]
+            logger.error(
+                f"Failed to obtain OAuth token: {response.status_code} {body_preview}"
+            )
             return False
 
     def clear_oauth_tokens(self) -> None:
