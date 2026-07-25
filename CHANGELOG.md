@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/S0lidByte/CineFlow/compare/v1.14.1...v1.15.0) (2026-07-25)
+
+
+### Features
+
+* **scrapers:** add settings-gated anime ranking soft-opt-in ([#117](https://github.com/S0lidByte/CineFlow/issues/117)) ([92b9afa](https://github.com/S0lidByte/CineFlow/commit/92b9afa181a061c3b1a13f3777330e7f1691ef0a))
+
 ## [1.14.1](https://github.com/S0lidByte/CineFlow/compare/v1.14.0...v1.14.1) (2026-07-25)
 
 
