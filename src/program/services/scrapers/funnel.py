@@ -48,7 +48,7 @@ class ScrapeFunnelStats:
     already_known: int = 0
     blacklisted: int = 0
     new: int = 0
-    rtn_reasons: Counter[str] = field(default_factory=Counter)
+    rtn_reasons: Counter[str] = field(default_factory=lambda: Counter[str]())
 
     def record_rtn_reject(self, exc: BaseException) -> None:
         self.rtn_rejected += 1
