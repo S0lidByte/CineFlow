@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.0](https://github.com/S0lidByte/CineFlow/compare/v1.19.3...v1.20.0) (2026-07-25)
+
+
+### Features
+
+* **media:** persist MediaItem.runtime for bitrate floors ([#141](https://github.com/S0lidByte/CineFlow/issues/141)) ([5e8e167](https://github.com/S0lidByte/CineFlow/commit/5e8e1671cad45447ec21e102af48db36b83d31bf))
+
 ## [1.19.3](https://github.com/S0lidByte/CineFlow/compare/v1.19.2...v1.19.3) (2026-07-25)
 
 
