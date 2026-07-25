@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/S0lidByte/CineFlow/compare/v1.14.0...v1.14.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **media:** make blacklist_stream idempotent for existing relations ([#115](https://github.com/S0lidByte/CineFlow/issues/115)) ([6c83ee0](https://github.com/S0lidByte/CineFlow/commit/6c83ee06793c6fd89f02ba6585ef9deafd32f604))
+
 ## [1.14.0](https://github.com/S0lidByte/CineFlow/compare/v1.13.0...v1.14.0) (2026-07-25)
 
 
