@@ -579,7 +579,10 @@ class TraktOauthModel(BaseModel):
 
 class TraktModel(Updatable):
     enabled: bool = Field(default=False, description="Enable Trakt integration")
-    api_key: str = Field(default="", description="Trakt API key")
+    api_key: str = Field(
+        default="",
+        description="Trakt Client ID (from trakt.tv/oauth/applications — not the Client Secret)",
+    )
     watchlist: list[str] = Field(
         default_factory=list[str],
         description="Trakt usernames for watchlist monitoring",

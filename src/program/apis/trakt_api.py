@@ -52,9 +52,11 @@ class TraktAPI:
     """Handles Trakt API communication"""
 
     BASE_URL = "https://api.trakt.tv"
-    CLIENT_ID = os.environ.get(
-        "TRAKT_API_CLIENT_ID",
-        "0183a05ad97098d87287fe46da4ae286f434f32e8e951caad4cc147c947d79a3",
+    # Authorize must use the website host, not api.trakt.tv (Trakt OAuth docs).
+    OAUTH_AUTHORIZE_URL = "https://trakt.tv/oauth/authorize"
+    # Legacy fallback when settings/env are empty (upstream Riven default app).
+    _DEFAULT_CLIENT_ID = (
+        "0183a05ad97098d87287fe46da4ae286f434f32e8e951caad4cc147c947d79a3"
     )
 
     patterns = {
@@ -62,11 +64,31 @@ class TraktAPI:
         "short_list": re.compile(r"https://trakt.tv/lists/\d+"),
     }
 
+    @staticmethod
+    def resolve_client_id(settings: TraktModel) -> str:
+        """Resolve Trakt Client ID for the ``trakt-api-key`` header.
+
+        Preference order matches what operators configure in Settings:
+        1. ``content.trakt.api_key`` (UI "Api Key" — must be Client ID)
+        2. ``content.trakt.oauth.oauth_client_id``
+        3. ``TRAKT_API_CLIENT_ID`` env
+        4. baked-in legacy default
+        """
+        for candidate in (
+            (settings.api_key or "").strip(),
+            (settings.oauth.oauth_client_id or "").strip(),
+            (os.environ.get("TRAKT_API_CLIENT_ID") or "").strip(),
+        ):
+            if candidate:
+                return candidate
+        return TraktAPI._DEFAULT_CLIENT_ID
+
     def __init__(self, settings: TraktModel):
         self.settings = settings
         self.oauth_client_id = self.settings.oauth.oauth_client_id
         self.oauth_client_secret = self.settings.oauth.oauth_client_secret
         self.oauth_redirect_uri = self.settings.oauth.oauth_redirect_uri
+        self.client_id = self.resolve_client_id(settings)
 
         self.session = SmartSession(
             base_url=self.BASE_URL,
@@ -82,10 +104,13 @@ class TraktAPI:
         )
 
         self.headers = {
-            "Content-type": "application/json",
-            "trakt-api-key": self.CLIENT_ID,
+            "Content-Type": "application/json",
+            "trakt-api-key": self.client_id,
             "trakt-api-version": "2",
         }
+        access_token = (self.settings.oauth.access_token or "").strip()
+        if access_token:
+            self.headers["Authorization"] = f"Bearer {access_token}"
         self.session.headers.update(self.headers)
 
         if self.settings.proxy_url:
@@ -99,6 +124,13 @@ class TraktAPI:
         response = self.session.get("lists/2")
 
         from schemas.trakt import GetList200Response
+
+        if response.status_code == 403:
+            raise RequestException(
+                "Trakt returned 403 Forbidden — check that Settings Api Key "
+                "(and Oauth Client Id) are your Trakt app Client ID, not the "
+                "Client Secret. The trakt-api-key header must be the Client ID."
+            )
 
         try:
             payload = response.json()
@@ -427,7 +459,7 @@ class TraktAPI:
             "redirect_uri": self.oauth_redirect_uri,
         }
 
-        return f"{self.BASE_URL}/oauth/authorize?{urlencode(params)}"
+        return f"{self.OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
 
     def handle_oauth_callback(self, api_key: str, code: str) -> bool:
         """Handle the OAuth callback and exchange the code for an access token."""
@@ -451,7 +483,7 @@ class TraktAPI:
         }
 
         headers = self.headers.copy()
-        headers["trakt-api-key"] = api_key
+        headers["trakt-api-key"] = api_key or self.client_id
 
         response = self.session.post(token_url, data=payload, headers=headers)
 
@@ -463,11 +495,15 @@ class TraktAPI:
 
             token_data = OAuthTokenResponse.model_validate(response.json())
 
-            # Write tokens directly to Pydantic model internals to bypass Observable.__setattr__,
+            # Write tokens on the oauth sub-model, bypassing Observable.__setattr__,
             # which would fire notify_observers() → initialize_services() and destroy any
             # in-flight downloads. settings_manager.save() persists the values to disk.
-            object.__setattr__(self.settings, "access_token", token_data.access_token)
-            object.__setattr__(self.settings, "refresh_token", token_data.refresh_token)
+            object.__setattr__(
+                self.settings.oauth, "access_token", token_data.access_token
+            )
+            object.__setattr__(
+                self.settings.oauth, "refresh_token", token_data.refresh_token
+            )
 
             settings_manager.save()  # Save the tokens to settings
 
