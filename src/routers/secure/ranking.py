@@ -6,7 +6,7 @@ import re
 import time
 from collections import defaultdict, deque
 from threading import Lock
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -116,8 +116,10 @@ class RankingMetaResponse(BaseModel):
     categories: dict[str, str]
     soft_opt_in_links: dict[str, dict[str, str]]
     pattern_limits: dict[str, int]
-    title_matching_modes: list[dict[str, Any]] = Field(default_factory=list)
-    presets: list[dict[str, Any]] = Field(default_factory=list)
+    title_matching_modes: list[dict[str, Any]] = Field(
+        default_factory=list[dict[str, Any]]
+    )
+    presets: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
     golden_titles: dict[str, str] = Field(default_factory=dict)
 
 
@@ -167,7 +169,7 @@ class FunnelSummaryResponse(BaseModel):
     blacklisted: int = 0
     rtn_rejected: int = 0
     content_filtered: int = 0
-    rtn_top: list[FunnelReasonCount] = Field(default_factory=list)
+    rtn_top: list[FunnelReasonCount] = Field(default_factory=list[FunnelReasonCount])
 
 
 def _scraping_hint_for_deny(deny_key: str | None) -> str | None:
@@ -267,6 +269,23 @@ async def get_scrape_funnel_summary(item_id: int) -> FunnelSummaryResponse:
             found=False,
             item_id=item_id,
         )
+
+    rtn_top: list[FunnelReasonCount] = []
+    rtn_top_raw: Any = cached.get("rtn_top") or []
+    if isinstance(rtn_top_raw, list):
+        for entry in cast(list[Any], rtn_top_raw):
+            if not isinstance(entry, dict):
+                continue
+            typed_entry = cast(dict[str, Any], entry)
+            reason_val: Any = typed_entry.get("reason", "")
+            count_val: Any = typed_entry.get("count", 0)
+            rtn_top.append(
+                FunnelReasonCount(
+                    reason=str(reason_val) if reason_val is not None else "",
+                    count=int(count_val) if count_val is not None else 0,
+                )
+            )
+
     return FunnelSummaryResponse(
         message="Scrape funnel summary",
         found=True,
@@ -279,11 +298,7 @@ async def get_scrape_funnel_summary(item_id: int) -> FunnelSummaryResponse:
         blacklisted=int(cached.get("blacklisted", 0)),
         rtn_rejected=int(cached.get("rtn_rejected", 0)),
         content_filtered=int(cached.get("content_filtered", 0)),
-        rtn_top=[
-            FunnelReasonCount(reason=str(r.get("reason", "")), count=int(r.get("count", 0)))
-            for r in (cached.get("rtn_top") or [])
-            if isinstance(r, dict)
-        ],
+        rtn_top=rtn_top,
     )
 
 
