@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.0](https://github.com/S0lidByte/CineFlow/compare/v1.16.3...v1.17.0) (2026-07-25)
+
+
+### Features
+
+* **ranking:** validate patterns and enrich Ranking Studio API ([#127](https://github.com/S0lidByte/CineFlow/issues/127)) ([6a4a61f](https://github.com/S0lidByte/CineFlow/commit/6a4a61f8405e0444e233451e07fe70aa2f199566))
+
 ## [1.16.3](https://github.com/S0lidByte/CineFlow/compare/v1.16.2...v1.16.3) (2026-07-25)
 
 
