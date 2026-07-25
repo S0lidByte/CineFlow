@@ -68,4 +68,8 @@ jobs:
             src/tests/test_debrid_cdn_url.py \
             src/tests/test_requests.py \
             src/tests/test_incremental_parse_results.py \
-            src/tests/test_alldebrid_downloader.py
+            src/tests/test_alldebrid_downloader.py \
+            src/tests/test_stream_read_type.py \
+            src/tests/test_streaming_cache.py \
+            src/tests/test_stream_tolerance_settings.py \
+            src/tests/test_rivenvfs.py

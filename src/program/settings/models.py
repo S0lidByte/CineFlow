@@ -982,6 +982,24 @@ class StreamModel(Observable):
         ge=1,
         description="Timeout in seconds before a stream is considered inactive during resource cleanup (60 seconds default)",
     )
+    sequential_read_tolerance_blocks: int = Field(
+        default=10,
+        ge=1,
+        le=1000,
+        description=(
+            "Advanced: tolerance in kernel blocks for interleaved sequential reads "
+            "(default 10 × 128 KiB). Leave at default unless tuning scan vs playback detection."
+        ),
+    )
+    scan_tolerance_blocks: int = Field(
+        default=25,
+        ge=1,
+        le=1000,
+        description=(
+            "Advanced: jump size in kernel blocks that classifies a read as a library scan "
+            "(default 25 × 128 KiB). Leave at default unless tuning scan vs playback detection."
+        ),
+    )
 
 
 class AppModel(Observable):

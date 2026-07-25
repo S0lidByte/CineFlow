@@ -879,24 +879,7 @@ class RivenVFS(pyfuse3.Operations):
 
         # Step 5: Batch invalidate all collected inodes
         # This is critical: reduces syscalls from O(n) to O(1)
-        if self._pending_invalidations:
-            invalidated_count = 0
-            try:
-                for inode in self._pending_invalidations:
-                    try:
-                        pyfuse3.invalidate_inode(inode, attr_only=False)
-                        invalidated_count += 1
-                    except OSError as e:
-                        # Expected: some inodes may not be in kernel cache
-                        # This is not an error, just means kernel already evicted them
-                        if e.errno != errno.ENOENT:
-                            logger.trace(f"Could not invalidate inode {inode}: {e}")
-                if invalidated_count > 0:
-                    logger.trace(
-                        f"Batch invalidated {invalidated_count}/{len(self._pending_invalidations)} inodes"
-                    )
-            finally:
-                self._pending_invalidations.clear()
+        self._flush_pending_invalidations()
 
         # Invalidate root directory
         if registered_count > 0:
@@ -905,6 +888,36 @@ class RivenVFS(pyfuse3.Operations):
                 logger.debug("Invalidated root directory cache after sync")
             except Exception as e:
                 logger.trace(f"Could not invalidate root directory: {e}")
+
+    def _flush_pending_invalidations(self) -> None:
+        """Flush collected parent inode invalidations to the FUSE kernel cache.
+
+        Safe to call when the set is empty. ENOENT is expected when the kernel
+        has already dropped an inode from its cache.
+        """
+
+        if not self._pending_invalidations:
+            return
+
+        invalidated_count = 0
+        pending_count = len(self._pending_invalidations)
+
+        try:
+            for inode in self._pending_invalidations:
+                try:
+                    pyfuse3.invalidate_inode(inode, attr_only=False)
+                    invalidated_count += 1
+                except OSError as e:
+                    # Expected: some inodes may not be in kernel cache
+                    if e.errno != errno.ENOENT:
+                        logger.trace(f"Could not invalidate inode {inode}: {e}")
+
+            if invalidated_count > 0:
+                logger.trace(
+                    f"Batch invalidated {invalidated_count}/{pending_count} inodes"
+                )
+        finally:
+            self._pending_invalidations.clear()
 
     def _sync_individual(self, item: "MediaItem") -> None:
         """
@@ -957,6 +970,9 @@ class RivenVFS(pyfuse3.Operations):
                 # Step 2: Re-add the item with current state (including new subtitles)
                 self.add(fresh_item)
                 session.commit()
+
+        # Flush parent invalidations collected during re-add (same path as full sync).
+        self._flush_pending_invalidations()
 
         logger.debug(f"Individual sync complete for item {item.id}")
 
@@ -1836,11 +1852,11 @@ class RivenVFS(pyfuse3.Operations):
         """
         Read data from file at offset.
 
-        Implements efficient streaming with:
-        - Fixed-size chunk fetching (32MB default)
-        - Concurrent chunk fetching for cache misses
-        - Sequential read detection and prefetching
-        - Per-chunk locking to prevent duplicate fetches
+        Streaming is on-demand via MediaStream:
+        - Fixed-size chunk fetching (default ``chunk_size_mb`` = 1 MiB)
+        - Read-type classification (header/footer scan, sequential, seek, body)
+        - Disk/shm block cache with per-chunk locking to avoid duplicate fetches
+        - No adaptive prefetch of ahead-of-playback chunks
 
         Args:
             fh: File handle from open()

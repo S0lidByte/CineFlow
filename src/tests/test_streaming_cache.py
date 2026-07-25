@@ -1,0 +1,170 @@
+"""Characterization tests for the disk-backed streaming Cache."""
+
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+import pytest
+import trio
+
+from program.services.streaming.cache import Cache, CacheConfig
+
+
+def _make_cache(
+    cache_dir: Path,
+    *,
+    max_size_bytes: int = 10 * 1024 * 1024,
+    eviction: str = "LRU",
+    ttl_seconds: int = 3600,
+    metrics_enabled: bool = True,
+) -> Cache:
+    return Cache(
+        CacheConfig(
+            cache_dir=cache_dir,
+            max_size_bytes=max_size_bytes,
+            eviction=eviction,  # type: ignore[arg-type]
+            ttl_seconds=ttl_seconds,
+            metrics_enabled=metrics_enabled,
+        )
+    )
+
+
+def test_cache_put_get_exact_hit(tmp_path: Path) -> None:
+    cache = _make_cache(tmp_path)
+    payload = b"abcdefghij" * 100
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, payload)
+        got = await cache.get("movie.mkv", 0, len(payload) - 1)
+        assert got == payload
+        stats = await cache.stats()
+        assert stats["hits"] == 1
+        assert stats["misses"] == 0
+        assert stats["bytes_from_cache"] == len(payload)
+        assert stats["bytes_written"] == len(payload)
+        assert stats["entries"] == 1
+
+    trio.run(_run)
+
+
+def test_cache_partial_slice_within_chunk(tmp_path: Path) -> None:
+    cache = _make_cache(tmp_path)
+    payload = bytes(range(256))
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, payload)
+        got = await cache.get("movie.mkv", 10, 19)
+        assert got == payload[10:20]
+        stats = await cache.stats()
+        assert stats["hits"] == 1
+
+    trio.run(_run)
+
+
+def test_cache_cross_chunk_stitch(tmp_path: Path) -> None:
+    cache = _make_cache(tmp_path)
+    first = b"A" * 100
+    second = b"B" * 100
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, first)
+        await cache.put("movie.mkv", 100, second)
+        got = await cache.get("movie.mkv", 90, 109)
+        assert got == (b"A" * 10) + (b"B" * 10)
+        stats = await cache.stats()
+        assert stats["hits"] >= 1
+        assert stats["entries"] == 2
+
+    trio.run(_run)
+
+
+def test_cache_miss_returns_empty(tmp_path: Path) -> None:
+    cache = _make_cache(tmp_path)
+
+    async def _run() -> None:
+        got = await cache.get("missing.mkv", 0, 99)
+        assert got == b""
+        stats = await cache.stats()
+        assert stats["misses"] == 1
+        assert stats["hits"] == 0
+
+    trio.run(_run)
+
+
+def test_cache_has_reports_coverage(tmp_path: Path) -> None:
+    cache = _make_cache(tmp_path)
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, b"0123456789")
+        assert cache.has("movie.mkv", 0, 9) is True
+        assert cache.has("movie.mkv", 0, 10) is False
+        assert cache.has("other.mkv", 0, 9) is False
+
+    trio.run(_run)
+
+
+def test_cache_lru_eviction(tmp_path: Path) -> None:
+    # Each put is 60 bytes; max 100 bytes forces eviction of the oldest entry.
+    cache = _make_cache(tmp_path, max_size_bytes=100)
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, b"1" * 60)
+        await cache.put("movie.mkv", 60, b"2" * 60)
+        stats = await cache.stats()
+        assert stats["entries"] == 1
+        assert stats["evictions"] >= 1
+        assert stats["total_bytes"] <= 100
+        # First chunk should be gone
+        assert await cache.get("movie.mkv", 0, 59) == b""
+        # Second chunk should remain
+        assert await cache.get("movie.mkv", 60, 119) == b"2" * 60
+
+    trio.run(_run)
+
+
+def test_cache_ttl_eviction(tmp_path: Path) -> None:
+    cache = _make_cache(tmp_path, eviction="TTL", ttl_seconds=1)
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, b"ttl-data-123456")
+        assert await cache.get("movie.mkv", 0, 14) == b"ttl-data-123456"
+        # Age the entry past TTL
+        key = cache._key("movie.mkv", 0)
+        entry = cache._index[key]
+        cache._index[key] = type(entry)(
+            key=entry.key,
+            cache_key=entry.cache_key,
+            start=entry.start,
+            size=entry.size,
+            mtime=time.time() - 10,
+        )
+        await cache.trim()
+        assert await cache.get("movie.mkv", 0, 14) == b""
+        stats = await cache.stats()
+        assert stats["evictions"] >= 1
+
+    trio.run(_run)
+
+
+def test_cache_rebuilds_index_on_restart(tmp_path: Path) -> None:
+    payload = b"persist-me-please!!"
+
+    # Cache.__init__ calls trio.run(_initialize); construct outside nested runs.
+    cache = _make_cache(tmp_path)
+
+    async def _seed() -> None:
+        await cache.put("movie.mkv", 0, payload)
+
+    trio.run(_seed)
+
+    reloaded = _make_cache(tmp_path)
+
+    async def _reload() -> None:
+        got = await reloaded.get("movie.mkv", 0, len(payload) - 1)
+        assert got == payload
+        stats = await reloaded.stats()
+        assert stats["entries"] == 1
+        assert stats["hits"] == 1
+
+    trio.run(_reload)

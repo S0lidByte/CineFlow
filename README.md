@@ -184,13 +184,28 @@ CineFlow ships with a built-in virtual filesystem (VFS) optimised for streaming,
 
 | Setting | Description |
 |---------|-------------|
-| `cache_dir` | Directory where cached data is stored |
-| `cache_max_size_mb` | Maximum total cache size in MB |
-| `chunk_size_mb` | Size of each CDN request chunk |
-| `fetch_ahead_chunks` | Number of chunks prefetched ahead of playback |
-| `ttl_seconds` | Optional TTL-based expiration for cached blocks |
+| `filesystem.cache_dir` | Directory where cached chunks are stored (default `/dev/shm/riven-cache`) |
+| `filesystem.cache_max_size_mb` | Maximum total cache size in MB (default 10240) |
+| `filesystem.cache_ttl_seconds` | TTL used when eviction policy is TTL (default 2 hours) |
+| `filesystem.cache_eviction` | Eviction policy: `LRU` (default) or `TTL` |
+| `filesystem.cache_metrics` | Emit periodic VFS cache stats logs (default true) |
+| `stream.chunk_size_mb` | Size of each on-demand CDN request chunk (default 1 MiB) |
+| `stream.sequential_read_tolerance_blocks` | Interleaved sequential-read tolerance in 128 KiB blocks (default 10) |
+| `stream.scan_tolerance_blocks` | Jump size that classifies a read as a library scan (default 25) |
 
-By default, CineFlow uses **LRU eviction** — the least recently used cache blocks are automatically removed when space runs low. Set `ttl_seconds` to switch to time-based expiration instead.
+Chunks are fetched **on demand** for the bytes requested by the media client. There is no ahead-of-playback prefetch setting.
+
+By default, CineFlow uses **LRU eviction** — the least recently used cache blocks are removed when space runs low. Set `filesystem.cache_eviction` to `TTL` to expire blocks by `filesystem.cache_ttl_seconds` instead.
+
+### Baseline metrics before further cache work
+
+With `filesystem.cache_metrics` enabled, VFS logs emit `Cache stats: {...}` about every 30s. Capture these before proposing prefetch or extra cache tiers:
+
+- `hits` / `misses` (and derived hit ratio)
+- `bytes_from_cache` / `bytes_written`
+- `evictions`, `total_bytes`, `entries`
+
+Also note STREAM/VFS log lines for read types (`header_scan`, `footer_scan`, `sequential_read`, `seek`, `body_read`) during library scan, playback, and seek. Miss latency and CDN byte volume are not in the snapshot today — time those from logs or external tooling if needed.
 
 ---
 
