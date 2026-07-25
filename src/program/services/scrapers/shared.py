@@ -102,6 +102,38 @@ def normalize_rtn_language_settings(settings: SettingsModel) -> None:
     _normalize_rtn_language_settings(settings)
 
 
+def _item_is_anime(item: MediaItem | object) -> bool:
+    return bool(getattr(item, "is_anime", False))
+
+
+def _scraping_settings() -> ScraperModel:
+    """Live scraping settings (avoid stale import-time snapshot)."""
+
+    return settings_manager.settings.scraping
+
+
+def _title_looks_multi_or_dual_audio(raw_title: str) -> bool:
+    """Heuristic for MULTI / dual-audio releases (anime soft-opt-in)."""
+
+    lowered = raw_title.lower()
+    tokens = (
+        "multi",
+        "dual-audio",
+        "dual audio",
+        "dualaudio",
+        "dual.audio",
+    )
+    if any(token in lowered for token in tokens):
+        return True
+
+    try:
+        languages = parse(raw_title).languages or []
+    except Exception:
+        return False
+
+    return len({lang.lower() for lang in languages}) >= 2
+
+
 def _should_retry_as_untagged_english(
     error: GarbageTorrent, settings: SettingsModel, raw_title: str
 ) -> bool:
@@ -120,6 +152,44 @@ def _should_retry_as_untagged_english(
         return False
 
 
+def _should_retry_as_multi_audio_for_anime(
+    error: GarbageTorrent,
+    *,
+    item: MediaItem | object | None,
+    raw_title: str,
+) -> bool:
+    if item is None or not _item_is_anime(item):
+        return False
+    if not _scraping_settings().anime_allow_multi_audio:
+        return False
+    if "missing_required_language" not in str(error):
+        return False
+    return _title_looks_multi_or_dual_audio(raw_title)
+
+
+def _apply_anime_extras_dubbed_soft_opt_in(
+    item: MediaItem | object, settings: SettingsModel
+) -> SettingsModel:
+    """Optionally enable extras.dubbed.fetch for anime items only."""
+
+    if not _item_is_anime(item):
+        return settings
+    if not _scraping_settings().anime_allow_extras_dubbed:
+        return settings
+
+    dubbed = settings.custom_ranks.extras.dubbed
+    if getattr(dubbed, "fetch", True):
+        return settings
+
+    relaxed = settings.model_copy(deep=True)
+    relaxed.custom_ranks.extras.dubbed.fetch = True
+    logger.debug(
+        "Anime ranking soft-opt-in: enabling extras.dubbed.fetch for "
+        f"{getattr(item, 'log_string', item)}"
+    )
+    return relaxed
+
+
 def _rank_with_language_compat(
     rtn_instance: RTN,
     settings: SettingsModel,
@@ -129,6 +199,7 @@ def _rank_with_language_compat(
     correct_title: str,
     remove_trash: bool,
     aliases: dict[str, list[str]],
+    item: MediaItem | object | None = None,
 ) -> Torrent:
     try:
         return rtn_instance.rank(
@@ -139,15 +210,26 @@ def _rank_with_language_compat(
             aliases=aliases,
         )
     except GarbageTorrent as e:
-        if not _should_retry_as_untagged_english(e, settings, raw_title):
+        retry_untagged = _should_retry_as_untagged_english(e, settings, raw_title)
+        retry_multi = _should_retry_as_multi_audio_for_anime(
+            e, item=item, raw_title=raw_title
+        )
+        if not retry_untagged and not retry_multi:
             raise
 
         relaxed_settings = settings.model_copy(deep=True)
         relaxed_settings.languages.required = []
         relaxed_rtn = RTN(relaxed_settings, ranking_model)
-        logger.trace(
-            f"Treating untagged release as English for language-required ranking: {raw_title}"
-        )
+        if retry_multi:
+            logger.trace(
+                "Anime ranking soft-opt-in: treating MULTI/dual-audio as "
+                f"language-compatible: {raw_title}"
+            )
+        else:
+            logger.trace(
+                "Treating untagged release as English for language-required "
+                f"ranking: {raw_title}"
+            )
         return relaxed_rtn.rank(
             raw_title=raw_title,
             infohash=infohash,
@@ -228,9 +310,7 @@ def episode_release_matches(
         # Absolute match is evaluated independently so E1/abs=1 without a
         # season tag can still match anime-style absolute numbering.
         relative_ok = (
-            episode_number in episodes
-            and bool(seasons)
-            and season_number in seasons
+            episode_number in episodes and bool(seasons) and season_number in seasons
         )
         absolute_ok = (
             absolute_number is not None
@@ -253,6 +333,7 @@ def _prepare_rtn_ranking_context(
     correct_title = item.top_title
     active_settings = settings_manager.get_effective_rtn_model()
     _normalize_rtn_language_settings(active_settings)
+    active_settings = _apply_anime_extras_dubbed_soft_opt_in(item, active_settings)
 
     is_default_settings = active_settings.model_dump() == ranking_settings.model_dump()
     rtn_instance = rtn if is_default_settings else RTN(active_settings, ranking_model)
@@ -315,8 +396,8 @@ def _accumulate_ranked_torrents(
     if not results:
         return
 
-    rtn_instance, active_settings, correct_title, aliases = _prepare_rtn_ranking_context(
-        item
+    rtn_instance, active_settings, correct_title, aliases = (
+        _prepare_rtn_ranking_context(item)
     )
 
     if log_msg:
@@ -337,6 +418,7 @@ def _accumulate_ranked_torrents(
                     active_settings.options["remove_all_trash"] if not manual else False
                 ),
                 aliases=aliases,
+                item=item,
             )
         except Exception as e:
             logger.debug(f"RTN rejected '{raw_title[:60]}': {type(e).__name__}: {e}")
@@ -360,11 +442,7 @@ def _accumulate_ranked_torrents(
 
         if isinstance(item, Show):
             # make sure the torrent has at least 2 episodes (should weed out most junk)
-            if (
-                not manual
-                and torrent.data.episodes
-                and len(torrent.data.episodes) <= 2
-            ):
+            if not manual and torrent.data.episodes and len(torrent.data.episodes) <= 2:
                 logger.trace(
                     f"Skipping torrent with too few episodes for {item.log_string}: {raw_title}"
                 )
@@ -414,11 +492,7 @@ def _accumulate_ranked_torrents(
                 continue
 
             # make sure the torrent has at least 2 episodes (should weed out most junk)
-            if (
-                not manual
-                and torrent.data.episodes
-                and len(torrent.data.episodes) <= 2
-            ):
+            if not manual and torrent.data.episodes and len(torrent.data.episodes) <= 2:
                 logger.trace(
                     f"Skipping torrent with too few episodes for {item.log_string}: {raw_title}"
                 )
@@ -439,8 +513,7 @@ def _accumulate_ranked_torrents(
                 not manual
                 and torrent.data.episodes
                 and not all(
-                    episode.number in torrent.data.episodes
-                    for episode in item.episodes
+                    episode.number in torrent.data.episodes for episode in item.episodes
                 )
             ):
                 logger.trace(
@@ -543,9 +616,7 @@ def parse_results(
         log_msg=log_msg,
         funnel=funnel,
     )
-    return _streams_from_torrents(
-        item, torrents, manual=manual, log_msg=log_msg
-    )
+    return _streams_from_torrents(item, torrents, manual=manual, log_msg=log_msg)
 
 
 def merge_parse_results(
@@ -573,9 +644,7 @@ def merge_parse_results(
         log_msg=log_msg,
         funnel=funnel,
     )
-    return _streams_from_torrents(
-        item, torrents, manual=manual, log_msg=log_msg
-    )
+    return _streams_from_torrents(item, torrents, manual=manual, log_msg=log_msg)
 
 
 # helper functions

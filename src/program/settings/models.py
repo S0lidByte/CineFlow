@@ -807,6 +807,23 @@ class ScraperModel(Observable):
     dubbed_anime_only: bool = Field(
         default=False, description="Only scrape dubbed anime content"
     )
+    anime_allow_extras_dubbed: bool = Field(
+        default=False,
+        description=(
+            "Opt-in: for is_anime items only, temporarily enable "
+            "custom_ranks.extras.dubbed.fetch during ranking. "
+            "Default False keeps strict ranking. Enable when scrape funnel "
+            "shows high extras_dubbed rejects with good raw finds."
+        ),
+    )
+    anime_allow_multi_audio: bool = Field(
+        default=False,
+        description=(
+            "Opt-in: for is_anime items only, retry ranking after "
+            "missing_required_language when the release looks like "
+            "MULTI/dual-audio. Default False keeps strict language rules."
+        ),
+    )
     torrentio: TorrentioConfig = Field(
         default_factory=lambda: TorrentioConfig(), description="Torrentio configuration"
     )
@@ -888,7 +905,9 @@ class OpenSubtitlesProviderConfig(Observable):
         description="OpenSubtitles password",
         json_schema_extra={"format": "password"},
     )
-    user_agent: str = Field(default="VLSub 0.11.1", description="OpenSubtitles user agent")
+    user_agent: str = Field(
+        default="VLSub 0.11.1", description="OpenSubtitles user agent"
+    )
     allow_anonymous: bool = Field(
         default=True,
         description="Allow fallback to anonymous login when username/password are empty.",
@@ -904,7 +923,11 @@ class OpenSubtitlesProviderConfig(Observable):
                 "OpenSubtitles provider requires both username and password, or neither."
             )
 
-        if self.enabled and not (has_username and has_password) and not self.allow_anonymous:
+        if (
+            self.enabled
+            and not (has_username and has_password)
+            and not self.allow_anonymous
+        ):
             raise ValueError(
                 "OpenSubtitles provider is enabled but authentication is not configured. "
                 "Set both username and password, or enable allow_anonymous."
