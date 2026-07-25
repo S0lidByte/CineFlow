@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.2](https://github.com/S0lidByte/CineFlow/compare/v1.19.1...v1.19.2) (2026-07-25)
+
+
+### Bug Fixes
+
+* **realdebrid:** rate-limit fair-usage warnings during cooldown ([#137](https://github.com/S0lidByte/CineFlow/issues/137)) ([3b179b9](https://github.com/S0lidByte/CineFlow/commit/3b179b9b7b9f0f7faa29665ee5b1be8a87016440))
+
 ## [1.19.1](https://github.com/S0lidByte/CineFlow/compare/v1.19.0...v1.19.1) (2026-07-25)
 
 
