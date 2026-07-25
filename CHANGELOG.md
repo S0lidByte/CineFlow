@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.2](https://github.com/S0lidByte/CineFlow/compare/v1.16.1...v1.16.2) (2026-07-25)
+
+
+### Bug Fixes
+
+* **trakt:** use Settings Client ID for trakt-api-key header ([#123](https://github.com/S0lidByte/CineFlow/issues/123)) ([c0e7d39](https://github.com/S0lidByte/CineFlow/commit/c0e7d39f19b669b1557eb70537a50b42dddc5709))
+
 ## [1.16.1](https://github.com/S0lidByte/CineFlow/compare/v1.16.0...v1.16.1) (2026-07-25)
 
 
