@@ -13,6 +13,8 @@ def test_extract_ids_summarizes_empty_show_skips():
     items = [
         SimpleNamespace(show=None, seasons=None),
         SimpleNamespace(show=None, seasons=None),
+        # No `show` attr so ItemWithMovie branch runs (checked after show).
+        SimpleNamespace(movie=None),
         SimpleNamespace(show=SimpleNamespace(ids=SimpleNamespace(tvdb=81189))),
     ]
 
@@ -24,4 +26,4 @@ def test_extract_ids_summarizes_empty_show_skips():
     assert len(debug_msgs) == 1
     assert "lacking media payload" in debug_msgs[0]
     assert "no_show=2" in debug_msgs[0]
-    assert "no_movie=0" in debug_msgs[0]
+    assert "no_movie=1" in debug_msgs[0]
