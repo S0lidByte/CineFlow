@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/S0lidByte/CineFlow/compare/v1.13.0...v1.14.0) (2026-07-25)
+
+
+### Features
+
+* **scrapers:** add log-only scrape funnel telemetry ([#113](https://github.com/S0lidByte/CineFlow/issues/113)) ([cf5ba7d](https://github.com/S0lidByte/CineFlow/commit/cf5ba7d67ab0fdedd49f509016144ec9ec2d9f8e))
+
 ## [1.13.0](https://github.com/S0lidByte/CineFlow/compare/v1.12.8...v1.13.0) (2026-07-25)
 
 
