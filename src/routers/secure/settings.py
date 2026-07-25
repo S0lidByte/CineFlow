@@ -7,8 +7,18 @@ from pydantic import TypeAdapter, ValidationError
 from program.settings import settings_manager
 from program.settings.models import AppModel
 from program.settings.ranking_descriptions import enrich_ranking_schema
+from program.settings.ranking_patterns import validate_ranking_payload_patterns
 
 from ..models.shared import MessageResponse
+
+
+def _validate_ranking_in_settings(settings_dict: dict[str, Any]) -> None:
+    ranking = settings_dict.get("ranking")
+    if isinstance(ranking, dict):
+        try:
+            validate_ranking_payload_patterns(cast(dict[str, Any], ranking))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 router = APIRouter(
     prefix="/settings",
@@ -192,6 +202,7 @@ async def set_all_settings(
                 current_obj[key] = value
 
     update_settings(current_settings, new_settings)
+    _validate_ranking_in_settings(current_settings)
 
     # Validate and save the updated settings
     try:
@@ -261,6 +272,9 @@ async def set_settings(
                 detail=f"Key '{keys[-1]}' does not exist in path '{'.'.join(keys[:-1]) or 'root'}'.",
             )
         current_obj[keys[-1]] = values[path]
+
+    if any(p == "ranking" or p.startswith("ranking.") for p in requested_paths):
+        _validate_ranking_in_settings(current_settings)
 
     try:
         updated_settings = settings_manager.settings.__class__(**current_settings)
