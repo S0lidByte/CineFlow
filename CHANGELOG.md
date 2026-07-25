@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.0](https://github.com/S0lidByte/CineFlow/compare/v1.18.1...v1.19.0) (2026-07-25)
+
+
+### Features
+
+* **scraping:** remake aliases, Trakt OAuth helpers, soft VFS reinit ([#134](https://github.com/S0lidByte/CineFlow/issues/134)) ([e5ebfdb](https://github.com/S0lidByte/CineFlow/commit/e5ebfdb554dc36af954d9c61b2cda8bcd419e614))
+
 ## [1.18.1](https://github.com/S0lidByte/CineFlow/compare/v1.18.0...v1.18.1) (2026-07-25)
 
 
