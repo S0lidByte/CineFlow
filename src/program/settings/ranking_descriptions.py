@@ -80,8 +80,10 @@ DENY_KEY_HELP: dict[str, str] = {
     "title_mismatch": (
         "Parsed release title failed Levenshtein similarity against the media title "
         "(ranking.options.title_similarity). Remakes (e.g. Saint Seiya vs Knights of "
-        "the Zodiac) often land here — use Ranking Studio matching modes / aliases "
-        "to diagnose; do not silently accept wrong titles."
+        "the Zodiac) often land here — diagnose with Ranking Studio matching modes "
+        "(remake_diagnose is tester-only). For live scrape, opt in via Scraping → "
+        "enable_remake_aliases + remake_alias_groups (default off). Do not silently "
+        "accept wrong titles or leave remake_diagnose saved as the live threshold."
     ),
     "extras_edition": "Special edition tags. Log: denied by: extras_edition when fetch is off.",
     "extras_hardcoded": "Hardcoded subs. Log: denied by: extras_hardcoded when fetch is off.",
@@ -182,7 +184,12 @@ CATEGORY_HELP: dict[str, str] = {
 }
 
 OPTIONS_HELP: dict[str, str] = {
-    "title_similarity": "Minimum title similarity (Levenshtein) required to accept a release.",
+    "title_similarity": (
+        "Minimum title similarity (Levenshtein) required to accept a release on "
+        "live scrape. Ranking Studio remake_diagnose lowers this for the tester "
+        "only — remakes should use Scraping → enable_remake_aliases instead of "
+        "permanently lowering this value."
+    ),
     "remove_all_trash": "When true, apply trash custom_ranks fetch=false rules and other trash heuristics.",
     "remove_ranks_under": "Drop torrents whose computed rank is below this threshold (log: does not meet the minimum rank requirement).",
     "remove_unknown_languages": "Reject releases with unrecognized language tags.",

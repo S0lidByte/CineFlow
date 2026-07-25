@@ -112,6 +112,112 @@ def _scraping_settings() -> ScraperModel:
     return settings_manager.settings.scraping
 
 
+def _normalize_alias_title(title: str) -> str:
+    """Casefold + collapse whitespace for remake group membership checks."""
+
+    return " ".join((title or "").casefold().split())
+
+
+def _collect_item_alias_names(
+    correct_title: str,
+    aliases: dict[str, list[str]],
+) -> set[str]:
+    """All known titles for an item (canonical + alias values), normalized."""
+
+    names: set[str] = set()
+    if correct_title:
+        names.add(_normalize_alias_title(correct_title))
+    for values in aliases.values():
+        for name in values:
+            if name.strip():
+                names.add(_normalize_alias_title(name))
+    names.discard("")
+    return names
+
+
+def _merge_remake_aliases(
+    correct_title: str,
+    aliases: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    """Merge settings remake_alias_groups into aliases when opted in.
+
+    Only injects alternate titles from groups that intersect the item's known
+    titles. Default (enable_remake_aliases=False) returns aliases unchanged.
+    """
+
+    scraping = _scraping_settings()
+    if not scraping.enable_remake_aliases:
+        return aliases
+
+    groups: list[list[str]] = list(scraping.remake_alias_groups)
+    if not groups:
+        return aliases
+
+    known = _collect_item_alias_names(correct_title, aliases)
+    if not known:
+        return aliases
+
+    extras: list[str] = []
+    seen_extra: set[str] = {
+        _normalize_alias_title(n) for values in aliases.values() for n in values
+    }
+    if correct_title:
+        seen_extra.add(_normalize_alias_title(correct_title))
+
+    for group in groups:
+        if len(group) < 2:
+            continue
+        members = [m.strip() for m in group if m.strip()]
+        if len(members) < 2:
+            continue
+        member_norms = {_normalize_alias_title(m) for m in members}
+        if not member_norms.intersection(known):
+            continue
+        for member in members:
+            norm = _normalize_alias_title(member)
+            if norm in seen_extra:
+                continue
+            seen_extra.add(norm)
+            extras.append(member)
+
+    if not extras:
+        return aliases
+
+    merged = {k: list(v) for k, v in aliases.items()}
+    existing = list(merged.get("xx") or [])
+    # Preserve operator-configured aliases; append remake extras without dupes.
+    existing_norms = {_normalize_alias_title(n) for n in existing}
+    for name in extras:
+        if _normalize_alias_title(name) not in existing_norms:
+            existing.append(name)
+            existing_norms.add(_normalize_alias_title(name))
+    merged["xx"] = existing
+    logger.debug(
+        f"Remake alias soft-opt-in: injected {len(extras)} alias(es) for "
+        f"{correct_title!r}"
+    )
+    return merged
+
+
+def _resolve_scrape_aliases(
+    item: MediaItem,
+    active_settings: SettingsModel,
+) -> dict[str, list[str]]:
+    """Build aliases for live scrape ranking (indexer + optional remake groups)."""
+
+    scraping = _scraping_settings()
+    if not scraping.enable_aliases:
+        return {}
+
+    raw = item.get_aliases() or {}
+    aliases = {
+        k: list(v)
+        for k, v in raw.items()
+        if k not in active_settings.languages.exclude
+    }
+    return _merge_remake_aliases(item.top_title or "", aliases)
+
+
 def _title_looks_multi_or_dual_audio(raw_title: str) -> bool:
     """Heuristic for MULTI / dual-audio releases (anime soft-opt-in)."""
 
@@ -338,11 +444,7 @@ def _prepare_rtn_ranking_context(
     is_default_settings = active_settings.model_dump() == ranking_settings.model_dump()
     rtn_instance = rtn if is_default_settings else RTN(active_settings, ranking_model)
 
-    aliases = (
-        {k: v for k, v in a.items() if k not in active_settings.languages.exclude}
-        if scraping_settings.enable_aliases and (a := item.get_aliases())
-        else {}
-    )
+    aliases = _resolve_scrape_aliases(item, active_settings)
 
     return rtn_instance, active_settings, correct_title, aliases
 

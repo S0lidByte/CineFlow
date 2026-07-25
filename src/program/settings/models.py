@@ -590,7 +590,15 @@ class TraktOauthModel(BaseModel):
     oauth_client_secret: str = Field(
         default="", description="Trakt OAuth client secret"
     )
-    oauth_redirect_uri: str = Field(default="", description="Trakt OAuth redirect URI")
+    oauth_redirect_uri: str = Field(
+        default="",
+        description=(
+            "Trakt OAuth redirect URI — must match the Redirect URI registered at "
+            "trakt.tv/oauth/applications. For CineFlow Connect, use your frontend "
+            "ORIGIN + /api/trakt/oauth/callback (e.g. http://localhost:3000/api/trakt/oauth/callback), "
+            "not the backend /api/v1/trakt/oauth/callback (that route requires an API key)."
+        ),
+    )
     access_token: str = Field(default="", description="Trakt OAuth access token")
     refresh_token: str = Field(default="", description="Trakt OAuth refresh token")
 
@@ -819,6 +827,26 @@ class ScraperModel(Observable):
     )
     enable_aliases: bool = Field(
         default=True, description="Enable title aliases for better matching"
+    )
+    enable_remake_aliases: bool = Field(
+        default=False,
+        description=(
+            "Opt-in: during scrape ranking, merge remake_alias_groups into item "
+            "aliases when enable_aliases is on and the item title (or an existing "
+            "alias) matches a name in a group. Default False keeps classic titles "
+            "strict — remakes (e.g. Knights of the Zodiac ↔ Saint Seiya) stay "
+            "title_mismatch until you opt in. Does not lower title_similarity."
+        ),
+    )
+    remake_alias_groups: list[list[str]] = Field(
+        default_factory=lambda: [],
+        description=(
+            "Groups of remake / alternate titles that should match each other when "
+            "enable_remake_aliases is on. Each group is a list of titles, e.g. "
+            '[["Knights of the Zodiac", "Saint Seiya"]]. Only applied when the '
+            "item title or an existing alias matches a name in the group "
+            "(case-insensitive). Empty by default — add groups intentionally."
+        ),
     )
     bucket_limit: int = Field(
         default=5, ge=0, le=20, description="Maximum results per quality bucket"

@@ -240,6 +240,38 @@ async def initiate_trakt_oauth() -> TraktOAuthInitiateResponse:
     return TraktOAuthInitiateResponse(auth_url=auth_url)
 
 
+class TraktOAuthStatusResponse(BaseModel):
+    connected: bool
+    has_client_id: bool
+    has_client_secret: bool
+    redirect_uri: str
+    redirect_uri_hint: str
+
+
+@router.get(
+    "/trakt/oauth/status",
+    operation_id="trakt_oauth_status",
+    response_model=TraktOAuthStatusResponse,
+)
+async def trakt_oauth_status() -> TraktOAuthStatusResponse:
+    try:
+        trakt_api = di[TraktAPI]
+    except ServiceError:
+        raise HTTPException(status_code=404, detail="Trakt service not found")
+
+    oauth = settings_manager.settings.content.trakt.oauth
+    return TraktOAuthStatusResponse(
+        connected=trakt_api.oauth_connected(),
+        has_client_id=bool((oauth.oauth_client_id or "").strip()),
+        has_client_secret=bool((oauth.oauth_client_secret or "").strip()),
+        redirect_uri=(oauth.oauth_redirect_uri or "").strip(),
+        redirect_uri_hint=(
+            "Register this exact URI at trakt.tv/oauth/applications. Prefer the "
+            "frontend BFF callback: {ORIGIN}/api/trakt/oauth/callback"
+        ),
+    )
+
+
 @router.get(
     "/trakt/oauth/callback",
     operation_id="trakt_oauth_callback",
@@ -258,7 +290,11 @@ async def trakt_oauth_callback(
 
     trakt_api_key = settings_manager.settings.content.trakt.api_key
 
-    if not trakt_api_key:
+    if not (trakt_api_key or "").strip():
+        # Prefer oauth client id when api_key field is empty (same as header resolution).
+        trakt_api_key = trakt_api.client_id
+
+    if not (trakt_api_key or "").strip():
         raise HTTPException(
             status_code=404, detail="Trakt Api key not found in settings"
         )
@@ -269,6 +305,21 @@ async def trakt_oauth_callback(
         return MessageResponse(message="OAuth token obtained successfully")
     else:
         raise HTTPException(status_code=400, detail="Failed to obtain OAuth token")
+
+
+@router.post(
+    "/trakt/oauth/disconnect",
+    operation_id="trakt_oauth_disconnect",
+    response_model=MessageResponse,
+)
+async def trakt_oauth_disconnect() -> MessageResponse:
+    try:
+        trakt_api = di[TraktAPI]
+    except ServiceError:
+        raise HTTPException(status_code=404, detail="Trakt service not found")
+
+    trakt_api.clear_oauth_tokens()
+    return MessageResponse(message="Trakt OAuth tokens cleared")
 
 
 class StatsResponse(BaseModel):

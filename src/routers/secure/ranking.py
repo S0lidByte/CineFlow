@@ -222,9 +222,11 @@ def _scraping_hint_for_deny(deny_key: str | None) -> str | None:
         )
     if key == "title_mismatch":
         return (
-            "Title similarity failed. Try Ranking Studio matching modes / aliases, "
-            "lower title_similarity temporarily for diagnose, or enable Scraping → "
-            "enable_aliases. Do not silently accept remake mismatches."
+            "Title similarity failed. Diagnose with Ranking Studio matching modes "
+            "(remake_diagnose is tester-only). For live remakes enable Scraping → "
+            "enable_remake_aliases and add remake_alias_groups (e.g. Knights of the "
+            "Zodiac / Saint Seiya). Keep enable_aliases on. Do not silently accept "
+            "mismatches or leave remake_diagnose as the saved threshold."
         )
     return None
 
@@ -259,9 +261,9 @@ async def get_ranking_meta() -> RankingMetaResponse:
                 "label": "Anime allow MULTI/dual-audio retry (soft-opt-in)",
             },
             "title_mismatch": {
-                "scraping_path": "scraping.enable_aliases",
+                "scraping_path": "scraping.enable_remake_aliases",
                 "ranking_path": "ranking.options.title_similarity",
-                "label": "Aliases + title similarity (remake diagnose)",
+                "label": "Remake aliases (scrape opt-in) + title similarity",
             },
         },
         pattern_limits={

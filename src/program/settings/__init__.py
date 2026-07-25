@@ -23,6 +23,9 @@ class SettingsManager:
         self._overrides_ctx: contextvars.ContextVar[dict[str, Any] | None] = (
             contextvars.ContextVar("settings_overrides", default=None)
         )
+        # Top-level AppModel keys that changed on the last load()/notify cycle.
+        # None means "unknown / full reinit" (startup, setattr path, file load).
+        self.last_changed_top_keys: frozenset[str] | None = None
 
         Observable.set_notify_observers(self.notify_observers)
 
@@ -45,8 +48,13 @@ class SettingsManager:
         self.observers.append(observer)
 
     def notify_observers(self):
-        for observer in self.observers:
-            observer()
+        try:
+            for observer in self.observers:
+                observer()
+        finally:
+            # Clear after a full notify cycle so opportunistic setattr paths
+            # default to a conservative full reinit next time.
+            self.last_changed_top_keys = None
 
     def check_environment(
         self,
@@ -95,6 +103,15 @@ class SettingsManager:
     def load(self, settings_dict: dict[str, Any] | None = None):
         """Load settings from file, validating against the AppModel schema."""
 
+        previous_dump: dict[str, Any] | None = None
+        if hasattr(self, "settings"):
+            try:
+                previous_dump = self.settings.model_dump()
+            except Exception:
+                previous_dump = None
+
+        from_file = settings_dict is None
+
         try:
             if not settings_dict:
                 with open(self.settings_file, "r", encoding="utf-8") as file:
@@ -136,6 +153,20 @@ class SettingsManager:
                 f"Error loading settings: {self.settings_file} does not exist"
             )
             raise
+
+        # Diff top-level keys for soft VFS reinit. File loads and first boot
+        # keep None (full reinit). API set_settings passes an in-memory dict.
+        if from_file or previous_dump is None:
+            self.last_changed_top_keys = None
+        else:
+            new_dump = self.settings.model_dump()
+            changed = frozenset(
+                key
+                for key in set(previous_dump) | set(new_dump)
+                if previous_dump.get(key) != new_dump.get(key)
+            )
+            self.last_changed_top_keys = changed
+
         self.notify_observers()
 
     def _recover_invalid_opensubtitles_settings(
