@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/S0lidByte/CineFlow/compare/v1.12.8...v1.13.0) (2026-07-25)
+
+
+### Features
+
+* **vfs:** expose stream tolerances and flush sync invalidations ([#111](https://github.com/S0lidByte/CineFlow/issues/111)) ([7fee7c9](https://github.com/S0lidByte/CineFlow/commit/7fee7c938a3ca27baee92a37dec02f23cf1fd3b1))
+
 ## [1.12.8](https://github.com/S0lidByte/CineFlow/compare/v1.12.7...v1.12.8) (2026-07-24)
 
 
