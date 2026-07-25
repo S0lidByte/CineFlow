@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.19.1](https://github.com/S0lidByte/CineFlow/compare/v1.19.0...v1.19.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **scrapers:** accept arc subtitle title aliases for anime and series releases ([2f3e982](https://github.com/S0lidByte/CineFlow/commit/2f3e982404ad7cbaa03e7a93d767b7651928723b))
+* **scrapers:** accept arc subtitle title aliases for anime and series releases ([061803f](https://github.com/S0lidByte/CineFlow/commit/061803f92bf0820f50fa7cb5765c3777e8ce582e))
+
 ## [1.19.0](https://github.com/S0lidByte/CineFlow/compare/v1.18.1...v1.19.0) (2026-07-25)
 
 
