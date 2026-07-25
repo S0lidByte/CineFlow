@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/S0lidByte/CineFlow/compare/v1.15.0...v1.16.0) (2026-07-25)
+
+
+### Features
+
+* **vfs:** expose Prometheus mirrors of streaming cache metrics ([#119](https://github.com/S0lidByte/CineFlow/issues/119)) ([8f1af2d](https://github.com/S0lidByte/CineFlow/commit/8f1af2df02531d11f7d911f3c02fb71886914385))
+
 ## [1.15.0](https://github.com/S0lidByte/CineFlow/compare/v1.14.1...v1.15.0) (2026-07-25)
 
 
