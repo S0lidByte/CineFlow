@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.3](https://github.com/S0lidByte/CineFlow/compare/v1.19.2...v1.19.3) (2026-07-25)
+
+
+### Bug Fixes
+
+* **trakt:** send OAuth token exchange as JSON body ([#139](https://github.com/S0lidByte/CineFlow/issues/139)) ([3b3444a](https://github.com/S0lidByte/CineFlow/commit/3b3444a972efd5c0dc1af973d346dd3f437f17dd))
+
 ## [1.19.2](https://github.com/S0lidByte/CineFlow/compare/v1.19.1...v1.19.2) (2026-07-25)
 
 
