@@ -93,7 +93,10 @@ from program.services.filesystem.vfs.vfs_node import VFSDirectory, VFSFile  # no
 
 
 @pytest.fixture
-def mock_vfs():
+def mock_vfs(tmp_path):
+    cache_dir = tmp_path / "riven-cache"
+    cache_dir.mkdir()
+
     with (
         patch("pyfuse3.init"),
         patch("threading.Thread"),
@@ -101,12 +104,16 @@ def mock_vfs():
         patch(
             "program.services.filesystem.vfs.rivenvfs.settings_manager"
         ) as mock_settings,
+        patch.object(RivenVFS, "sync", return_value=None),
     ):
-        mock_settings.settings.filesystem.cache_dir.exists.return_value = True
+        mock_settings.settings.filesystem.cache_dir = cache_dir
         mock_settings.settings.filesystem.cache_max_size_mb = 100
+        mock_settings.settings.filesystem.cache_ttl_seconds = 3600
+        mock_settings.settings.filesystem.cache_eviction = "LRU"
+        mock_settings.settings.filesystem.cache_metrics = False
         mock_settings.settings.filesystem.library_profiles = {}
 
-        vfs = RivenVFS(mountpoint="/tmp/mock_mtpt", downloader=MagicMock())
+        vfs = RivenVFS(mountpoint=str(tmp_path / "mock_mtpt"), downloader=MagicMock())
         vfs.vfs_db = MagicMock()
         vfs.vfs_db.get_subtitle_content = MagicMock(return_value=b"subtitle data")
         # FUSE thread is mocked, so the Trio lock never gets created in _fuse_runner.
