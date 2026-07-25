@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal
 import psutil
 import requests
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 from kink import di
 from kink.errors.service_error import ServiceError
 from loguru import logger
@@ -18,6 +19,8 @@ from program.db.db import db_session
 from program.media.item import Episode, MediaItem, Movie, Season, Show
 from program.media.state import States
 from program.program import Program
+from program.services.streaming import prom_cache_metrics as prom
+from program.services.streaming.cache import Cache
 from program.settings import settings_manager
 from program.utils import generate_api_key
 
@@ -40,6 +43,32 @@ def get_size(size_bytes: float, suffix: str = "B") -> str | None:
 async def health() -> MessageResponse:
     return MessageResponse(message=str(di[Program].initialized))
 
+
+@router.get("/metrics", operation_id="prometheus_metrics")
+async def prometheus_metrics() -> Response:
+    """Prometheus text exposition of streaming cache counters (API-key protected)."""
+
+    metrics_enabled = bool(
+        getattr(settings_manager.settings.filesystem, "cache_metrics", True)
+    )
+    if metrics_enabled:
+        try:
+            cache = di[Cache]
+            stats = await cache.stats()
+            prom.set_size_gauges(
+                total_bytes=int(stats.get("total_bytes") or 0),
+                entries=int(stats.get("entries") or 0),
+            )
+        except (KeyError, ServiceError):
+            # Cache not registered yet — avoid serving stale size/entry gauges.
+            prom.set_size_gauges(total_bytes=0, entries=0)
+    else:
+        prom.set_size_gauges(total_bytes=0, entries=0)
+
+    return Response(
+        content=prom.render_metrics(),
+        media_type=prom.CONTENT_TYPE_LATEST,
+    )
 
 class DownloaderUserInfo(BaseModel):
     """Normalized downloader user information response"""
