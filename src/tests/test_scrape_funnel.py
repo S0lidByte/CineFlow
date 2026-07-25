@@ -33,6 +33,16 @@ def test_bucket_rtn_reason_extracts_known_tokens():
     assert bucket_rtn_reason(ValueError("mystery failure")).startswith("mystery")
 
 
+def test_bucket_rtn_reason_maps_title_mismatch_message():
+    msg = (
+        "GarbageTorrent: 'Os.Cavaleiros.do.Zodíaco.Box.Filmes.1987-2004.BluRay.720p' "
+        "does not match the correct title. correct title: "
+        "'Saint Seiya: Legend of Crimson Youth', parsed title: "
+        "'Os Cavaleiros do Zodíaco Box Filmes'"
+    )
+    assert bucket_rtn_reason(Exception(msg)) == "title_mismatch"
+
+
 def test_classify_ranked_against_item_splits_buckets():
     existing = _HashStream("a" * 40)
     blacklisted = _HashStream("b" * 40)

@@ -24,6 +24,12 @@ def bucket_rtn_reason(exc: BaseException) -> str:
     if not msg:
         return type(exc).__name__
 
+    # RTN title failures: "… does not match the correct title. correct title: …"
+    # Prefer a stable bucket over slugifying the whole message (which produced
+    # noisy keys like saint_seiya_legend_of_crimson_youth_parsed_title).
+    if re.search(r"does not match the correct title", msg, re.IGNORECASE):
+        return "title_mismatch"
+
     match = _REASON_RE.search(msg)
     if match:
         return match.group(1).lower().replace(" ", "_")
