@@ -184,3 +184,10 @@ def test_meta_soft_opt_in_keys_present():
     assert "anime_allow_extras_dubbed" in DENY_KEY_HELP["extras_dubbed"]
     assert "missing_required_language" in DENY_KEY_HELP
     assert "anime_allow_multi_audio" in DENY_KEY_HELP["missing_required_language"]
+    assert "title_mismatch" in DENY_KEY_HELP
+
+
+def test_golden_remake_title_present_in_shared_contract():
+    from program.settings.ranking_presets import GOLDEN_TITLES
+
+    assert "Knights.of.the.Zodiac" in GOLDEN_TITLES["title_mismatch_remake"]

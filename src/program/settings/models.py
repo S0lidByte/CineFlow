@@ -98,6 +98,24 @@ class DownloadersModel(Observable):
         ge=-1,
         description="Maximum file size in MB for episodes (-1 for no limit)",
     )
+    movie_min_avg_bitrate: float = Field(
+        default=0.0,
+        ge=0.0,
+        description=(
+            "Optional minimum average bitrate for movies "
+            "(MiB per minute of runtime; 0 = disabled). "
+            "Requires item runtime; riven-ts parity."
+        ),
+    )
+    episode_min_avg_bitrate: float = Field(
+        default=0.0,
+        ge=0.0,
+        description=(
+            "Optional minimum average bitrate for episodes "
+            "(MiB per minute of runtime; 0 = disabled). "
+            "Requires item runtime; riven-ts parity."
+        ),
+    )
     proxy_url: EmptyOrUrl = Field(
         default="", description="Proxy URL for downloaders (optional)"
     )

@@ -77,6 +77,12 @@ DENY_KEY_HELP: dict[str, str] = {
         "(ranking.languages.required). Anime soft-opt-in: Scraping → "
         "anime_allow_multi_audio retries MULTI/dual-audio titles after this reject."
     ),
+    "title_mismatch": (
+        "Parsed release title failed Levenshtein similarity against the media title "
+        "(ranking.options.title_similarity). Remakes (e.g. Saint Seiya vs Knights of "
+        "the Zodiac) often land here — use Ranking Studio matching modes / aliases "
+        "to diagnose; do not silently accept wrong titles."
+    ),
     "extras_edition": "Special edition tags. Log: denied by: extras_edition when fetch is off.",
     "extras_hardcoded": "Hardcoded subs. Log: denied by: extras_hardcoded when fetch is off.",
     "extras_network": "Network tag. Log: denied by: extras_network when fetch is off.",

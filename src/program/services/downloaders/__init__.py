@@ -354,7 +354,21 @@ class Downloader(Runner[None, DownloaderBase]):
 
             return None
 
-        container = service.get_instant_availability(stream.infohash, item.type)
+        runtime_minutes = getattr(item, "runtime", None)
+        override_kwargs: dict[str, object] = {}
+        if runtime_minutes is not None:
+            try:
+                runtime_val = float(runtime_minutes)
+                if runtime_val > 0:
+                    override_kwargs["runtime_minutes"] = runtime_val
+            except (TypeError, ValueError):
+                pass
+
+        if override_kwargs:
+            with settings_manager.override(**override_kwargs):
+                container = service.get_instant_availability(stream.infohash, item.type)
+        else:
+            container = service.get_instant_availability(stream.infohash, item.type)
 
         if not container:
             logger.debug(

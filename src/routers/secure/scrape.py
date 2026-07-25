@@ -35,6 +35,7 @@ from program.services.downloaders.models import (
 )
 from program.services.downloaders.shared import DownloaderBase
 from program.services.scrapers import Scraping
+from program.services.scrapers.funnel import ScrapeFunnelStats, remember_funnel_summary
 from program.services.scrapers.shared import get_ranking_overrides
 from program.settings import settings_manager
 from program.settings.models import RTNSettingsModel
@@ -66,10 +67,12 @@ class ScrapeStreamEvent(BaseModel):
     total_streams: int = 0
     services_completed: int = 0
     total_services: int = 0
+    funnel: dict[str, Any] | None = None
 
 
 class ScrapeItemResponse(MessageResponse):
     streams: dict[str, Stream]
+    funnel: dict[str, Any] | None = None
 
 
 class ParsedFile(BaseModel):
@@ -713,6 +716,7 @@ def scrape_item(
                 all_streams: dict[str, Stream] = {}
                 total_services = len(scraper.initialized_services)
                 services_completed = 0
+                funnel = ScrapeFunnelStats()
 
                 start_event = ScrapeStreamEvent(
                     event="start",
@@ -723,7 +727,7 @@ def scrape_item(
 
                 with settings_manager.override(**overrides):
                     for service_name, parsed_streams in scraper.scrape_streaming(
-                        item, manual=True
+                        item, manual=True, funnel=funnel
                     ):
                         services_completed += 1
                         new_streams: dict[str, Stream] = {}
@@ -756,6 +760,13 @@ def scrape_item(
                         )
                         yield f"data: {event.model_dump_json()}\n\n"
 
+                funnel.ranked = len(all_streams)
+                funnel_summary = funnel.to_summary(
+                    item_id=getattr(item, "id", None),
+                    item_log=item.log_string,
+                )
+                remember_funnel_summary(getattr(item, "id", None), funnel_summary)
+
                 complete_event = ScrapeStreamEvent(
                     event="complete",
                     message=f"Scraping complete. Found {len(all_streams)} total streams.",
@@ -763,6 +774,7 @@ def scrape_item(
                     total_streams=len(all_streams),
                     services_completed=services_completed,
                     total_services=total_services,
+                    funnel=funnel_summary,
                 )
                 yield f"data: {complete_event.model_dump_json()}\n\n"
 
@@ -782,7 +794,16 @@ def scrape_item(
         apply_custom_params(item)
 
         with settings_manager.override(**overrides):
-            streams = scraper.scrape(item, manual=True)
+            funnel = ScrapeFunnelStats()
+            streams = scraper.scrape(item, manual=True, funnel=funnel)
+            funnel.classify_ranked_against_item(
+                streams, item.streams, item.blacklisted_streams
+            )
+            funnel_summary = funnel.to_summary(
+                item_id=getattr(item, "id", None),
+                item_log=item.log_string,
+            )
+            remember_funnel_summary(getattr(item, "id", None), funnel_summary)
 
         return ScrapeItemResponse(
             message=f"Manually scraped streams for item {item.log_string}",
@@ -798,6 +819,7 @@ def scrape_item(
                 )
                 for s in streams.values()
             },
+            funnel=funnel_summary,
         )
 
 
