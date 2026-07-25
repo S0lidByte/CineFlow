@@ -70,6 +70,7 @@ jobs:
             src/tests/test_requests.py \
             src/tests/test_incremental_parse_results.py \
             src/tests/test_scrape_funnel.py \
+            src/tests/test_ranking_soft_opt_in.py \
             src/tests/test_alldebrid_downloader.py \
             src/tests/test_stream_read_type.py \
             src/tests/test_streaming_cache.py \
