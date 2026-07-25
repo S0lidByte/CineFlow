@@ -66,6 +66,7 @@ jobs:
             src/tests/test_ranking_descriptions.py \
             src/tests/test_ranking_studio_p0.py \
             src/tests/test_ranking_scrape_quality_p1.py \
+            src/tests/test_mediaitem_runtime.py \
             src/tests/test_async_client.py \
             src/tests/test_opensubtitles_settings.py \
             src/tests/test_debrid_cdn_url.py \
