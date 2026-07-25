@@ -15,6 +15,7 @@ from program.media.stream import Stream
 from program.services.scrapers.aiostreams import AIOStreams
 from program.services.scrapers.base import ScraperService
 from program.services.scrapers.comet import Comet
+from program.services.scrapers.funnel import ScrapeFunnelStats
 from program.services.scrapers.jackett import Jackett
 from program.services.scrapers.mediafusion import Mediafusion
 from program.services.scrapers.orionoid import Orionoid
@@ -68,7 +69,12 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
     ) -> MediaItemGenerator:
         """Scrape an item."""
 
-        sorted_streams = self.scrape(item)
+        funnel = ScrapeFunnelStats()
+        sorted_streams = self.scrape(item, funnel=funnel)
+        funnel.classify_ranked_against_item(
+            sorted_streams, item.streams, item.blacklisted_streams
+        )
+        logger.log("SCRAPER", funnel.summary_line(item.log_string))
 
         new_streams = [
             stream
@@ -115,6 +121,7 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
         item: MediaItem,
         verbose_logging: bool = True,
         manual: bool = False,
+        funnel: ScrapeFunnelStats | None = None,
     ) -> dict[str, Stream]:
         """Scrape an item.
 
@@ -122,6 +129,7 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
             item: The media item to scrape.
             verbose_logging: Whether to log verbose messages.
             manual: If True, bypass content filters for manual scraping.
+            funnel: Optional scrape funnel counters (log-only telemetry).
         """
 
         results = dict[str, str]()
@@ -157,11 +165,14 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
                         f"Exception occurred while running service {futures[future]}: {e}"
                     )
 
+        if funnel is not None:
+            funnel.found = len(results)
+
         if not results:
             logger.log("NOT_FOUND", f"No streams to process for {item.log_string}")
             return {}
 
-        sorted_streams = parse_results(item, results, manual=manual)
+        sorted_streams = parse_results(item, results, manual=manual, funnel=funnel)
 
         if sorted_streams and (verbose_logging and settings_manager.settings.log_level):
             top_results = list(sorted_streams.values())[:10]

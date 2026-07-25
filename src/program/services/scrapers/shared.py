@@ -18,6 +18,7 @@ from RTN.models import SettingsModel
 
 from program.media.item import Episode, MediaItem, Movie, Season, Show
 from program.media.stream import Stream
+from program.services.scrapers.funnel import ScrapeFunnelStats
 from program.settings import settings_manager
 from program.settings.models import RTNSettingsModel, ScraperModel
 
@@ -307,6 +308,7 @@ def _accumulate_ranked_torrents(
     *,
     manual: bool = False,
     log_msg: bool = True,
+    funnel: ScrapeFunnelStats | None = None,
 ) -> None:
     """Rank and filter scraper results into ``torrents`` (mutates in place)."""
 
@@ -346,6 +348,8 @@ def _accumulate_ranked_torrents(
                 logger.trace(
                     f"Skipping show torrent for movie {item.log_string}: {raw_title}"
                 )
+                if funnel is not None:
+                    funnel.record_content_filter()
                 continue
 
             if isinstance(item, Show):
@@ -358,6 +362,8 @@ def _accumulate_ranked_torrents(
                     logger.trace(
                         f"Skipping torrent with too few episodes for {item.log_string}: {raw_title}"
                     )
+                    if funnel is not None:
+                        funnel.record_content_filter()
                     continue
 
                 # make sure all of the item seasons are present in the torrent
@@ -367,6 +373,8 @@ def _accumulate_ranked_torrents(
                     logger.trace(
                         f"Skipping torrent with incorrect number of seasons for {item.log_string}: {raw_title}"
                     )
+                    if funnel is not None:
+                        funnel.record_content_filter()
                     continue
 
                 if (
@@ -382,6 +390,8 @@ def _accumulate_ranked_torrents(
                     logger.trace(
                         f"Skipping torrent with incorrect number of episodes for {item.log_string}: {raw_title}"
                     )
+                    if funnel is not None:
+                        funnel.record_content_filter()
                     continue
 
             if isinstance(item, Season):
@@ -393,6 +403,8 @@ def _accumulate_ranked_torrents(
                     logger.trace(
                         f"Skipping torrent with no seasons or incorrect season number for {item.log_string}: {raw_title}"
                     )
+                    if funnel is not None:
+                        funnel.record_content_filter()
                     continue
 
                 # make sure the torrent has at least 2 episodes (should weed out most junk)
@@ -404,6 +416,8 @@ def _accumulate_ranked_torrents(
                     logger.trace(
                         f"Skipping torrent with too few episodes for {item.log_string}: {raw_title}"
                     )
+                    if funnel is not None:
+                        funnel.record_content_filter()
                     continue
 
                 # disregard torrents with incorrect season number
@@ -411,6 +425,8 @@ def _accumulate_ranked_torrents(
                     logger.trace(
                         f"Skipping incorrect season torrent for {item.log_string}: {raw_title}"
                     )
+                    if funnel is not None:
+                        funnel.record_content_filter()
                     continue
 
                 if (
@@ -424,6 +440,8 @@ def _accumulate_ranked_torrents(
                     logger.trace(
                         f"Skipping incorrect season torrent for not having all episodes {item.log_string}: {raw_title}"
                     )
+                    if funnel is not None:
+                        funnel.record_content_filter()
                     continue
 
             if isinstance(item, Episode) and not manual:
@@ -440,6 +458,8 @@ def _accumulate_ranked_torrents(
                     logger.trace(
                         f"Skipping incorrect episode torrent for {item.log_string}: {raw_title}"
                     )
+                    if funnel is not None:
+                        funnel.record_content_filter()
                     continue
 
             # If country is present, then check to make sure it's correct. (Covers: US, UK, NZ, AU)
@@ -453,6 +473,8 @@ def _accumulate_ranked_torrents(
                 logger.trace(
                     f"Skipping torrent for incorrect country with {item.log_string}: {raw_title}"
                 )
+                if funnel is not None:
+                    funnel.record_content_filter()
                 continue
 
             if (
@@ -465,6 +487,8 @@ def _accumulate_ranked_torrents(
                 logger.trace(
                     f"Skipping torrent for incorrect year with {item.log_string}: {raw_title}"
                 )
+                if funnel is not None:
+                    funnel.record_content_filter()
                 continue
 
             # If anime and user wants dubbed only, then check to make sure it's dubbed
@@ -477,12 +501,16 @@ def _accumulate_ranked_torrents(
                 logger.trace(
                     f"Skipping non-dubbed anime torrent for {item.log_string}: {raw_title}"
                 )
+                if funnel is not None:
+                    funnel.record_content_filter()
                 continue
 
             torrents.add(torrent)
             processed_infohashes.add(infohash)
         except Exception as e:
             logger.debug(f"RTN rejected '{raw_title[:60]}': {type(e).__name__}: {e}")
+            if funnel is not None:
+                funnel.record_rtn_reject(e)
             processed_infohashes.add(infohash)
             continue
 
@@ -492,6 +520,7 @@ def parse_results(
     results: dict[str, str],
     log_msg: bool = True,
     manual: bool = False,
+    funnel: ScrapeFunnelStats | None = None,
 ) -> dict[str, Stream]:
     """Parse the results from the scrapers into Torrent objects.
 
@@ -500,6 +529,7 @@ def parse_results(
         results: Dict mapping infohash to raw title.
         log_msg: If False, suppress debug progress logs during ranking/sort.
         manual: If True, bypass content filters (for manual scraping).
+        funnel: Optional scrape funnel counters (log-only telemetry).
     """
 
     torrents = set[Torrent]()
@@ -511,6 +541,7 @@ def parse_results(
         processed_infohashes,
         manual=manual,
         log_msg=log_msg,
+        funnel=funnel,
     )
     return _streams_from_torrents(
         item, torrents, manual=manual, log_msg=log_msg
@@ -525,6 +556,7 @@ def merge_parse_results(
     *,
     manual: bool = False,
     log_msg: bool = True,
+    funnel: ScrapeFunnelStats | None = None,
 ) -> dict[str, Stream]:
     """Parse only newly seen scraper results and return the full ranked stream map.
 
@@ -539,6 +571,7 @@ def merge_parse_results(
         processed_infohashes,
         manual=manual,
         log_msg=log_msg,
+        funnel=funnel,
     )
     return _streams_from_torrents(
         item, torrents, manual=manual, log_msg=log_msg
