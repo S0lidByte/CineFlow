@@ -287,7 +287,11 @@ class FilesystemModel(Observable):
         default="LRU", description="Cache eviction policy (LRU or TTL)"
     )
     cache_metrics: bool = Field(
-        default=True, description="Enable cache metrics logging"
+        default=True,
+        description=(
+            "Enable cache metrics logging and Prometheus mirrors "
+            "(GET /api/v1/metrics when authenticated)"
+        ),
     )
 
     # VFS Naming Templates

@@ -56,12 +56,13 @@ class ChunkInfo:
 
 
 class Metrics:
-    def __init__(self) -> None:
+    def __init__(self, *, prom_enabled: bool = True) -> None:
         self.hits = 0
         self.misses = 0
         self.bytes_from_cache = 0
         self.bytes_written = 0
         self.evictions = 0
+        self.prom_enabled = prom_enabled
         self.lock = threading.Lock()
 
     def snapshot(self) -> CacheSnapshot:
@@ -73,6 +74,41 @@ class Metrics:
                 bytes_written=self.bytes_written,
                 evictions=self.evictions,
             )
+
+    def record_hit(self, nbytes: int) -> None:
+        with self.lock:
+            self.hits += 1
+            self.bytes_from_cache += nbytes
+        if self.prom_enabled:
+            from program.services.streaming import prom_cache_metrics as prom
+
+            prom.record_hit(nbytes)
+
+    def record_miss(self) -> None:
+        with self.lock:
+            self.misses += 1
+        if self.prom_enabled:
+            from program.services.streaming import prom_cache_metrics as prom
+
+            prom.record_miss()
+
+    def record_bytes_written(self, nbytes: int) -> None:
+        with self.lock:
+            self.bytes_written += nbytes
+        if self.prom_enabled:
+            from program.services.streaming import prom_cache_metrics as prom
+
+            prom.record_bytes_written(nbytes)
+
+    def record_evictions(self, count: int = 1) -> None:
+        if count <= 0:
+            return
+        with self.lock:
+            self.evictions += count
+        if self.prom_enabled:
+            from program.services.streaming import prom_cache_metrics as prom
+
+            prom.record_evictions(count)
 
 
 class Cache:
@@ -89,7 +125,7 @@ class Cache:
         self._lock = trio.Lock()
         # Thread lock for synchronizing _index/_by_path access
         self._thread_lock = threading.Lock()
-        self._metrics = Metrics()
+        self._metrics = Metrics(prom_enabled=cfg.metrics_enabled)
         self._last_log = 0.0  # Initialize last log timestamp
 
         try:
@@ -304,7 +340,7 @@ class Cache:
 
                 self._total_bytes -= cache_entry.size
                 target -= cache_entry.size
-                self._metrics.evictions += 1
+                self._metrics.record_evictions(1)
 
     async def _evict_ttl(self) -> None:
         ttl = self.cfg.ttl_seconds
@@ -346,7 +382,7 @@ class Cache:
                     removed += 1
 
         if removed:
-            self._metrics.evictions += removed
+            self._metrics.record_evictions(removed)
 
     async def get(self, cache_key: str, start: int, end: int) -> bytes:
         needed_len = max(0, end - start + 1)
@@ -428,8 +464,7 @@ class Cache:
                                     size=cache_entry.size,
                                 )
 
-                    self._metrics.hits += 1
-                    self._metrics.bytes_from_cache += needed_len
+                    self._metrics.record_hit(needed_len)
 
                     total_time = time.time() - get_start_time
 
@@ -534,8 +569,7 @@ class Cache:
                                         size=cache_entry.size,
                                     )
 
-                    self._metrics.hits += 1
-                    self._metrics.bytes_from_cache += needed_len
+                    self._metrics.record_hit(needed_len)
 
                     return bytes(result_data)
 
@@ -554,7 +588,7 @@ class Cache:
             async with self.locks():
                 self._index.pop(k, None)
 
-            self._metrics.misses += 1
+            self._metrics.record_miss()
             # No log for cache misses - reduces noise (misses are expected and normal)
             return b""
 
@@ -579,11 +613,10 @@ class Cache:
         length = end - start + 1
 
         if len(data) >= length:
-            self._metrics.hits += 1
-            self._metrics.bytes_from_cache += length
+            self._metrics.record_hit(length)
             return data[:length]
 
-        self._metrics.misses += 1
+        self._metrics.record_miss()
 
         return b""
 
@@ -637,7 +670,7 @@ class Cache:
             lst = self._by_path.setdefault(cache_key, [])
             insort(lst, start)
             self._total_bytes += need
-            self._metrics.bytes_written += need
+            self._metrics.record_bytes_written(need)
 
     def has(self, cache_key: str, start: int, end: int) -> bool:
         """
@@ -709,5 +742,12 @@ class Cache:
 
         self._last_log = now
         stats = await self.stats()
+        if self.cfg.metrics_enabled:
+            from program.services.streaming import prom_cache_metrics as prom
+
+            prom.set_size_gauges(
+                total_bytes=int(stats.get("total_bytes") or 0),
+                entries=int(stats.get("entries") or 0),
+            )
 
         logger.log("VFS", f"Cache stats: {stats}")
