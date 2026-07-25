@@ -338,181 +338,181 @@ def _accumulate_ranked_torrents(
                 ),
                 aliases=aliases,
             )
-
-            # If movie item, disregard torrents with seasons and episodes
-            if (
-                isinstance(item, Movie)
-                and not manual
-                and (torrent.data.episodes or torrent.data.seasons)
-            ):
-                logger.trace(
-                    f"Skipping show torrent for movie {item.log_string}: {raw_title}"
-                )
-                if funnel is not None:
-                    funnel.record_content_filter()
-                continue
-
-            if isinstance(item, Show):
-                # make sure the torrent has at least 2 episodes (should weed out most junk)
-                if (
-                    not manual
-                    and torrent.data.episodes
-                    and len(torrent.data.episodes) <= 2
-                ):
-                    logger.trace(
-                        f"Skipping torrent with too few episodes for {item.log_string}: {raw_title}"
-                    )
-                    if funnel is not None:
-                        funnel.record_content_filter()
-                    continue
-
-                # make sure all of the item seasons are present in the torrent
-                if not manual and not all(
-                    season.number in torrent.data.seasons for season in item.seasons
-                ):
-                    logger.trace(
-                        f"Skipping torrent with incorrect number of seasons for {item.log_string}: {raw_title}"
-                    )
-                    if funnel is not None:
-                        funnel.record_content_filter()
-                    continue
-
-                if (
-                    not manual
-                    and torrent.data.episodes
-                    and not torrent.data.seasons
-                    and len(item.seasons) == 1
-                    and not all(
-                        episode.number in torrent.data.episodes
-                        for episode in item.seasons[0].episodes
-                    )
-                ):
-                    logger.trace(
-                        f"Skipping torrent with incorrect number of episodes for {item.log_string}: {raw_title}"
-                    )
-                    if funnel is not None:
-                        funnel.record_content_filter()
-                    continue
-
-            if isinstance(item, Season):
-                if (
-                    not manual
-                    and torrent.data.seasons
-                    and item.number not in torrent.data.seasons
-                ):
-                    logger.trace(
-                        f"Skipping torrent with no seasons or incorrect season number for {item.log_string}: {raw_title}"
-                    )
-                    if funnel is not None:
-                        funnel.record_content_filter()
-                    continue
-
-                # make sure the torrent has at least 2 episodes (should weed out most junk)
-                if (
-                    not manual
-                    and torrent.data.episodes
-                    and len(torrent.data.episodes) <= 2
-                ):
-                    logger.trace(
-                        f"Skipping torrent with too few episodes for {item.log_string}: {raw_title}"
-                    )
-                    if funnel is not None:
-                        funnel.record_content_filter()
-                    continue
-
-                # disregard torrents with incorrect season number
-                if not manual and item.number not in torrent.data.seasons:
-                    logger.trace(
-                        f"Skipping incorrect season torrent for {item.log_string}: {raw_title}"
-                    )
-                    if funnel is not None:
-                        funnel.record_content_filter()
-                    continue
-
-                if (
-                    not manual
-                    and torrent.data.episodes
-                    and not all(
-                        episode.number in torrent.data.episodes
-                        for episode in item.episodes
-                    )
-                ):
-                    logger.trace(
-                        f"Skipping incorrect season torrent for not having all episodes {item.log_string}: {raw_title}"
-                    )
-                    if funnel is not None:
-                        funnel.record_content_filter()
-                    continue
-
-            if isinstance(item, Episode) and not manual:
-                # Disregard torrents with incorrect episode/season identity.
-                # Episode number alone is not enough: S08E14 must not match S06E14.
-                parent_season = cast(Season, item.parent)
-                if not episode_release_matches(
-                    episode_number=item.number,
-                    absolute_number=item.absolute_number,
-                    season_number=parent_season.number,
-                    parsed_episodes=torrent.data.episodes,
-                    parsed_seasons=torrent.data.seasons,
-                ):
-                    logger.trace(
-                        f"Skipping incorrect episode torrent for {item.log_string}: {raw_title}"
-                    )
-                    if funnel is not None:
-                        funnel.record_content_filter()
-                    continue
-
-            # If country is present, then check to make sure it's correct. (Covers: US, UK, NZ, AU)
-            if (
-                not manual
-                and torrent.data.country
-                and not item.is_anime
-                and (item_country := _get_item_country(item))
-                and torrent.data.country not in item_country
-            ):
-                logger.trace(
-                    f"Skipping torrent for incorrect country with {item.log_string}: {raw_title}"
-                )
-                if funnel is not None:
-                    funnel.record_content_filter()
-                continue
-
-            if (
-                not manual
-                and torrent.data.year
-                and item.aired_at
-                and not _check_item_year(item.aired_at, torrent.data)
-            ):
-                # If year is present, then check to make sure it's correct
-                logger.trace(
-                    f"Skipping torrent for incorrect year with {item.log_string}: {raw_title}"
-                )
-                if funnel is not None:
-                    funnel.record_content_filter()
-                continue
-
-            # If anime and user wants dubbed only, then check to make sure it's dubbed
-            if (
-                not manual
-                and item.is_anime
-                and scraping_settings.dubbed_anime_only
-                and not torrent.data.dubbed
-            ):
-                logger.trace(
-                    f"Skipping non-dubbed anime torrent for {item.log_string}: {raw_title}"
-                )
-                if funnel is not None:
-                    funnel.record_content_filter()
-                continue
-
-            torrents.add(torrent)
-            processed_infohashes.add(infohash)
         except Exception as e:
             logger.debug(f"RTN rejected '{raw_title[:60]}': {type(e).__name__}: {e}")
             if funnel is not None:
                 funnel.record_rtn_reject(e)
             processed_infohashes.add(infohash)
             continue
+
+        # If movie item, disregard torrents with seasons and episodes
+        if (
+            isinstance(item, Movie)
+            and not manual
+            and (torrent.data.episodes or torrent.data.seasons)
+        ):
+            logger.trace(
+                f"Skipping show torrent for movie {item.log_string}: {raw_title}"
+            )
+            if funnel is not None:
+                funnel.record_content_filter()
+            continue
+
+        if isinstance(item, Show):
+            # make sure the torrent has at least 2 episodes (should weed out most junk)
+            if (
+                not manual
+                and torrent.data.episodes
+                and len(torrent.data.episodes) <= 2
+            ):
+                logger.trace(
+                    f"Skipping torrent with too few episodes for {item.log_string}: {raw_title}"
+                )
+                if funnel is not None:
+                    funnel.record_content_filter()
+                continue
+
+            # make sure all of the item seasons are present in the torrent
+            if not manual and not all(
+                season.number in torrent.data.seasons for season in item.seasons
+            ):
+                logger.trace(
+                    f"Skipping torrent with incorrect number of seasons for {item.log_string}: {raw_title}"
+                )
+                if funnel is not None:
+                    funnel.record_content_filter()
+                continue
+
+            if (
+                not manual
+                and torrent.data.episodes
+                and not torrent.data.seasons
+                and len(item.seasons) == 1
+                and not all(
+                    episode.number in torrent.data.episodes
+                    for episode in item.seasons[0].episodes
+                )
+            ):
+                logger.trace(
+                    f"Skipping torrent with incorrect number of episodes for {item.log_string}: {raw_title}"
+                )
+                if funnel is not None:
+                    funnel.record_content_filter()
+                continue
+
+        if isinstance(item, Season):
+            if (
+                not manual
+                and torrent.data.seasons
+                and item.number not in torrent.data.seasons
+            ):
+                logger.trace(
+                    f"Skipping torrent with no seasons or incorrect season number for {item.log_string}: {raw_title}"
+                )
+                if funnel is not None:
+                    funnel.record_content_filter()
+                continue
+
+            # make sure the torrent has at least 2 episodes (should weed out most junk)
+            if (
+                not manual
+                and torrent.data.episodes
+                and len(torrent.data.episodes) <= 2
+            ):
+                logger.trace(
+                    f"Skipping torrent with too few episodes for {item.log_string}: {raw_title}"
+                )
+                if funnel is not None:
+                    funnel.record_content_filter()
+                continue
+
+            # disregard torrents with incorrect season number
+            if not manual and item.number not in torrent.data.seasons:
+                logger.trace(
+                    f"Skipping incorrect season torrent for {item.log_string}: {raw_title}"
+                )
+                if funnel is not None:
+                    funnel.record_content_filter()
+                continue
+
+            if (
+                not manual
+                and torrent.data.episodes
+                and not all(
+                    episode.number in torrent.data.episodes
+                    for episode in item.episodes
+                )
+            ):
+                logger.trace(
+                    f"Skipping incorrect season torrent for not having all episodes {item.log_string}: {raw_title}"
+                )
+                if funnel is not None:
+                    funnel.record_content_filter()
+                continue
+
+        if isinstance(item, Episode) and not manual:
+            # Disregard torrents with incorrect episode/season identity.
+            # Episode number alone is not enough: S08E14 must not match S06E14.
+            parent_season = cast(Season, item.parent)
+            if not episode_release_matches(
+                episode_number=item.number,
+                absolute_number=item.absolute_number,
+                season_number=parent_season.number,
+                parsed_episodes=torrent.data.episodes,
+                parsed_seasons=torrent.data.seasons,
+            ):
+                logger.trace(
+                    f"Skipping incorrect episode torrent for {item.log_string}: {raw_title}"
+                )
+                if funnel is not None:
+                    funnel.record_content_filter()
+                continue
+
+        # If country is present, then check to make sure it's correct. (Covers: US, UK, NZ, AU)
+        if (
+            not manual
+            and torrent.data.country
+            and not item.is_anime
+            and (item_country := _get_item_country(item))
+            and torrent.data.country not in item_country
+        ):
+            logger.trace(
+                f"Skipping torrent for incorrect country with {item.log_string}: {raw_title}"
+            )
+            if funnel is not None:
+                funnel.record_content_filter()
+            continue
+
+        if (
+            not manual
+            and torrent.data.year
+            and item.aired_at
+            and not _check_item_year(item.aired_at, torrent.data)
+        ):
+            # If year is present, then check to make sure it's correct
+            logger.trace(
+                f"Skipping torrent for incorrect year with {item.log_string}: {raw_title}"
+            )
+            if funnel is not None:
+                funnel.record_content_filter()
+            continue
+
+        # If anime and user wants dubbed only, then check to make sure it's dubbed
+        if (
+            not manual
+            and item.is_anime
+            and scraping_settings.dubbed_anime_only
+            and not torrent.data.dubbed
+        ):
+            logger.trace(
+                f"Skipping non-dubbed anime torrent for {item.log_string}: {raw_title}"
+            )
+            if funnel is not None:
+                funnel.record_content_filter()
+            continue
+
+        torrents.add(torrent)
+        processed_infohashes.add(infohash)
 
 
 def parse_results(
