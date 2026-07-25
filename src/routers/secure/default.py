@@ -48,16 +48,22 @@ async def health() -> MessageResponse:
 async def prometheus_metrics() -> Response:
     """Prometheus text exposition of streaming cache counters (API-key protected)."""
 
-    try:
-        cache = di[Cache]
-        stats = await cache.stats()
-        prom.set_size_gauges(
-            total_bytes=int(stats.get("total_bytes") or 0),
-            entries=int(stats.get("entries") or 0),
-        )
-    except (KeyError, ServiceError):
-        # Cache may not be registered yet (startup) — still return process counters.
-        pass
+    metrics_enabled = bool(
+        getattr(settings_manager.settings.filesystem, "cache_metrics", True)
+    )
+    if metrics_enabled:
+        try:
+            cache = di[Cache]
+            stats = await cache.stats()
+            prom.set_size_gauges(
+                total_bytes=int(stats.get("total_bytes") or 0),
+                entries=int(stats.get("entries") or 0),
+            )
+        except (KeyError, ServiceError):
+            # Cache not registered yet — avoid serving stale size/entry gauges.
+            prom.set_size_gauges(total_bytes=0, entries=0)
+    else:
+        prom.set_size_gauges(total_bytes=0, entries=0)
 
     return Response(
         content=prom.render_metrics(),
