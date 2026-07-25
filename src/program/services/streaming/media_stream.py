@@ -105,6 +105,8 @@ class MediaStream:
             activity_timeout_seconds=stream_settings.activity_timeout_seconds,
             chunk_wait_timeout_seconds=stream_settings.chunk_wait_timeout_seconds,
             connect_timeout_seconds=stream_settings.connect_timeout_seconds,
+            sequential_read_tolerance_blocks=stream_settings.sequential_read_tolerance_blocks,
+            scan_tolerance_blocks=stream_settings.scan_tolerance_blocks,
         )
 
         self.session_statistics = SessionStatistics()
