@@ -25,7 +25,7 @@ from program.media.models import ActiveStream
 from program.media.state import States
 from program.media.subtitle_entry import SubtitleEntry
 
-from .stream import Stream
+from .stream import Stream, StreamBlacklistRelation
 
 if TYPE_CHECKING:
     from program.media.filesystem_entry import FilesystemEntry
@@ -306,22 +306,54 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
         return False
 
     def blacklist_stream(self, stream: Stream) -> bool:
-        """Blacklist a stream by moving it from streams to blacklisted_streams."""
+        """Blacklist a stream by moving it from streams to blacklisted_streams.
+
+        Idempotent against an existing StreamBlacklistRelation row so commit does
+        not raise UniqueViolation when the ORM collection is stale or the stream
+        was already blacklisted in a prior session.
+        """
 
         _dedupe_stream_list_in_place(self.streams)
         _dedupe_stream_list_in_place(self.blacklisted_streams)
 
+        removed_from_active = False
         if stream in self.streams:
             self.streams.remove(stream)
+            removed_from_active = True
 
-            if stream not in self.blacklisted_streams:
-                self.blacklisted_streams.append(stream)
-
-            logger.debug(f"Blacklisted stream {stream.infohash} for {self.log_string}")
-
+        if stream in self.blacklisted_streams:
+            if removed_from_active:
+                logger.debug(
+                    f"Blacklisted stream {stream.infohash} for {self.log_string}"
+                )
             return True
 
-        return False
+        # DB already has the association but the collection missed it (stale /
+        # dual-membership). Refresh instead of appending (which would INSERT).
+        session = object_session(self)
+        stream_id = getattr(stream, "id", None)
+        item_id = getattr(self, "id", None)
+        if session is not None and stream_id is not None and item_id is not None:
+            existing = session.query(StreamBlacklistRelation.id).filter_by(
+                media_item_id=item_id,
+                stream_id=stream_id,
+            ).first()
+            if existing is not None:
+                session.expire(self, ["blacklisted_streams"])
+                if removed_from_active:
+                    logger.debug(
+                        f"Blacklisted stream {stream.infohash} for {self.log_string}"
+                    )
+                return True
+
+        if not removed_from_active:
+            # Stream was not on the active list and not already blacklisted —
+            # nothing to move (caller may have passed a detached/orphan stream).
+            return False
+
+        self.blacklisted_streams.append(stream)
+        logger.debug(f"Blacklisted stream {stream.infohash} for {self.log_string}")
+        return True
 
     def unblacklist_stream(self, stream: Stream) -> None:
         """Unblacklist a stream by moving it from blacklisted_streams to streams."""
