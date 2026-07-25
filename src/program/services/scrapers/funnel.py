@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+
+from program.media.stream import Stream
 
 # Prefer stable RTN / trash tokens seen in production debug lines.
 _REASON_RE = re.compile(
@@ -56,9 +59,9 @@ class ScrapeFunnelStats:
 
     def classify_ranked_against_item(
         self,
-        ranked_streams: dict,
-        existing_streams: list,
-        blacklisted_streams: list,
+        ranked_streams: dict[str, Stream],
+        existing_streams: Sequence[Stream],
+        blacklisted_streams: Sequence[Stream],
     ) -> None:
         """Split ranked streams into new / already_known / blacklisted."""
 
