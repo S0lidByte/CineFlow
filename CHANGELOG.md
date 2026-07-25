@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.1](https://github.com/S0lidByte/CineFlow/compare/v1.16.0...v1.16.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **vfs:** stop /metrics from awaiting trio Cache.stats under asyncio ([#121](https://github.com/S0lidByte/CineFlow/issues/121)) ([0b99f34](https://github.com/S0lidByte/CineFlow/commit/0b99f34d4897cbd960ca0266c380c26ddb2ac54b))
+
 ## [1.16.0](https://github.com/S0lidByte/CineFlow/compare/v1.15.0...v1.16.0) (2026-07-25)
 
 
