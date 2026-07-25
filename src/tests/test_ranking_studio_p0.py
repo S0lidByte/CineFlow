@@ -161,16 +161,13 @@ def test_ranking_languages_required_can_reject_multi():
     ranking = _balanced_like()
     ranking["languages"]["required"] = ["en"]
     ranking["options"]["allow_english_in_languages"] = False
-    # MULTI / TRUEFRENCH often lacks plain English tagging → language reject.
-    try:
+    # MULTI / TRUEFRENCH lacks English tagging → language reject when remove_trash=True.
+    with pytest.raises(GarbageTorrent, match="missing_required_language"):
         _rank(
             ANIME_MULTI,
             ranking,
             correct_title="Dragon Ball Z: Resurrection F",
-            remove_trash=False,
         )
-    except GarbageTorrent as exc:
-        assert "language" in str(exc).lower() or "denied" in str(exc).lower()
 
 
 def test_invalid_patterns_blocked_before_rtn():
