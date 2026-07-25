@@ -304,11 +304,15 @@ class TraktContent(Runner[TraktModel]):
                 return hasattr(item, "ids")
 
         _ids = list[tuple[int, Literal["show", "movie"]]]()
+        skipped_no_show = 0
+        skipped_no_movie = 0
 
         for item in items:
             if ItemWithShow.is_type_of(item):
                 if not item.show:
-                    logger.debug(f"Skipping collection item with no show data: {item}")
+                    # Expected for movie collection rows (show-only schema) and
+                    # empty season/episode wrappers — count once, don't spam.
+                    skipped_no_show += 1
                     continue
 
                 ids = item.show.ids
@@ -318,7 +322,7 @@ class TraktContent(Runner[TraktModel]):
 
             elif ItemWithMovie.is_type_of(item):
                 if not item.movie:
-                    logger.debug(f"Skipping collection item with no movie data: {item}")
+                    skipped_no_movie += 1
                     continue
 
                 ids = item.movie.ids
@@ -344,5 +348,11 @@ class TraktContent(Runner[TraktModel]):
                 logger.error(f"Unknown item type: {item}")
 
                 continue
+
+        if skipped_no_show or skipped_no_movie:
+            logger.debug(
+                "Skipped Trakt items lacking media payload: "
+                f"no_show={skipped_no_show} no_movie={skipped_no_movie}"
+            )
 
         return _ids
