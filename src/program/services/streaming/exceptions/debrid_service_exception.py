@@ -65,8 +65,18 @@ class DebridServiceLinkUnavailable(DebridServiceException):
 class DebridServiceFairUsageLimitException(DebridServiceException):
     """Raised when the debrid service fair usage limit is reached."""
 
-    def __init__(self, provider: str) -> None:
-        super().__init__("Fair usage limit reached", provider=provider)
+    def __init__(
+        self,
+        provider: str,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        message = "Fair usage limit reached"
+        if retry_after_seconds is not None and retry_after_seconds > 0:
+            message = f"{message} (retry after {retry_after_seconds:.0f}s)"
+
+        super().__init__(message, provider=provider)
+
+        self.retry_after_seconds = retry_after_seconds
 
 
 class DebridServiceClosedConnectionException(DebridServiceException):

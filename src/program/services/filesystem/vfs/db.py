@@ -144,7 +144,9 @@ class VFSDatabase:
 
                     return entry.unrestricted_url
             except DebridServiceFairUsageLimitException as e:
-                logger.warning(
+                # Provider already logs WARNING once per cooldown; keep this at debug
+                # so client open-retries (~2s) do not triple-spam the log.
+                logger.debug(
                     f"Fair usage limit reached when unrestricting URL for {entry.original_filename}: {e}"
                 )
                 raise
