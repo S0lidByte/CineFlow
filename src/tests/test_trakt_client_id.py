@@ -51,3 +51,66 @@ def test_oauth_authorize_url_uses_website_host():
     url = api.build_oauth_url()
     assert url.startswith("https://trakt.tv/oauth/authorize?")
     assert "client_id=cid" in url
+
+
+def test_oauth_token_exchange_posts_json_body_not_form():
+    """Trakt rejects form-urlencoded bodies advertised as application/json."""
+    from unittest.mock import MagicMock
+
+    settings = TraktModel(
+        api_key="mismatched-api-key",
+        oauth=TraktOauthModel(
+            oauth_client_id="cid",
+            oauth_client_secret="secret",
+            oauth_redirect_uri="http://localhost:3000/api/trakt/oauth/callback",
+            access_token="stale-bearer",
+        ),
+    )
+    api = TraktAPI(settings)
+    api.headers["Authorization"] = "Bearer stale-bearer"
+
+    mock_response = MagicMock()
+    mock_response.ok = True
+    mock_response.json.return_value = {
+        "access_token": "new-access",
+        "refresh_token": "new-refresh",
+    }
+    api.session.post = MagicMock(return_value=mock_response)
+
+    with patch("program.apis.trakt_api.settings_manager.save"):
+        assert api.handle_oauth_callback("ignored-api-key", "auth-code") is True
+
+    api.session.post.assert_called_once()
+    _args, kwargs = api.session.post.call_args
+    assert kwargs.get("json") == {
+        "code": "auth-code",
+        "client_id": "cid",
+        "client_secret": "secret",
+        "redirect_uri": "http://localhost:3000/api/trakt/oauth/callback",
+        "grant_type": "authorization_code",
+    }
+    assert "data" not in kwargs or kwargs.get("data") is None
+    assert kwargs["headers"]["trakt-api-key"] == "cid"
+    assert "Authorization" not in kwargs["headers"]
+    assert settings.oauth.access_token == "new-access"
+    assert settings.oauth.refresh_token == "new-refresh"
+
+
+def test_oauth_token_exchange_logs_failure_body():
+    from unittest.mock import MagicMock
+
+    settings = TraktModel(
+        oauth=TraktOauthModel(
+            oauth_client_id="cid",
+            oauth_client_secret="secret",
+            oauth_redirect_uri="http://localhost:3000/api/trakt/oauth/callback",
+        ),
+    )
+    api = TraktAPI(settings)
+    mock_response = MagicMock()
+    mock_response.ok = False
+    mock_response.status_code = 412
+    mock_response.text = "use application/json content type"
+    api.session.post = MagicMock(return_value=mock_response)
+
+    assert api.handle_oauth_callback("cid", "auth-code") is False
