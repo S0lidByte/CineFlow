@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import re
+import time
+from collections import defaultdict, deque
+from threading import Lock
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -10,6 +13,7 @@ from pydantic import BaseModel, Field
 from RTN import RTN, DefaultRanking, parse
 from RTN.exceptions import GarbageTorrent
 
+from program.services.scrapers.funnel import get_remembered_funnel_summary
 from program.services.scrapers.shared import (
     get_ranking_overrides,
     normalize_rtn_language_settings,
@@ -28,6 +32,11 @@ from program.settings.ranking_patterns import (
     validate_pattern_lists,
     validate_ranking_payload_patterns,
 )
+from program.settings.ranking_presets import (
+    GOLDEN_TITLES,
+    RANKING_PRESETS,
+    TITLE_MATCHING_MODES,
+)
 
 router = APIRouter(
     prefix="/ranking",
@@ -36,14 +45,30 @@ router = APIRouter(
 )
 
 _DENY_KEY_RE = re.compile(r"denied by:\s*([a-z0-9_]+)", re.IGNORECASE)
+_INFOHASH_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 
-# Non-matrix deny keys that still map to Scraping soft-opt-ins / language editors.
-_SOFT_OPT_IN_DENY_KEYS = frozenset(
-    {
-        "extras_dubbed",
-        "missing_required_language",
-    }
-)
+# Soft rate limit for expensive ranking helper endpoints (per process).
+_RATE_LIMIT_LOCK = Lock()
+_RATE_LIMIT_HITS: dict[str, deque[float]] = defaultdict(deque)
+_RATE_LIMIT_WINDOW_SEC = 60.0
+_RATE_LIMIT_MAX_HITS = 30
+
+
+def _enforce_ranking_rate_limit(bucket: str) -> None:
+    now = time.monotonic()
+    with _RATE_LIMIT_LOCK:
+        hits = _RATE_LIMIT_HITS[bucket]
+        while hits and now - hits[0] > _RATE_LIMIT_WINDOW_SEC:
+            hits.popleft()
+        if len(hits) >= _RATE_LIMIT_MAX_HITS:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"Rate limit exceeded for {bucket} "
+                    f"({_RATE_LIMIT_MAX_HITS}/{int(_RATE_LIMIT_WINDOW_SEC)}s). Retry later."
+                ),
+            )
+        hits.append(now)
 
 
 class RankingTestRequest(BaseModel):
@@ -61,6 +86,13 @@ class RankingTestRequest(BaseModel):
         default=None,
         description="Optional full ranking settings payload to test against (unsaved edits)",
     )
+    aliases: dict[str, list[str]] | None = Field(
+        default=None,
+        description=(
+            "Optional title aliases (country → names) for remake / alias diagnose. "
+            "Empty dict disables aliases for this test."
+        ),
+    )
 
 
 class RankingTestResponse(BaseModel):
@@ -72,6 +104,8 @@ class RankingTestResponse(BaseModel):
     deny_reason: str | None = None
     deny_help: str | None = None
     scraping_hint: str | None = None
+    title_similarity_threshold: float | None = None
+    aliases_used: bool = False
     parsed: dict[str, Any] | None = None
 
 
@@ -82,6 +116,9 @@ class RankingMetaResponse(BaseModel):
     categories: dict[str, str]
     soft_opt_in_links: dict[str, dict[str, str]]
     pattern_limits: dict[str, int]
+    title_matching_modes: list[dict[str, Any]] = Field(default_factory=list)
+    presets: list[dict[str, Any]] = Field(default_factory=list)
+    golden_titles: dict[str, str] = Field(default_factory=dict)
 
 
 class PatternValidateRequest(BaseModel):
@@ -113,6 +150,26 @@ class PatternValidateResponse(BaseModel):
     preview: PatternPreviewModel | None = None
 
 
+class FunnelReasonCount(BaseModel):
+    reason: str
+    count: int
+
+
+class FunnelSummaryResponse(BaseModel):
+    message: str
+    found: bool = False
+    item_id: int | None = None
+    item_log: str | None = None
+    found_count: int = 0
+    ranked: int = 0
+    new: int = 0
+    already_known: int = 0
+    blacklisted: int = 0
+    rtn_rejected: int = 0
+    content_filtered: int = 0
+    rtn_top: list[FunnelReasonCount] = Field(default_factory=list)
+
+
 def _scraping_hint_for_deny(deny_key: str | None) -> str | None:
     if not deny_key:
         return None
@@ -127,9 +184,23 @@ def _scraping_hint_for_deny(deny_key: str | None) -> str | None:
             "Adjust Ranking → Languages (required), or for anime MULTI/dual titles "
             "enable Scraping → anime_allow_multi_audio."
         )
-    if key in _SOFT_OPT_IN_DENY_KEYS:
-        return "See Scraping soft-opt-ins for anime-only ranking retries."
+    if key == "title_mismatch":
+        return (
+            "Title similarity failed. Try Ranking Studio matching modes / aliases, "
+            "lower title_similarity temporarily for diagnose, or enable Scraping → "
+            "enable_aliases. Do not silently accept remake mismatches."
+        )
     return None
+
+
+def _normalize_infohash(raw: str | None) -> str:
+    infohash = (raw or "0" * 40).strip().lower()
+    if not _INFOHASH_RE.fullmatch(infohash):
+        raise HTTPException(
+            status_code=400,
+            detail="infohash must be exactly 40 hexadecimal characters",
+        )
+    return infohash
 
 
 @router.get("/meta", operation_id="get_ranking_meta", response_model=RankingMetaResponse)
@@ -151,11 +222,68 @@ async def get_ranking_meta() -> RankingMetaResponse:
                 "ranking_path": "ranking.languages.required",
                 "label": "Anime allow MULTI/dual-audio retry (soft-opt-in)",
             },
+            "title_mismatch": {
+                "scraping_path": "scraping.enable_aliases",
+                "ranking_path": "ranking.options.title_similarity",
+                "label": "Aliases + title similarity (remake diagnose)",
+            },
         },
         pattern_limits={
             "max_patterns_per_list": MAX_PATTERNS_PER_LIST,
             "max_pattern_length": MAX_PATTERN_LENGTH,
         },
+        title_matching_modes=list(TITLE_MATCHING_MODES),
+        presets=list(RANKING_PRESETS),
+        golden_titles=dict(GOLDEN_TITLES),
+    )
+
+
+@router.get(
+    "/presets",
+    operation_id="get_ranking_presets",
+    response_model=dict[str, Any],
+)
+async def get_ranking_presets() -> dict[str, Any]:
+    """Shared Ranking Studio preset contract (ids + options) for FE alignment."""
+    return {
+        "message": "Ranking presets",
+        "presets": RANKING_PRESETS,
+        "title_matching_modes": TITLE_MATCHING_MODES,
+        "golden_titles": GOLDEN_TITLES,
+    }
+
+
+@router.get(
+    "/funnel/{item_id}",
+    operation_id="get_scrape_funnel_summary",
+    response_model=FunnelSummaryResponse,
+)
+async def get_scrape_funnel_summary(item_id: int) -> FunnelSummaryResponse:
+    """Return the last remembered scrape funnel summary for an item (process-local)."""
+    cached = get_remembered_funnel_summary(item_id)
+    if not cached:
+        return FunnelSummaryResponse(
+            message="No recent scrape funnel for this item",
+            found=False,
+            item_id=item_id,
+        )
+    return FunnelSummaryResponse(
+        message="Scrape funnel summary",
+        found=True,
+        item_id=cached.get("item_id", item_id),
+        item_log=cached.get("item_log"),
+        found_count=int(cached.get("found", 0)),
+        ranked=int(cached.get("ranked", 0)),
+        new=int(cached.get("new", 0)),
+        already_known=int(cached.get("already_known", 0)),
+        blacklisted=int(cached.get("blacklisted", 0)),
+        rtn_rejected=int(cached.get("rtn_rejected", 0)),
+        content_filtered=int(cached.get("content_filtered", 0)),
+        rtn_top=[
+            FunnelReasonCount(reason=str(r.get("reason", "")), count=int(r.get("count", 0)))
+            for r in (cached.get("rtn_top") or [])
+            if isinstance(r, dict)
+        ],
     )
 
 
@@ -166,6 +294,7 @@ async def get_ranking_meta() -> RankingMetaResponse:
 )
 async def validate_ranking_patterns(body: PatternValidateRequest) -> PatternValidateResponse:
     """Validate require/exclude/preferred regex lists (length, compile, ReDoS heuristics)."""
+    _enforce_ranking_rate_limit("validate-patterns")
     result = validate_pattern_lists(
         require=body.require,
         exclude=body.exclude,
@@ -198,6 +327,7 @@ async def validate_ranking_patterns(body: PatternValidateRequest) -> PatternVali
 @router.post("/test", operation_id="test_ranking", response_model=RankingTestResponse)
 async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
     """Run a release title through RTN using current (or provided) ranking settings."""
+    _enforce_ranking_rate_limit("test")
     try:
         if body.ranking is not None:
             try:
@@ -214,9 +344,9 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
 
         normalize_rtn_language_settings(settings_model)
         rtn_instance = RTN(settings_model, ranking_model or DefaultRanking())
-        infohash = (body.infohash or "0" * 40).lower()
-        if len(infohash) != 40:
-            raise HTTPException(status_code=400, detail="infohash must be 40 hex characters")
+        infohash = _normalize_infohash(body.infohash)
+        aliases = body.aliases if body.aliases is not None else {}
+        threshold = float(getattr(settings_model.options, "title_similarity", 0.85))
 
         try:
             torrent = rtn_instance.rank(
@@ -224,7 +354,7 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
                 infohash=infohash,
                 correct_title=body.correct_title or "",
                 remove_trash=body.remove_trash,
-                aliases={},
+                aliases=aliases,
             )
             parsed = torrent.data.model_dump() if hasattr(torrent.data, "model_dump") else None
             return RankingTestResponse(
@@ -236,6 +366,8 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
                 deny_reason=None,
                 deny_help=None,
                 scraping_hint=None,
+                title_similarity_threshold=threshold,
+                aliases_used=bool(aliases),
                 parsed=parsed,
             )
         except GarbageTorrent as exc:
@@ -245,6 +377,10 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
             # Language rejects often surface as plain messages without "denied by:".
             if deny_key is None and "missing_required_language" in msg.lower():
                 deny_key = "missing_required_language"
+            if deny_key is None and re.search(
+                r"does not match the correct title", msg, re.IGNORECASE
+            ):
+                deny_key = "title_mismatch"
             try:
                 parsed_data = parse(body.raw_title)
                 parsed = (
@@ -263,6 +399,8 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
                 deny_reason=deny_key or msg,
                 deny_help=DENY_KEY_HELP.get(deny_key) if deny_key else None,
                 scraping_hint=_scraping_hint_for_deny(deny_key),
+                title_similarity_threshold=threshold,
+                aliases_used=bool(aliases),
                 parsed=parsed,
             )
     except HTTPException:

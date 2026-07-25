@@ -65,7 +65,15 @@ class InvalidDebridFileException(Exception):
 
 
 class BitrateLimitExceededException(InvalidDebridFileException):
-    """Exception raised when a file exceeds the allowed bitrate limit"""
+    """Exception raised when a file is under the configured minimum average bitrate"""
+
+
+def calculate_average_bitrate(filesize_bytes: int, runtime_minutes: float) -> float:
+    """Average bitrate proxy used by riven-ts (MiB per minute of runtime)."""
+
+    if runtime_minutes <= 0:
+        raise ValueError("runtime_minutes must be positive")
+    return filesize_bytes / runtime_minutes / (1024 * 1024)
 
 
 class DebridFile(BaseModel):
@@ -85,6 +93,7 @@ class DebridFile(BaseModel):
         path: str | None = None,
         file_id: int | None = None,
         limit_filesize: bool = True,
+        runtime_minutes: float | None = None,
     ) -> "DebridFile":
         """Factory method to validate and create a DebridFile"""
 
@@ -135,6 +144,35 @@ class DebridFile(BaseModel):
                 raise InvalidDebridFileException(
                     f"Skipping {filetype} file: '{filename}' - filesize: {round(filesize_mb, 2)}MB is outside the allowed range of {min_limit}MB to {max_limit}MB"
                 )
+
+        # Optional average bitrate floor (riven-ts parity). Requires runtime.
+        effective_runtime = runtime_minutes
+        if effective_runtime is None:
+            override_runtime = settings_manager.get_setting("runtime_minutes", None)
+            if override_runtime is not None:
+                try:
+                    effective_runtime = float(override_runtime)
+                except (TypeError, ValueError):
+                    effective_runtime = None
+
+        if effective_runtime and effective_runtime > 0:
+            if filetype == "movie":
+                min_bitrate = settings_manager.settings.downloaders.movie_min_avg_bitrate
+            elif filetype in ["show", "season", "episode"]:
+                min_bitrate = (
+                    settings_manager.settings.downloaders.episode_min_avg_bitrate
+                )
+            else:
+                min_bitrate = 0.0
+
+            if min_bitrate and min_bitrate > 0:
+                bitrate = calculate_average_bitrate(filesize_bytes, effective_runtime)
+                if bitrate < min_bitrate:
+                    raise BitrateLimitExceededException(
+                        f"Skipping {filetype} file: '{filename}' - average bitrate "
+                        f"{bitrate:.3f} MiB/min is under the configured minimum "
+                        f"{min_bitrate:.3f} MiB/min"
+                    )
 
         return cls(filename=filename, filesize=filesize_bytes, file_id=file_id)
 

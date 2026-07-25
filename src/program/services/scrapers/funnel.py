@@ -1,11 +1,15 @@
-"""Scrape funnel telemetry — log-only counters for diagnose-before-change."""
+"""Scrape funnel telemetry — counters for diagnose-before-change."""
 
 from __future__ import annotations
 
 import re
+import threading
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Any
+
+from cachetools import TTLCache
 
 from program.media.stream import Stream
 
@@ -15,6 +19,10 @@ _REASON_RE = re.compile(
     r"title[_\s]?mismatch|incorrect[_\s]?\w+)",
     re.IGNORECASE,
 )
+
+# Last completed scrape funnel per media item id (process-local, TTL).
+_LAST_FUNNEL_LOCK = threading.RLock()
+_LAST_FUNNEL_BY_ITEM: TTLCache[int, dict[str, Any]] = TTLCache(maxsize=2048, ttl=3600)
 
 
 def bucket_rtn_reason(exc: BaseException) -> str:
@@ -80,10 +88,32 @@ class ScrapeFunnelStats:
             else:
                 self.new += 1
 
+    def top_rtn_reasons(self, limit: int = 5) -> list[tuple[str, int]]:
+        return self.rtn_reasons.most_common(limit)
+
+    def to_summary(self, *, item_id: int | None = None, item_log: str | None = None) -> dict[str, Any]:
+        """JSON-serializable funnel summary for API / UI."""
+
+        return {
+            "item_id": item_id,
+            "item_log": item_log,
+            "found": self.found,
+            "ranked": self.ranked,
+            "new": self.new,
+            "already_known": self.already_known,
+            "blacklisted": self.blacklisted,
+            "rtn_rejected": self.rtn_rejected,
+            "content_filtered": self.content_filtered,
+            "rtn_top": [
+                {"reason": reason, "count": count}
+                for reason, count in self.top_rtn_reasons(5)
+            ],
+        }
+
     def summary_line(self, item_log: str) -> str:
         reasons = ""
         if self.rtn_reasons:
-            top = self.rtn_reasons.most_common(5)
+            top = self.top_rtn_reasons(5)
             reasons = " rtn_top=[" + ", ".join(f"{k}:{v}" for k, v in top) + "]"
         return (
             f"Scrape funnel for {item_log}: "
@@ -92,3 +122,18 @@ class ScrapeFunnelStats:
             f"rtn_rejected={self.rtn_rejected} "
             f"content_filtered={self.content_filtered}{reasons}"
         )
+
+
+def remember_funnel_summary(item_id: int | None, summary: dict[str, Any]) -> None:
+    """Cache the latest funnel summary for an item (best-effort, process-local)."""
+
+    if item_id is None:
+        return
+    with _LAST_FUNNEL_LOCK:
+        _LAST_FUNNEL_BY_ITEM[int(item_id)] = summary
+
+
+def get_remembered_funnel_summary(item_id: int) -> dict[str, Any] | None:
+    with _LAST_FUNNEL_LOCK:
+        cached = _LAST_FUNNEL_BY_ITEM.get(int(item_id))
+        return dict(cached) if cached is not None else None

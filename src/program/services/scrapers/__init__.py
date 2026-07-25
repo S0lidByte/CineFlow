@@ -15,7 +15,7 @@ from program.media.stream import Stream
 from program.services.scrapers.aiostreams import AIOStreams
 from program.services.scrapers.base import ScraperService
 from program.services.scrapers.comet import Comet
-from program.services.scrapers.funnel import ScrapeFunnelStats
+from program.services.scrapers.funnel import ScrapeFunnelStats, remember_funnel_summary
 from program.services.scrapers.jackett import Jackett
 from program.services.scrapers.mediafusion import Mediafusion
 from program.services.scrapers.orionoid import Orionoid
@@ -75,6 +75,10 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
             sorted_streams, item.streams, item.blacklisted_streams
         )
         logger.log("SCRAPER", funnel.summary_line(item.log_string))
+        remember_funnel_summary(
+            getattr(item, "id", None),
+            funnel.to_summary(item_id=getattr(item, "id", None), item_log=item.log_string),
+        )
 
         new_streams = [
             stream
@@ -192,12 +196,14 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
         self,
         item: MediaItem,
         manual: bool = False,
+        funnel: ScrapeFunnelStats | None = None,
     ) -> Generator[tuple[str, dict[str, Stream]], None, None]:
         """Scrape an item and yield results incrementally as each scraper finishes.
 
         Args:
             item: The media item to scrape.
             manual: If True, bypass content filters for manual scraping.
+            funnel: Optional scrape funnel counters (log-only telemetry).
 
         Yields:
             Tuples of (service_name, parsed_streams_dict) as each service completes.
@@ -248,6 +254,8 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
                                 if infohash not in all_raw_results
                             }
                             all_raw_results.update(delta_results)
+                            if funnel is not None:
+                                funnel.found = len(all_raw_results)
 
                         parse_started = time.perf_counter()
                         parsed_streams = merge_parse_results(
@@ -256,6 +264,7 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
                             accumulated_torrents,
                             processed_infohashes,
                             manual=manual,
+                            funnel=funnel,
                         )
                         parse_ms = (time.perf_counter() - parse_started) * 1000
                         logger.trace(
