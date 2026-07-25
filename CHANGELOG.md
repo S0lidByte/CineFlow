@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.1](https://github.com/S0lidByte/CineFlow/compare/v1.18.0...v1.18.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **ranking:** bound aliases and reject non-finite bitrate runtimes ([#132](https://github.com/S0lidByte/CineFlow/issues/132)) ([03f6363](https://github.com/S0lidByte/CineFlow/commit/03f6363756495dfa1e57a2864c2d6750c2d46bd0))
+
 ## [1.18.0](https://github.com/S0lidByte/CineFlow/compare/v1.17.0...v1.18.0) (2026-07-25)
 
 
