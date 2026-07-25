@@ -196,3 +196,56 @@ def test_funnel_still_buckets_title_mismatch():
         "parsed title: 'Knights of the Zodiac'"
     )
     assert bucket_rtn_reason(Exception(msg)) == "title_mismatch"
+
+
+def test_accepts_anime_arc_subtitle_release():
+    """Anime/series arc subtitles (Big Bang Mission, Ultra God Mission) are accepted automatically."""
+
+    settings = SettingsModel()
+    settings.options.title_similarity = 0.85
+    settings.languages.required = []
+    settings.custom_ranks.extras.dubbed.fetch = True
+
+    from RTN import RTN, DefaultRanking
+
+    raw_title = "[Grupa Mirai] Super Dragon Ball Heroes Big Bang Mission - 19 [WEB 1080p AAC] [PL]"
+    correct_title = "Super Dragon Ball Heroes"
+
+    torrent = _rank_with_language_compat(
+        RTN(settings, DefaultRanking()),
+        settings,
+        raw_title=raw_title,
+        infohash=INFOHASH,
+        correct_title=correct_title,
+        remove_trash=True,
+        aliases={},
+    )
+    assert torrent.infohash.lower() == INFOHASH
+
+
+def test_rejects_unrelated_franchise_title():
+    """Unrelated series titles like Dragon Ball Super vs Super Dragon Ball Heroes are still rejected."""
+
+    settings = SettingsModel()
+    settings.options.title_similarity = 0.85
+    settings.languages.required = []
+    settings.custom_ranks.extras.dubbed.fetch = True
+
+    from RTN import RTN, DefaultRanking
+
+    raw_title = "Dragon.Ball.Super.2015-2018.MULTi.720p.BluRay.x264.AC3-EMiS"
+    correct_title = "Super Dragon Ball Heroes"
+
+    with pytest.raises(GarbageTorrent) as exc:
+        _rank_with_language_compat(
+            RTN(settings, DefaultRanking()),
+            settings,
+            raw_title=raw_title,
+            infohash=INFOHASH,
+            correct_title=correct_title,
+            remove_trash=True,
+            aliases={},
+        )
+
+    assert bucket_rtn_reason(exc.value) == "title_mismatch"
+

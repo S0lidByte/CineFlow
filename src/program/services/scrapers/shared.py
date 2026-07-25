@@ -296,6 +296,48 @@ def _apply_anime_extras_dubbed_soft_opt_in(
     return relaxed
 
 
+def _should_retry_with_title_alias(
+    error: GarbageTorrent,
+    *,
+    item: MediaItem | object | None,
+    correct_title: str,
+    aliases: dict[str, list[str]],
+    raw_title: str,
+) -> str | None:
+    """Return a candidate title alias when a title mismatch is caused by arc subtitles.
+
+    For anime and series releases with arc/sub-season titles in release names
+    (e.g., 'Super Dragon Ball Heroes Big Bang Mission'), RTN's parser extracts
+    the arc subtitle as part of parsed_title. When parsed_title contains or
+    is contained by correct_title (or any known alias), return parsed_title so
+    ranking can retry with the arc subtitle accepted.
+    """
+
+    if "does not match the correct title" not in str(error):
+        return None
+
+    try:
+        parsed_title = parse(raw_title).parsed_title
+    except Exception:
+        return None
+
+    if not parsed_title or not correct_title:
+        return None
+
+    known = _collect_item_alias_names(correct_title, aliases)
+    norm_parsed = _normalize_alias_title(parsed_title)
+
+    if not norm_parsed:
+        return None
+
+    for name in known:
+        if len(name) >= 4:
+            if name in norm_parsed or norm_parsed in name:
+                return parsed_title
+
+    return None
+
+
 def _rank_with_language_compat(
     rtn_instance: RTN,
     settings: SettingsModel,
@@ -307,15 +349,44 @@ def _rank_with_language_compat(
     aliases: dict[str, list[str]],
     item: MediaItem | object | None = None,
 ) -> Torrent:
+    current_aliases = aliases
+    title_alias = None
+
     try:
         return rtn_instance.rank(
             raw_title=raw_title,
             infohash=infohash,
             correct_title=correct_title,
             remove_trash=remove_trash,
-            aliases=aliases,
+            aliases=current_aliases,
         )
     except GarbageTorrent as e:
+        title_alias = _should_retry_with_title_alias(
+            e,
+            item=item,
+            correct_title=correct_title,
+            aliases=current_aliases,
+            raw_title=raw_title,
+        )
+        if title_alias:
+            current_aliases = {k: list(v) for k, v in current_aliases.items()}
+            xx_list = current_aliases.setdefault("xx", [])
+            if title_alias not in xx_list:
+                xx_list.append(title_alias)
+            logger.trace(
+                f"Retrying ranking with title arc alias '{title_alias}' for {correct_title!r}"
+            )
+            try:
+                return rtn_instance.rank(
+                    raw_title=raw_title,
+                    infohash=infohash,
+                    correct_title=correct_title,
+                    remove_trash=remove_trash,
+                    aliases=current_aliases,
+                )
+            except GarbageTorrent as inner_e:
+                e = inner_e
+
         retry_untagged = _should_retry_as_untagged_english(e, settings, raw_title)
         retry_multi = _should_retry_as_multi_audio_for_anime(
             e, item=item, raw_title=raw_title
@@ -341,7 +412,7 @@ def _rank_with_language_compat(
             infohash=infohash,
             correct_title=correct_title,
             remove_trash=remove_trash,
-            aliases=aliases,
+            aliases=current_aliases,
         )
 
 
