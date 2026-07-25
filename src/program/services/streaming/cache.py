@@ -716,6 +716,16 @@ class Cache:
         except Exception:
             pass
 
+    def sync_size_snapshot(self) -> tuple[int, int]:
+        """Thread-safe size/entry snapshot for asyncio callers (e.g. /metrics).
+
+        Must not use ``trio.Lock`` — FastAPI runs under asyncio, while VFS
+        cache ops run under trio. Reading under ``_thread_lock`` alone is safe
+        for metrics (same inner critical section as ``locks()``).
+        """
+        with self._thread_lock:
+            return int(self._total_bytes), int(len(self._index))
+
     async def stats(self) -> CacheSnapshot:
         s = self._metrics.snapshot()
 

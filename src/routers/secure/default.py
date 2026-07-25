@@ -54,14 +54,15 @@ async def prometheus_metrics() -> Response:
     if metrics_enabled:
         try:
             cache = di[Cache]
-            stats = await cache.stats()
-            prom.set_size_gauges(
-                total_bytes=int(stats.get("total_bytes") or 0),
-                entries=int(stats.get("entries") or 0),
-            )
+            # Sync snapshot only — Cache.stats() uses trio.Lock and 500s under asyncio.
+            total_bytes, entries = cache.sync_size_snapshot()
+            prom.set_size_gauges(total_bytes=total_bytes, entries=entries)
         except (KeyError, ServiceError):
             # Cache not registered yet — avoid serving stale size/entry gauges.
             prom.set_size_gauges(total_bytes=0, entries=0)
+        except Exception:
+            logger.exception("Failed to refresh cache size gauges for /metrics")
+            # Still serve process counters; leave gauges as last known values.
     else:
         prom.set_size_gauges(total_bytes=0, entries=0)
 

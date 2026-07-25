@@ -80,7 +80,7 @@ def test_cache_metrics_disabled_skips_prometheus(tmp_path: Path) -> None:
     assert written_after == written_before
 
 
-def test_prometheus_metrics_endpoint_requires_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+def _metrics_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     import auth
 
     monkeypatch.setattr(
@@ -105,7 +105,11 @@ def test_prometheus_metrics_endpoint_requires_auth(monkeypatch: pytest.MonkeyPat
         default_router_mod.router,
         dependencies=[Depends(resolve_api_key)],
     )
-    client = TestClient(app)
+    return TestClient(app)
+
+
+def test_prometheus_metrics_endpoint_requires_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _metrics_client(monkeypatch)
 
     denied = client.get("/metrics")
     assert denied.status_code == 401
@@ -132,6 +136,34 @@ def test_prometheus_metrics_endpoint_requires_auth(monkeypatch: pytest.MonkeyPat
             prom.SIZE_BYTES.set(size_before)
         if entries_before is not None:
             prom.ENTRIES.set(entries_before)
+
+
+def test_prometheus_metrics_endpoint_with_live_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Regression: live Cache uses trio.Lock; /metrics must not await it under asyncio."""
+    client = _metrics_client(monkeypatch)
+    cache = _make_cache(tmp_path)
+    payload = b"abcdefghij" * 50
+
+    async def _seed() -> None:
+        await cache.put("movie.mkv", 0, payload)
+
+    trio.run(_seed)
+
+    previous_cache = di[Cache] if Cache in di else None
+    try:
+        di[Cache] = cache
+        ok = client.get("/metrics", headers={"x-api-key": "k" * 32})
+        assert ok.status_code == 200
+        assert "riven_cache_hits_total" in ok.text
+        assert f"riven_cache_size_bytes {len(payload)}" in ok.text
+        assert "riven_cache_entries 1" in ok.text
+    finally:
+        if previous_cache is not None:
+            di[Cache] = previous_cache
+        elif Cache in di:
+            del di[Cache]
 
 
 def test_render_metrics_includes_gauge_names() -> None:
