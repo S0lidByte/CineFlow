@@ -67,7 +67,16 @@ DENY_KEY_HELP: dict[str, str] = {
     "extras_three_d": "3D releases. Log: denied by: extras_three_d when fetch is off.",
     "extras_converted": "Converted flag. Log: denied by: extras_converted when fetch is off.",
     "extras_documentary": "Documentary edition. Log: denied by: extras_documentary when fetch is off.",
-    "extras_dubbed": "Dubbed / MULTi / Dual Audio. Log: denied by: extras_dubbed when fetch is off.",
+    "extras_dubbed": (
+        "Dubbed / MULTi / Dual Audio. Log: denied by: extras_dubbed when fetch is off. "
+        "Anime soft-opt-in: Scraping → anime_allow_extras_dubbed (enable extras.dubbed.fetch "
+        "for is_anime items only without changing global ranking)."
+    ),
+    "missing_required_language": (
+        "Release languages do not include a required language "
+        "(ranking.languages.required). Anime soft-opt-in: Scraping → "
+        "anime_allow_multi_audio retries MULTI/dual-audio titles after this reject."
+    ),
     "extras_edition": "Special edition tags. Log: denied by: extras_edition when fetch is off.",
     "extras_hardcoded": "Hardcoded subs. Log: denied by: extras_hardcoded when fetch is off.",
     "extras_network": "Network tag. Log: denied by: extras_network when fetch is off.",
