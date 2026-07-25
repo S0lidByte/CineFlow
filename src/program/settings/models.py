@@ -112,7 +112,7 @@ class DownloadersModel(Observable):
         description=(
             "Optional minimum average bitrate for movies "
             "(MiB per minute of runtime; 0 = disabled). "
-            "Requires item runtime; riven-ts parity."
+            "Uses MediaItem.runtime from TMDB when available; riven-ts parity."
         ),
     )
     episode_min_avg_bitrate: float = Field(
@@ -121,7 +121,8 @@ class DownloadersModel(Observable):
         description=(
             "Optional minimum average bitrate for episodes "
             "(MiB per minute of runtime; 0 = disabled). "
-            "Requires item runtime; riven-ts parity."
+            "Uses MediaItem.runtime from TVDB (episode or series average); "
+            "riven-ts parity."
         ),
     )
     proxy_url: EmptyOrUrl = Field(

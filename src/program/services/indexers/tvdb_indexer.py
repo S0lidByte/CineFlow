@@ -11,6 +11,7 @@ from program.apis.tvdb_api import SeriesRelease, TVDBApi
 from program.core.runner import MediaItemGenerator, RunnerResult
 from program.media.item import Episode, MediaItem, Season, Show
 from program.services.indexers.base import BaseIndexer
+from program.services.indexers.runtime import coerce_runtime_minutes
 from schemas.tvdb import EpisodeBaseRecord, SeasonExtendedRecord
 
 
@@ -220,6 +221,7 @@ class TVDBIndexer(BaseIndexer):
             show.rating = None  # TVDB doesn't provide ratings
             show.content_rating = content_rating
             show.tvdb_status = tvdb_status
+            show.runtime = coerce_runtime_minutes(show_data.average_runtime)
 
             # Update seasons and episodes (add new ones, update existing ones)
             self._add_seasons_to_show(show, show_data)
@@ -397,6 +399,7 @@ class TVDBIndexer(BaseIndexer):
                     "rating": rating,
                     "content_rating": content_rating,
                     "tvdb_status": tvdb_status,
+                    "runtime": coerce_runtime_minutes(show_data.average_runtime),
                 }
             )
         except Exception as e:
@@ -600,6 +603,9 @@ class TVDBIndexer(BaseIndexer):
             episode.aired_at = aired_at
             episode.year = year
             episode.absolute_number = episode_data.absolute_number
+            episode_runtime = coerce_runtime_minutes(episode_data.runtime)
+            if episode_runtime is not None:
+                episode.runtime = episode_runtime
 
             # Note: is_anime and other attributes are inherited from show via __getattribute__
 
@@ -643,6 +649,7 @@ class TVDBIndexer(BaseIndexer):
                     "is_anime": season.is_anime,
                     "requested_at": datetime.now(),
                     "absolute_number": episode_data.absolute_number,
+                    "runtime": coerce_runtime_minutes(episode_data.runtime),
                 }
             )
 

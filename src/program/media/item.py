@@ -139,6 +139,10 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
     ## US content rating (G, PG, PG-13, R, NC-17, TV-Y, TV-PG, TV-14, TV-MA, etc.)
     content_rating: Mapped[str | None]
 
+    ## Runtime in minutes (TMDB movie runtime / TVDB episode or series average).
+    ## Used by optional debrid average-bitrate floors.
+    runtime: Mapped[float | None] = mapped_column(sqlalchemy.Float, default=None)
+
     updated: Mapped[bool | None] = mapped_column(sqlalchemy.Boolean, default=False)
     guid: Mapped[str | None]
     overseerr_id: Mapped[int | None]
@@ -215,6 +219,7 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
         self.is_anime = item.get("is_anime", False)
         self.rating = item.get("rating")
         self.content_rating = item.get("content_rating")
+        self.runtime = item.get("runtime")
 
         # Media server related
         self.updated = item.get("updated", False)
@@ -334,10 +339,14 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
         stream_id = getattr(stream, "id", None)
         item_id = getattr(self, "id", None)
         if session is not None and stream_id is not None and item_id is not None:
-            existing = session.query(StreamBlacklistRelation.id).filter_by(
-                media_item_id=item_id,
-                stream_id=stream_id,
-            ).first()
+            existing = (
+                session.query(StreamBlacklistRelation.id)
+                .filter_by(
+                    media_item_id=item_id,
+                    stream_id=stream_id,
+                )
+                .first()
+            )
             if existing is not None:
                 session.expire(self, ["blacklisted_streams"])
                 if removed_from_active:
@@ -1153,6 +1162,7 @@ class Season(MediaItem):
             "rating",
             "content_rating",
             "poster_path",
+            "runtime",
         }
 
         # Get the value normally first
@@ -1293,6 +1303,7 @@ class Episode(MediaItem):
             "rating",
             "content_rating",
             "poster_path",
+            "runtime",
         }
 
         # Get the value normally first

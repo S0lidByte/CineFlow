@@ -10,6 +10,9 @@ from program.apis.trakt_api import TraktAPI
 from program.core.runner import MediaItemGenerator, RunnerResult
 from program.media.item import MediaItem, Movie
 from program.services.indexers.base import BaseIndexer
+from program.services.indexers.runtime import (
+    coerce_runtime_minutes as _coerce_runtime_minutes,
+)
 
 
 class TMDBIndexer(BaseIndexer):
@@ -188,6 +191,7 @@ class TMDBIndexer(BaseIndexer):
             movie.aliases = aliases
             movie.rating = rating
             movie.content_rating = content_rating
+            movie.runtime = _coerce_runtime_minutes(movie_details.runtime)
 
             return True
 
@@ -321,6 +325,7 @@ class TMDBIndexer(BaseIndexer):
                     "aliases": aliases,
                     "rating": rating,
                     "content_rating": content_rating,
+                    "runtime": _coerce_runtime_minutes(movie_details.runtime),
                 }
             )
         except Exception as e:
