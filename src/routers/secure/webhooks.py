@@ -2,16 +2,24 @@ import hmac
 import json
 from typing import Any, cast
 
+from cachetools import TTLCache
 from fastapi import APIRouter, HTTPException, Request, status
 from kink import di
 from loguru import logger
 from pydantic import BaseModel
 
+from program.apis.trakt_api import TraktAPI
 from program.media.item import MediaItem
 from program.program import Program
 from program.services.content.overseerr import Overseerr
 from program.settings import settings_manager
-from program.utils.plex_webhook import sanitize_plex_guids
+from program.utils.plex_trakt_metrics import record_history_result
+from program.utils.plex_webhook import (
+    build_trakt_history_payload,
+    history_idempotency_key,
+    plex_media_kind,
+    sanitize_plex_guids,
+)
 
 from ..models.overseerr import OverseerrWebhook
 
@@ -22,6 +30,9 @@ router = APIRouter(
 
 WEBHOOK_SECRET_HEADER = "x-webhook-secret"
 PLEX_SCROBBLE_EVENT = "media.scrobble"
+
+# Dedup repeated Plex/Tautulli deliveries of the same scrobble (24h TTL).
+_HISTORY_IDEMPOTENCY: TTLCache[str, bool] = TTLCache(maxsize=4096, ttl=86400)
 
 
 class OverseerrWebhookResponse(BaseModel):
@@ -125,6 +136,56 @@ async def _parse_plex_webhook_payload(request: Request) -> dict[str, Any]:
     return cast(dict[str, Any], parsed_body)
 
 
+def _sync_plex_scrobble_to_trakt(
+    *,
+    metadata: dict[str, Any] | None,
+    guids: list[str],
+) -> str:
+    """Attempt Trakt history POST. Returns a short status message for the response."""
+
+    media_kind = plex_media_kind(metadata)
+    idem_key = history_idempotency_key(
+        media_kind=media_kind, guids=guids, metadata=metadata
+    )
+    if idem_key in _HISTORY_IDEMPOTENCY:
+        record_history_result("idempotent")
+        logger.debug(f"Plex scrobble idempotent skip key={idem_key}")
+        return "idempotent (already synced)"
+
+    payload = build_trakt_history_payload(metadata, guids)
+    if not payload:
+        record_history_result("skipped")
+        logger.warning(
+            f"Plex scrobble skipped (no Trakt mapping) type={media_kind} guids={guids}"
+        )
+        return "skipped (no Trakt mapping)"
+
+    try:
+        trakt_api = di[TraktAPI]
+    except Exception:
+        record_history_result("failed")
+        logger.error("TraktAPI not available in DI container")
+        return "failed (TraktAPI unavailable)"
+
+    if not trakt_api.oauth_connected():
+        record_history_result("skipped")
+        logger.warning("Plex scrobble skipped: Trakt OAuth not connected")
+        return "skipped (Trakt OAuth not connected)"
+
+    ok = trakt_api.add_items_to_watched_history(payload)
+    if ok:
+        _HISTORY_IDEMPOTENCY[idem_key] = True
+        record_history_result("success")
+        logger.log(
+            "API",
+            f"Plex scrobble synced to Trakt type={media_kind} guids={guids}",
+        )
+        return "synced to Trakt"
+
+    record_history_result("failed")
+    return "failed (Trakt history POST)"
+
+
 @router.post(
     "/overseerr",
     response_model=OverseerrWebhookResponse,
@@ -214,10 +275,10 @@ async def overseerr(request: Request) -> OverseerrWebhookResponse:
     response_model=PlexWebhookResponse,
 )
 async def plex_webhook(request: Request) -> PlexWebhookResponse:
-    """Dry-run Plex webhook: parse ``media.scrobble``, map/log provider GUIDs.
+    """Plex webhook: parse ``media.scrobble``, map provider GUIDs, optionally sync.
 
-    Does **not** write to Trakt. Configure Plex (Pass) or Tautulli to POST here
-    with API key (+ optional ``webhook_secret``).
+    When ``content.plex_webhook.sync_to_trakt`` is false (default), logs GUIDs only.
+    When true and Trakt OAuth is connected, POSTs to Trakt ``/sync/history``.
     """
 
     try:
@@ -241,27 +302,36 @@ async def plex_webhook(request: Request) -> PlexWebhookResponse:
             metadata = None
 
         guids = sanitize_plex_guids(metadata)
-        media_type = ""
-        if metadata:
-            type_val = cast(
-                object,
-                metadata.get("type") or metadata.get("librarySectionType") or "",
-            )
-            media_type = str(type_val)
+        media_type = plex_media_kind(metadata)
 
-        logger.log(
-            "API",
-            f"Plex scrobble dry-run type={media_type or 'unknown'} guids={guids}",
+        sync_enabled = bool(
+            settings_manager.settings.content.plex_webhook.sync_to_trakt
         )
 
+        if not sync_enabled:
+            record_history_result("dry_run")
+            logger.log(
+                "API",
+                f"Plex scrobble dry-run type={media_type} guids={guids}",
+            )
+            return PlexWebhookResponse(
+                success=True,
+                event=event,
+                guids=guids,
+                message="dry-run (no Trakt write)",
+            )
+
+        message = _sync_plex_scrobble_to_trakt(metadata=metadata, guids=guids)
+        success = not message.startswith("failed")
         return PlexWebhookResponse(
-            success=True,
+            success=success,
             event=event,
             guids=guids,
-            message="dry-run (no Trakt write)",
+            message=message,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to process Plex webhook: {e}")
+        record_history_result("failed")
         return PlexWebhookResponse(success=False, message="processing failed")

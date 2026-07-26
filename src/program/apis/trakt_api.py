@@ -1,5 +1,7 @@
 import os
 import re
+import threading
+import time
 from collections.abc import Callable
 from typing import Any, Generic, Literal, TypeVar
 from urllib.parse import urlencode
@@ -93,7 +95,7 @@ class TraktAPI:
         self.session = SmartSession(
             base_url=self.BASE_URL,
             rate_limits={
-                # 1000 calls per 5 minutes
+                # 1000 calls per 5 minutes (GET). POSTs also use _post_history_lock.
                 "api.trakt.tv": {
                     "rate": 1000 / 300,
                     "capacity": 1000,
@@ -102,6 +104,9 @@ class TraktAPI:
             retries=2,
             backoff_factor=0.3,
         )
+        # Trakt AUTHED_API_POST_LIMIT ≈ 1 call/sec — serialize history writes.
+        self._post_history_lock = threading.Lock()
+        self._last_history_post_at = 0.0
 
         self.headers = {
             "Content-Type": "application/json",
@@ -610,3 +615,64 @@ class TraktAPI:
 
     def oauth_connected(self) -> bool:
         return bool((self.settings.oauth.access_token or "").strip())
+
+    def add_items_to_watched_history(
+        self, payload: dict[str, Any], *, allow_refresh: bool = True
+    ) -> bool:
+        """POST items to ``/sync/history`` (OAuth required).
+
+        Serializes calls to respect Trakt's ~1 POST/sec auth limit. On 401,
+        refreshes tokens once and retries. On 429, sleeps ``Retry-After`` (capped)
+        once and retries.
+        """
+
+        if not self.oauth_connected():
+            logger.warning("Cannot POST Trakt history: OAuth not connected")
+            return False
+
+        if not payload or not any(
+            payload.get(key) for key in ("movies", "shows", "seasons", "episodes")
+        ):
+            logger.warning("Cannot POST Trakt history: empty payload")
+            return False
+
+        with self._post_history_lock:
+            elapsed = time.monotonic() - self._last_history_post_at
+            if elapsed < 1.05:
+                time.sleep(1.05 - elapsed)
+
+            response = self.session.post(
+                f"{self.BASE_URL}/sync/history",
+                json=payload,
+                headers=self.headers,
+            )
+            self._last_history_post_at = time.monotonic()
+
+        if response.ok:
+            return True
+
+        if (
+            response.status_code == 401
+            and allow_refresh
+            and (self.settings.oauth.refresh_token or "").strip()
+            and self.refresh_oauth_tokens()
+        ):
+            return self.add_items_to_watched_history(payload, allow_refresh=False)
+
+        if response.status_code == 429 and allow_refresh:
+            retry_after_raw = response.headers.get("Retry-After") or "1"
+            try:
+                retry_after = min(max(float(retry_after_raw), 0.0), 30.0)
+            except ValueError:
+                retry_after = 1.0
+            logger.warning(
+                f"Trakt history rate-limited; retrying after {retry_after:.1f}s"
+            )
+            time.sleep(retry_after)
+            return self.add_items_to_watched_history(payload, allow_refresh=False)
+
+        body_preview = (getattr(response, "text", None) or "")[:300]
+        logger.error(
+            f"Failed to POST Trakt history: {response.status_code} {body_preview}"
+        )
+        return False
