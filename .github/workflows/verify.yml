@@ -94,4 +94,6 @@ jobs:
             src/tests/test_trakt_client_id.py \
             src/tests/test_trakt_oauth_refresh.py \
             src/tests/test_trakt_extract_ids.py \
-            src/tests/test_plex_trakt_history.py
+            src/tests/test_plex_trakt_history.py \
+            src/tests/test_phase2c_dep_smoke.py \
+            src/tests/test_guessit_subliminal_harness.py
