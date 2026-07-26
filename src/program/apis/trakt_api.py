@@ -157,7 +157,7 @@ class TraktAPI:
 
         all_data = list[DataModel]()
 
-        def _request_page(requested_page: int):
+        def _request_page(requested_page: int, *, allow_refresh: bool = True):
             response = self.session.get(
                 url,
                 params={
@@ -196,6 +196,14 @@ class TraktAPI:
                     data=validated_data,
                     has_next_page=has_next_page,
                 )
+            elif (
+                response.status_code == 401
+                and allow_refresh
+                and (self.settings.oauth.refresh_token or "").strip()
+                and self.refresh_oauth_tokens()
+            ):
+                # One-shot: refresh Bearer then retry this page once.
+                return _request_page(requested_page, allow_refresh=False)
             elif response.status_code == 429:
                 logger.warning("Rate limit exceeded. Retrying after rate limit period.")
 
@@ -461,6 +469,28 @@ class TraktAPI:
 
         return f"{self.OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
 
+    def _persist_oauth_tokens(self, access_token: str, refresh_token: str) -> None:
+        """Soft-persist OAuth tokens and update Bearer headers (no observer notify).
+
+        Bypasses Observable.__setattr__, which would fire notify_observers() →
+        initialize_services() and destroy in-flight downloads / remount VFS.
+        """
+
+        object.__setattr__(self.settings.oauth, "access_token", access_token)
+        object.__setattr__(self.settings.oauth, "refresh_token", refresh_token)
+        bearer = f"Bearer {access_token}"
+        self.headers["Authorization"] = bearer
+        self.session.headers["Authorization"] = bearer
+        settings_manager.save()
+
+    def _oauth_token_headers(self, api_key: str = "") -> dict[str, str]:
+        """Headers for unauthenticated ``/oauth/token`` POSTs (no Bearer)."""
+
+        headers = self.headers.copy()
+        headers["trakt-api-key"] = self.oauth_client_id or api_key or self.client_id
+        headers.pop("Authorization", None)
+        return headers
+
     def handle_oauth_callback(self, api_key: str, code: str) -> bool:
         """Handle the OAuth callback and exchange the code for an access token.
 
@@ -490,11 +520,7 @@ class TraktAPI:
         # trakt-api-key must be the same Client ID used in the authorize + token body.
         # Prefer oauth_client_id over settings api_key so a mismatched Api Key field
         # cannot break an otherwise valid OAuth exchange.
-        headers = self.headers.copy()
-        headers["trakt-api-key"] = self.oauth_client_id or api_key or self.client_id
-        # Token exchange is unauthenticated; a stale Bearer confuses some gateways.
-        headers.pop("Authorization", None)
-
+        headers = self._oauth_token_headers(api_key)
         response = self.session.post(token_url, json=payload, headers=headers)
 
         if response.ok:
@@ -504,26 +530,72 @@ class TraktAPI:
                 refresh_token: str
 
             token_data = OAuthTokenResponse.model_validate(response.json())
-
-            # Write tokens on the oauth sub-model, bypassing Observable.__setattr__,
-            # which would fire notify_observers() → initialize_services() and destroy any
-            # in-flight downloads. settings_manager.save() persists the values to disk.
-            object.__setattr__(
-                self.settings.oauth, "access_token", token_data.access_token
+            self._persist_oauth_tokens(
+                token_data.access_token, token_data.refresh_token
             )
-            object.__setattr__(
-                self.settings.oauth, "refresh_token", token_data.refresh_token
-            )
-
-            settings_manager.save()  # Save the tokens to settings
-
             return True
-        else:
-            body_preview = (getattr(response, "text", None) or "")[:300]
+
+        body_preview = (getattr(response, "text", None) or "")[:300]
+        logger.error(
+            f"Failed to obtain OAuth token: {response.status_code} {body_preview}"
+        )
+        return False
+
+    def refresh_oauth_tokens(self) -> bool:
+        """Exchange ``refresh_token`` for a new access/refresh pair (soft persist).
+
+        On failure, clears stored tokens so the UI shows disconnected.
+        """
+
+        refresh_token = (self.settings.oauth.refresh_token or "").strip()
+        if (
+            not self.oauth_client_id
+            or not self.oauth_client_secret
+            or not self.oauth_redirect_uri
+            or not refresh_token
+        ):
             logger.error(
-                f"Failed to obtain OAuth token: {response.status_code} {body_preview}"
+                "OAuth refresh requires client id/secret, redirect_uri, and refresh_token"
             )
             return False
+
+        token_url = f"{self.BASE_URL}/oauth/token"
+        payload = {
+            "refresh_token": refresh_token,
+            "client_id": self.oauth_client_id,
+            "client_secret": self.oauth_client_secret,
+            "redirect_uri": self.oauth_redirect_uri,
+            "grant_type": "refresh_token",
+        }
+        headers = self._oauth_token_headers()
+        response = self.session.post(token_url, json=payload, headers=headers)
+
+        if response.ok:
+            try:
+
+                class OAuthTokenResponse(BaseModel):
+                    access_token: str
+                    refresh_token: str
+
+                token_data = OAuthTokenResponse.model_validate(response.json())
+            except Exception as exc:
+                body_preview = (getattr(response, "text", None) or "")[:300]
+                logger.error(f"Invalid OAuth refresh response: {exc} {body_preview}")
+                self.clear_oauth_tokens()
+                return False
+
+            self._persist_oauth_tokens(
+                token_data.access_token, token_data.refresh_token
+            )
+            logger.info("Trakt OAuth tokens refreshed")
+            return True
+
+        body_preview = (getattr(response, "text", None) or "")[:300]
+        logger.error(
+            f"Failed to refresh OAuth token: {response.status_code} {body_preview}"
+        )
+        self.clear_oauth_tokens()
+        return False
 
     def clear_oauth_tokens(self) -> None:
         """Clear stored OAuth tokens without notifying observers (no VFS remount)."""
