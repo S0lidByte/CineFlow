@@ -1,7 +1,82 @@
 """Utilities for subtitle handling, including OpenSubtitles hash calculation"""
 
+import re
 import struct
 from typing import BinaryIO
+
+# Hash / tag matches are trusted; all weaker match types need a title check.
+STRONG_SUBTITLE_MATCH_TYPES = frozenset({"moviehash", "tag"})
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_STOP_WORDS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "of",
+        "and",
+        "or",
+        "to",
+        "in",
+        "on",
+        "at",
+        "for",
+        "vs",
+        "versus",
+    }
+)
+_SEASON_EPISODE_TOKEN = re.compile(
+    r"^(?:s\d{1,2}e\d{1,3}|\d{1,2}x\d{1,3}|season|episode|s\d{1,2}|e\d{1,3})$"
+)
+
+
+def _significant_title_tokens(text: str) -> list[str]:
+    """Tokenize a title/filename into significant alphanumeric words."""
+    tokens = _TOKEN_RE.findall((text or "").lower())
+    return [
+        token
+        for token in tokens
+        if len(token) > 1
+        and token not in _STOP_WORDS
+        and not token.isdigit()
+        and not _SEASON_EPISODE_TOKEN.match(token)
+    ]
+
+
+def subtitle_title_matches(expected_title: str, *candidates: str | None) -> bool:
+    """
+    Return True when candidate movie_name/filename text matches expected_title.
+
+    Used to reject fulltext (and other weak) OpenSubtitles hits that share
+    season/episode numbers but belong to a different show (e.g. Game of Thrones
+    for Stargate Atlantis).
+    """
+    expected_tokens = _significant_title_tokens(expected_title)
+    if not expected_tokens:
+        return True
+
+    blob = " ".join(candidate for candidate in candidates if candidate)
+    if not blob.strip():
+        # No title metadata to compare — do not accept weak matches blindly.
+        return False
+
+    found = set(_significant_title_tokens(blob))
+    return all(token in found for token in expected_tokens)
+
+
+def subtitle_result_title_ok(
+    expected_title: str,
+    *,
+    matched_by: str | None,
+    movie_name: str | None = None,
+    filename: str | None = None,
+) -> bool:
+    """
+    Accept strong hash/tag matches unconditionally; otherwise require title match.
+    """
+    if (matched_by or "").lower() in STRONG_SUBTITLE_MATCH_TYPES:
+        return True
+    return subtitle_title_matches(expected_title, movie_name, filename)
 
 
 def calculate_opensubtitles_hash(file_handle: BinaryIO, file_size: int) -> str:
