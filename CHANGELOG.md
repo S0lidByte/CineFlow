@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.0](https://github.com/S0lidByte/CineFlow/compare/v1.26.1...v1.27.0) (2026-07-26)
+
+
+### Features
+
+* **scrapers:** add StremThru Torznab scraper ([#162](https://github.com/S0lidByte/CineFlow/issues/162)) ([ae8ec20](https://github.com/S0lidByte/CineFlow/commit/ae8ec206a4d7f11dc4d913a042ebd7fb89196238))
+
 ## [1.26.1](https://github.com/S0lidByte/CineFlow/compare/v1.26.0...v1.26.1) (2026-07-26)
 
 
