@@ -168,3 +168,60 @@ def test_cache_rebuilds_index_on_restart(tmp_path: Path) -> None:
         assert stats["hits"] == 1
 
     trio.run(_reload)
+
+
+def test_cache_get_miss_does_not_create_fanout_dirs(tmp_path: Path) -> None:
+    """Reads must not mkdir fanout dirs (previously held the global lock)."""
+    cache = _make_cache(tmp_path)
+
+    async def _run() -> None:
+        assert await cache.get("missing.mkv", 0, 99) == b""
+
+    trio.run(_run)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_cache_concurrent_gets_hit(tmp_path: Path) -> None:
+    cache = _make_cache(tmp_path)
+    payload = b"concurrent-hit-payload!!"
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, payload)
+        results: list[bytes] = []
+
+        async def one() -> None:
+            results.append(await cache.get("movie.mkv", 0, len(payload) - 1))
+
+        async with trio.open_nursery() as nursery:
+            for _ in range(24):
+                nursery.start_soon(one)
+
+        assert len(results) == 24
+        assert all(r == payload for r in results)
+        stats = await cache.stats()
+        assert stats["hits"] == 24
+
+    trio.run(_run)
+
+
+def test_cache_eviction_unlinks_without_holding_thread_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LRU/TTL unlink must run after index lock release (Plex multi-open)."""
+    cache = _make_cache(tmp_path, max_size_bytes=100)
+    held_during_unlink: list[bool] = []
+    real_unlink = Path.unlink
+
+    def tracking_unlink(self: Path, *args: object, **kwargs: object) -> None:
+        held_during_unlink.append(cache._thread_lock.locked())
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", tracking_unlink)
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, b"1" * 60)
+        await cache.put("movie.mkv", 60, b"2" * 60)
+
+    trio.run(_run)
+    assert held_during_unlink, "expected eviction to unlink at least one file"
+    assert all(not held for held in held_during_unlink)

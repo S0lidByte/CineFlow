@@ -259,11 +259,17 @@ class Cache:
         return h
 
     def _file_for(self, key: str) -> Path:
-        # Two-level fanout to avoid too many files in one dir
+        """Return cache file path without creating directories.
+
+        Read paths (``get`` / ``has``) must not mkdir under the global lock —
+        fanout dirs are created only on write via ``_ensure_parent``.
+        """
         sub = key[:2]
-        p = self.cfg.cache_dir / sub
-        p.mkdir(parents=True, exist_ok=True)
-        return p / key
+        return self.cfg.cache_dir / sub / key
+
+    def _ensure_parent(self, path: Path) -> None:
+        """Create the two-level fanout directory for a cache file (writes only)."""
+        path.parent.mkdir(parents=True, exist_ok=True)
 
     def _metadata_file_for(self, key: str) -> Path:
         """Get the metadata sidecar file path for a cache entry."""
@@ -276,7 +282,9 @@ class Cache:
         metadata = {"cache_key": cache_key, "start": start}
 
         try:
-            with self._metadata_file_for(key).open("w") as f:
+            meta_path = self._metadata_file_for(key)
+            self._ensure_parent(meta_path)
+            with meta_path.open("w") as f:
                 json.dump(metadata, f)
         except Exception as e:
             logger.warning(f"Failed to write cache metadata for {key}: {e}")
@@ -308,7 +316,23 @@ class Cache:
         except Exception as e:
             logger.warning(f"Failed to remove cache metadata for {key}: {e}")
 
+    def _unlink_cache_files(self, keys: list[str]) -> None:
+        """Delete cache payload + metadata files outside the index lock."""
+        for k in keys:
+            fp = self._file_for(k)
+            try:
+                if fp.exists():
+                    fp.unlink()
+            except Exception:
+                pass
+            self._remove_metadata(k)
+
     async def _evict_lru(self, need_bytes: int = 0) -> None:
+        # Index updates under lock; disk unlink after release so concurrent
+        # cache.get() under Plex multi-open is not blocked on unlink I/O.
+        to_unlink: list[str] = []
+        evicted = 0
+
         async with self.locks():
             target = max(0, self._total_bytes + need_bytes - self.cfg.max_size_bytes)
 
@@ -327,25 +351,20 @@ class Cache:
                     if not lst:
                         self._by_path.pop(cache_entry.cache_key, None)
 
-                fp = self._file_for(k)
-
-                try:
-                    if fp.exists():
-                        fp.unlink()
-
-                    # Also remove metadata file
-                    self._remove_metadata(k)
-                except Exception:
-                    pass
-
+                to_unlink.append(k)
                 self._total_bytes -= cache_entry.size
                 target -= cache_entry.size
-                self._metrics.record_evictions(1)
+                evicted += 1
+
+        if to_unlink:
+            self._unlink_cache_files(to_unlink)
+        if evicted:
+            self._metrics.record_evictions(evicted)
 
     async def _evict_ttl(self) -> None:
         ttl = self.cfg.ttl_seconds
         now = time.time()
-        removed = 0
+        to_unlink: list[str] = []
 
         async with self.locks():
             for k in list(self._index.keys()):
@@ -355,17 +374,6 @@ class Cache:
                     continue
 
                 if now - cache_entry.mtime > ttl:
-                    fp = self._file_for(k)
-
-                    try:
-                        if fp.exists():
-                            fp.unlink()
-
-                        # Also remove metadata file
-                        self._remove_metadata(k)
-                    except Exception:
-                        pass
-
                     self._index.pop(k, None)
                     lst = self._by_path.get(cache_entry.cache_key)
 
@@ -379,10 +387,11 @@ class Cache:
                             self._by_path.pop(cache_entry.cache_key, None)
 
                     self._total_bytes -= cache_entry.size
-                    removed += 1
+                    to_unlink.append(k)
 
-        if removed:
-            self._metrics.record_evictions(removed)
+        if to_unlink:
+            self._unlink_cache_files(to_unlink)
+            self._metrics.record_evictions(len(to_unlink))
 
     async def get(self, cache_key: str, start: int, end: int) -> bytes:
         needed_len = max(0, end - start + 1)
@@ -391,6 +400,7 @@ class Cache:
             return b""
 
         get_start_time = time.time()
+        lock_wait_s = 0.0
 
         # Fast path: Try to find a single chunk that contains the entire request
         # This avoids holding the lock during file I/O for the common case
@@ -398,7 +408,9 @@ class Cache:
         chunk_file = None
         chunk_start_offset = 0
 
+        lock_acquire = time.time()
         async with self.locks():
+            lock_wait_s += time.time() - lock_acquire
             s_list = self._by_path.get(cache_key)
 
             if s_list:
@@ -446,7 +458,9 @@ class Cache:
                 if len(result) == needed_len:
                     # Update LRU (move to end) but only update timestamp periodically
                     # to reduce lock contention and index modifications
+                    lock_acquire = time.time()
                     async with self.locks():
+                        lock_wait_s += time.time() - lock_acquire
                         if chunk_key in self._index:
                             cache_entry = self._index[chunk_key]
                             self._index.move_to_end(chunk_key, last=True)
@@ -470,7 +484,10 @@ class Cache:
 
                     if total_time > 0.1:  # Log if cache.get() takes >100ms
                         logger.warning(
-                            f"Slow cache.get(): {total_time * 1000:.0f}ms for {needed_len / (1024 * 1024):.2f}MB (read: {read_time * 1000:.0f}ms)"
+                            f"Slow cache.get(): {total_time * 1000:.0f}ms for "
+                            f"{needed_len / (1024 * 1024):.2f}MB "
+                            f"(read: {read_time * 1000:.0f}ms, "
+                            f"lock_wait: {lock_wait_s * 1000:.0f}ms)"
                         )
 
                     return result
@@ -482,7 +499,9 @@ class Cache:
         # Plan the read operations while holding the lock, then release it for I/O
         chunks_to_read = list[ChunkInfo]()
 
+        lock_acquire = time.time()
         async with self.locks():
+            lock_wait_s += time.time() - lock_acquire
             s_list = self._by_path.get(cache_key)
 
             if s_list:
@@ -635,6 +654,7 @@ class Cache:
         fp = self._file_for(k)
 
         try:
+            self._ensure_parent(fp)
             with fp.open("wb") as f:
                 f.write(data)
 
