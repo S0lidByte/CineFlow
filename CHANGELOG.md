@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.1](https://github.com/S0lidByte/CineFlow/compare/v1.24.0...v1.24.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **cdn:** refresh unrestricted URL on ConnectError/timeout ([#152](https://github.com/S0lidByte/CineFlow/issues/152)) ([83c9d79](https://github.com/S0lidByte/CineFlow/commit/83c9d792360764c7c38a8b2ea5ff353f4738cd86))
+
 ## [1.24.0](https://github.com/S0lidByte/CineFlow/compare/v1.23.0...v1.24.0) (2026-07-26)
 
 
