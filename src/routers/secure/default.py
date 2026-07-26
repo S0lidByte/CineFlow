@@ -322,6 +322,13 @@ async def trakt_oauth_disconnect() -> MessageResponse:
     return MessageResponse(message="Trakt OAuth tokens cleared")
 
 
+class NeedsAttentionItem(BaseModel):
+    id: int
+    title: str
+    state: str
+    scraped_times: int
+
+
 class StatsResponse(BaseModel):
     total_items: int
     total_movies: int
@@ -343,6 +350,16 @@ class StatsResponse(BaseModel):
             description="List of dictionaries with 'year' and 'count' keys representing media item releases per year"
         ),
     ]
+    needs_attention: Annotated[
+        list[NeedsAttentionItem],
+        Field(
+            default_factory=list,
+            description=(
+                "Top incomplete/failed items by scrape attempts "
+                "(capped; for Dashboard ops queue)"
+            ),
+        ),
+    ]
 
 
 @router.get(
@@ -354,10 +371,10 @@ async def get_stats() -> StatsResponse:
     """
     Produce aggregated statistics for the media library and its items.
 
-    The response includes total counts for media items, movies, shows, seasons, and episodes; the total number of filesystem symlinks (determined by existence of FilesystemEntry records linked to movie or episode items); a mapping of each state to its item count; the number of incomplete items; and a mapping of incomplete item IDs to their scraped attempt counts.
+    The response includes total counts for media items, movies, shows, seasons, and episodes; the total number of filesystem symlinks (determined by existence of FilesystemEntry records linked to movie or episode items); a mapping of each state to its item count; the number of incomplete items; release-year histogram; request activity by day; and a capped ``needs_attention`` queue (top incomplete items by scrape attempts).
 
     Returns:
-        StatsResponse: Aggregated statistics with keys `total_items`, `total_movies`, `total_shows`, `total_seasons`, `total_episodes`, `total_symlinks`, `incomplete_items`, `incomplete_retries`, and `states`.
+        StatsResponse: Aggregated library statistics including ``needs_attention``.
     """
 
     with db_session() as session:
@@ -441,6 +458,35 @@ async def get_stats() -> StatsResponse:
                     )
                 ).scalar_one()
 
+            # Cap ops queue: highest scrape attempts among non-completed items
+            needs_attention: list[NeedsAttentionItem] = []
+            attention_rows = conn.execute(
+                select(
+                    MediaItem.id,
+                    MediaItem.title,
+                    MediaItem.last_state,
+                    MediaItem.scraped_times,
+                )
+                .where(MediaItem.last_state != States.Completed)
+                .order_by(
+                    MediaItem.scraped_times.desc().nulls_last(),
+                    MediaItem.id.desc(),
+                )
+                .limit(15)
+            ).all()
+            for item_id, title, last_state, scraped_times in attention_rows:
+                state_value = (
+                    last_state.value if hasattr(last_state, "value") else str(last_state)
+                )
+                needs_attention.append(
+                    NeedsAttentionItem(
+                        id=int(item_id),
+                        title=(title or f"Item {item_id}").strip() or f"Item {item_id}",
+                        state=state_value,
+                        scraped_times=int(scraped_times or 0),
+                    )
+                )
+
     return StatsResponse(
         total_items=total_items,
         total_movies=total_movies,
@@ -452,6 +498,7 @@ async def get_stats() -> StatsResponse:
         states=states,
         activity=activity,
         media_year_releases=media_year_releases,
+        needs_attention=needs_attention,
     )
 
 
