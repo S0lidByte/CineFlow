@@ -22,6 +22,7 @@ from program.services.scrapers.orionoid import Orionoid
 from program.services.scrapers.prowlarr import Prowlarr
 from program.services.scrapers.rarbg import Rarbg
 from program.services.scrapers.shared import merge_parse_results, parse_results
+from program.services.scrapers.stremthru import StremThru
 from program.services.scrapers.torrentio import Torrentio
 from program.services.scrapers.zilean import Zilean
 from program.settings import settings_manager
@@ -46,6 +47,7 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
             Orionoid: Orionoid(),
             Prowlarr: Prowlarr(),
             Rarbg: Rarbg(),
+            StremThru: StremThru(),
             Torrentio: Torrentio(),
             Zilean: Zilean(),
         }

@@ -79,6 +79,7 @@ jobs:
             src/tests/test_anime_ranking_settings.py \
             src/tests/test_stats_needs_attention.py \
             src/tests/test_settings_connection.py \
+            src/tests/test_stremthru_scraper.py \
             src/tests/test_remake_aliases_scrape.py \
             src/tests/test_program_filesystem.py \
             src/tests/test_alldebrid_downloader.py \
