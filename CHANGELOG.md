@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.0](https://github.com/S0lidByte/CineFlow/compare/v1.22.0...v1.23.0) (2026-07-26)
+
+
+### Features
+
+* **ranking:** add independent anime ranking pack ([#148](https://github.com/S0lidByte/CineFlow/issues/148)) ([f9935c6](https://github.com/S0lidByte/CineFlow/commit/f9935c6690bd2efa46fe5de65b060594533d3ca0))
+
 ## [1.22.0](https://github.com/S0lidByte/CineFlow/compare/v1.21.0...v1.22.0) (2026-07-26)
 
 
