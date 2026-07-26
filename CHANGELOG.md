@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.0](https://github.com/S0lidByte/CineFlow/compare/v1.21.0...v1.22.0) (2026-07-26)
+
+
+### Features
+
+* **plex:** sync media.scrobble to Trakt watched history ([#146](https://github.com/S0lidByte/CineFlow/issues/146)) ([59e1dcb](https://github.com/S0lidByte/CineFlow/commit/59e1dcb15c8ef957b10527d53a142400a8c7156c))
+
 ## [1.21.0](https://github.com/S0lidByte/CineFlow/compare/v1.20.0...v1.21.0) (2026-07-26)
 
 
