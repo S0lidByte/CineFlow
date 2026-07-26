@@ -418,13 +418,20 @@ def _rank_with_language_compat(
 
 def get_ranking_overrides(
     ranking_overrides: dict[str, list[str]] | None,
+    *,
+    for_anime: bool = False,
 ) -> SettingsModel | None:
+    """Apply category→attribute fetch overrides onto the effective ranking pack.
+
+    Bases on live ``ranking`` or ``ranking_anime`` (not the module-level movies
+    snapshot) so anime scrapes do not silently mutate the movies pack.
+    """
     if not ranking_overrides:
         return None
 
     try:
-        # Create a deep copy of current settings
-        settings_model = RTNSettingsModel(**ranking_settings.model_dump())
+        base = settings_manager.get_effective_rtn_model(for_anime=for_anime)
+        settings_model = RTNSettingsModel(**base.model_dump())
 
         # Collect groups: resolutions + all custom rank categories
         groups = [("resolutions", settings_model.resolutions)]

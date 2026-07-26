@@ -1034,10 +1034,29 @@ class OpenSubtitlesProviderConfig(Observable):
         return self
 
 
+class SubDLProviderConfig(Observable):
+    enabled: bool = Field(default=False, description="Enable SubDL provider")
+    api_key: str = Field(
+        default="",
+        description="SubDL API key (required when enabled)",
+        json_schema_extra={"format": "password"},
+    )
+
+    @model_validator(mode="after")
+    def validate_api_key(self) -> "SubDLProviderConfig":
+        if self.enabled and not self.api_key.strip():
+            raise ValueError("SubDL provider is enabled but api_key is empty.")
+        return self
+
+
 class SubtitleProvidersDict(Observable):
     opensubtitles: OpenSubtitlesProviderConfig = Field(
         default_factory=lambda: OpenSubtitlesProviderConfig(),
         description="OpenSubtitles provider configuration",
+    )
+    subdl: SubDLProviderConfig = Field(
+        default_factory=lambda: SubDLProviderConfig(),
+        description="SubDL provider configuration",
     )
 
 

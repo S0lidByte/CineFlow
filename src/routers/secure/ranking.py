@@ -18,8 +18,8 @@ from program.services.scrapers.shared import (
     get_ranking_overrides,
     normalize_rtn_language_settings,
     ranking_model,
-    ranking_settings,
 )
+from program.settings import settings_manager
 from program.settings.models import RTNSettingsModel
 from program.settings.ranking_descriptions import (
     ATTRIBUTE_TITLES,
@@ -79,11 +79,17 @@ class RankingTestRequest(BaseModel):
     correct_title: str | None = Field(
         default=None, description="Optional media title for similarity scoring"
     )
-    infohash: str | None = Field(default=None, description="Optional infohash (40 hex chars)")
+    infohash: str | None = Field(
+        default=None, description="Optional infohash (40 hex chars)"
+    )
     remove_trash: bool = Field(default=True, description="Apply trash heuristics")
     ranking_overrides: dict[str, list[str]] | None = Field(
         default=None,
         description="Optional category→attribute map to force-enable fetch without saving",
+    )
+    for_anime: bool = Field(
+        default=False,
+        description="When true (and ranking payload omitted), base overrides on ranking_anime",
     )
     ranking: dict[str, Any] | None = Field(
         default=None,
@@ -241,7 +247,9 @@ def _normalize_infohash(raw: str | None) -> str:
     return infohash
 
 
-@router.get("/meta", operation_id="get_ranking_meta", response_model=RankingMetaResponse)
+@router.get(
+    "/meta", operation_id="get_ranking_meta", response_model=RankingMetaResponse
+)
 async def get_ranking_meta() -> RankingMetaResponse:
     """Deny-key map and attribute titles for the Ranking settings panel."""
     return RankingMetaResponse(
@@ -343,7 +351,9 @@ async def get_scrape_funnel_summary(item_id: int) -> FunnelSummaryResponse:
     operation_id="validate_ranking_patterns",
     response_model=PatternValidateResponse,
 )
-async def validate_ranking_patterns(body: PatternValidateRequest) -> PatternValidateResponse:
+async def validate_ranking_patterns(
+    body: PatternValidateRequest,
+) -> PatternValidateResponse:
     """Validate require/exclude/preferred regex lists (length, compile, ReDoS heuristics)."""
     _enforce_ranking_rate_limit("validate-patterns")
     result = validate_pattern_lists(
@@ -387,9 +397,12 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             settings_model = RTNSettingsModel(**body.ranking)
         else:
-            settings_model = RTNSettingsModel(**ranking_settings.model_dump())
+            base = settings_manager.get_effective_rtn_model(for_anime=body.for_anime)
+            settings_model = RTNSettingsModel(**base.model_dump())
             if body.ranking_overrides:
-                overridden = get_ranking_overrides(body.ranking_overrides)
+                overridden = get_ranking_overrides(
+                    body.ranking_overrides, for_anime=body.for_anime
+                )
                 if overridden is not None:
                     settings_model = RTNSettingsModel(**overridden.model_dump())
 
@@ -407,7 +420,11 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
                 remove_trash=body.remove_trash,
                 aliases=aliases,
             )
-            parsed = torrent.data.model_dump() if hasattr(torrent.data, "model_dump") else None
+            parsed = (
+                torrent.data.model_dump()
+                if hasattr(torrent.data, "model_dump")
+                else None
+            )
             return RankingTestResponse(
                 message="Accepted by RTN",
                 accepted=True,
@@ -457,4 +474,6 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Ranking test failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Ranking test failed: {exc}"
+        ) from exc

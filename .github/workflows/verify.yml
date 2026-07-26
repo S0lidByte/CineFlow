@@ -69,6 +69,7 @@ jobs:
             src/tests/test_mediaitem_runtime.py \
             src/tests/test_async_client.py \
             src/tests/test_opensubtitles_settings.py \
+            src/tests/test_subdl_provider.py \
             src/tests/test_debrid_cdn_url.py \
             src/tests/test_requests.py \
             src/tests/test_incremental_parse_results.py \

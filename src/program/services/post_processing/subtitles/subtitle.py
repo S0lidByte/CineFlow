@@ -20,6 +20,7 @@ from program.settings import settings_manager
 from program.settings.models import SubtitleConfig
 
 from .providers.opensubtitles import OpenSubtitlesProvider
+from .providers.subdl import SubDLProvider
 from .utils import calculate_opensubtitles_hash
 
 
@@ -81,10 +82,14 @@ class SubtitleService(AnalysisService[SubtitleConfig]):
             except Exception as e:
                 logger.error(f"Failed to initialize OpenSubtitles provider: {e}")
 
-        # Add more providers here in the future
-        # if provider_configs.get("opensubtitlescom", {}).get("enabled"):
-        #     ...
-
+        if provider_configs.subdl.enabled:
+            try:
+                subdl = SubDLProvider(api_key=provider_configs.subdl.api_key)
+                subdl.initialize()
+                self.providers.append(subdl)
+                logger.debug("SubDL provider initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize SubDL provider: {e}")
     @classmethod
     def _parse_languages(cls, language_codes: list[str]) -> list[str]:
         """
@@ -184,8 +189,13 @@ class SubtitleService(AnalysisService[SubtitleConfig]):
             # NOT full filenames - see https://trac.opensubtitles.org/opensubtitles/wiki/XMLRPC#Supportedtags
             search_tags = self._build_search_tags(item)
 
-            # Get IMDB ID
+            # Get IMDB / TMDB IDs (episodes inherit show IDs)
             imdb_id = item.imdb_id
+            tmdb_id = item.tmdb_id
+            if isinstance(item, Episode):
+                show = item.parent.parent
+                imdb_id = show.imdb_id or item.imdb_id
+                tmdb_id = show.tmdb_id or item.tmdb_id
 
             # Get season/episode info for TV shows
             season = None
@@ -217,6 +227,7 @@ class SubtitleService(AnalysisService[SubtitleConfig]):
                         original_filename=original_filename,
                         search_tags=search_tags,
                         imdb_id=imdb_id,
+                        tmdb_id=tmdb_id,
                         season=season,
                         episode=episode,
                     )
@@ -432,6 +443,7 @@ class SubtitleService(AnalysisService[SubtitleConfig]):
         imdb_id: str | None,
         season: int | None,
         episode: int | None,
+        tmdb_id: str | None = None,
     ):
         """
         Fetch subtitle for a specific language.
@@ -447,6 +459,7 @@ class SubtitleService(AnalysisService[SubtitleConfig]):
             imdb_id: IMDB ID of the media
             season: Season number (for TV shows)
             episode: Episode number (for TV shows)
+            tmdb_id: TMDB ID of the media (preferred by SubDL)
         """
 
         # Check if subtitle already exists
@@ -472,6 +485,7 @@ class SubtitleService(AnalysisService[SubtitleConfig]):
                     season=season,
                     episode=episode,
                     language=language,
+                    tmdb_id=tmdb_id,
                 )
                 all_results.extend(results)
             except Exception as e:
