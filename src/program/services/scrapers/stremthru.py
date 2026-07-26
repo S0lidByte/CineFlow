@@ -28,11 +28,11 @@ class TorznabAttr(BaseModel):
 
 class TorznabItem(BaseModel):
     title: str | None = None
-    attr: list[TorznabAttr] = Field(default_factory=list)
+    attr: list[TorznabAttr] = Field(default_factory=list[TorznabAttr])
 
 
 class TorznabChannel(BaseModel):
-    items: list[TorznabItem] = Field(default_factory=list)
+    items: list[TorznabItem] = Field(default_factory=list[TorznabItem])
 
 
 class TorznabResponse(BaseModel):
