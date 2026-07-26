@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.28.0](https://github.com/S0lidByte/CineFlow/compare/v1.27.0...v1.28.0) (2026-07-26)
+
+
+### Features
+
+* **ranking:** bind optional ranking_pack on library profiles ([#165](https://github.com/S0lidByte/CineFlow/issues/165)) ([da66f6d](https://github.com/S0lidByte/CineFlow/commit/da66f6d99187d9d3e3d9a7332366e6c637f239bf))
+
+
+### Bug Fixes
+
+* **subtitles:** reject OpenSubtitles wrong-title fulltext matches ([#164](https://github.com/S0lidByte/CineFlow/issues/164)) ([d911455](https://github.com/S0lidByte/CineFlow/commit/d9114551c68a1e27d3e38c5cb3f28e0136b636a4))
+
 ## [1.27.0](https://github.com/S0lidByte/CineFlow/compare/v1.26.1...v1.27.0) (2026-07-26)
 
 
