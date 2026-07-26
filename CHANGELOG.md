@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.0](https://github.com/S0lidByte/CineFlow/compare/v1.24.2...v1.25.0) (2026-07-26)
+
+
+### Features
+
+* **stats:** expose capped needs_attention queue for dashboard ([#156](https://github.com/S0lidByte/CineFlow/issues/156)) ([fa15e15](https://github.com/S0lidByte/CineFlow/commit/fa15e15e0a94f9bc5e9242e5472fe18fdf768913))
+
 ## [1.24.2](https://github.com/S0lidByte/CineFlow/compare/v1.24.1...v1.24.2) (2026-07-26)
 
 
