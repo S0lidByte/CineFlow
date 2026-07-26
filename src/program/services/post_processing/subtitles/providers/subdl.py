@@ -126,10 +126,14 @@ class SubDLProvider(SubtitleProvider):
         try:
             response = self._client.get("subtitles", params=params)
             response.raise_for_status()
-            payload = response.json()
+            payload_raw: Any = response.json()
         except Exception as exc:
             logger.error(f"SubDL search failed: {exc}")
             return []
+
+        if not isinstance(payload_raw, dict):
+            return []
+        payload = cast(dict[str, Any], payload_raw)
 
         if not payload.get("status"):
             logger.warning(
@@ -138,9 +142,15 @@ class SubDLProvider(SubtitleProvider):
             return []
 
         results: list[SubtitleItem] = []
-        for sub in payload.get("subtitles") or []:
-            if not isinstance(sub, dict):
+        raw_subs_any: Any = payload.get("subtitles") or []
+        if not isinstance(raw_subs_any, list):
+            return []
+        raw_subs = cast(list[Any], raw_subs_any)
+
+        for entry_any in raw_subs:
+            if not isinstance(entry_any, dict):
                 continue
+            sub = cast(dict[str, Any], entry_any)
             if media_type == "tv":
                 if sub.get("season") != season or sub.get("episode") != episode:
                     continue
@@ -154,16 +164,22 @@ class SubDLProvider(SubtitleProvider):
             if not url:
                 continue
             release = str(sub.get("release_name") or sub.get("name") or "subtitle.srt")
+            movie_name_raw = sub.get("name")
+            movie_name = str(movie_name_raw) if movie_name_raw else None
             results.append(
                 SubtitleItem(
                     id=url,
                     language=target_alpha3,
-                    filename=release if release.lower().endswith(".srt") else f"{release}.srt",
+                    filename=(
+                        release
+                        if release.lower().endswith(".srt")
+                        else f"{release}.srt"
+                    ),
                     download_count=0,
                     rating=0.0,
                     matched_by="tmdb" if tmdb_id else "imdb",
                     movie_hash=None,
-                    movie_name=str(sub.get("name") or "") or None,
+                    movie_name=movie_name,
                     provider=self.name,
                     score=50.0,
                 )
@@ -176,7 +192,9 @@ class SubDLProvider(SubtitleProvider):
         if not url:
             return None
         download_url = (
-            url if url.startswith("http") else urljoin(SUBDL_DOWNLOAD_BASE + "/", url.lstrip("/"))
+            url
+            if url.startswith("http")
+            else urljoin(SUBDL_DOWNLOAD_BASE + "/", url.lstrip("/"))
         )
         try:
             response = self._client.get(download_url, timeout=httpx.Timeout(60.0))

@@ -274,7 +274,11 @@ class ScrapingSessionManager:
             session
             and session.torrent_id
             and self.downloader
-            and (service := self.get_session_service(self.downloader, session.downloader_service))
+            and (
+                service := self.get_session_service(
+                    self.downloader, session.downloader_service
+                )
+            )
         ):
             try:
                 service.delete_torrent(session.torrent_id)
@@ -387,12 +391,16 @@ async def resolve_torrent_container(
                     f"Invalid debrid file from {service_key} for {infohash}: {e}"
                 )
             except CircuitBreakerOpen as e:
-                service_errors.append((service_name, f"{service_key} circuit breaker open: {e}"))
+                service_errors.append(
+                    (service_name, f"{service_key} circuit breaker open: {e}")
+                )
                 logger.warning(
                     f"Circuit breaker OPEN for {service_key} while checking {infohash}: {e}"
                 )
             except Exception as e:
-                service_errors.append((service_name, f"{service_key} service error: {e}"))
+                service_errors.append(
+                    (service_name, f"{service_key} service error: {e}")
+                )
                 logger.debug(f"Error checking instant availability: {e}")
 
             # Fallback: probe torrent by adding temporarily
@@ -445,7 +453,9 @@ async def resolve_torrent_container(
                             f"Circuit breaker OPEN while getting torrent info for {infohash} on {service_key}: {e}"
                         )
                     except Exception as e:
-                        logger.error(f"Error getting torrent info from {service_key}: {e}")
+                        logger.error(
+                            f"Error getting torrent info from {service_key}: {e}"
+                        )
                         service_errors.append(
                             (
                                 service_name,
@@ -1053,7 +1063,8 @@ async def session_action(
         )
         if not session_service:
             raise HTTPException(
-                status_code=500, detail="Could not resolve downloader service for session"
+                status_code=500,
+                detail="Could not resolve downloader service for session",
             )
 
         download_type: Literal["cached", "uncached"] = "uncached"
@@ -1150,7 +1161,8 @@ async def session_action(
 
             if not session_service:
                 raise HTTPException(
-                    status_code=500, detail="Could not resolve downloader service for session"
+                    status_code=500,
+                    detail="Could not resolve downloader service for session",
                 )
 
             # Start Manual Download via Downloader Service
@@ -1246,9 +1258,7 @@ def _normalize_episode_numbers(
         if season_number <= 0:
             continue
 
-        cleaned = {
-            episode_number for episode_number in numbers if episode_number > 0
-        }
+        cleaned = {episode_number for episode_number in numbers if episode_number > 0}
         if cleaned:
             normalized[season_number] = cleaned
 
@@ -1393,7 +1403,8 @@ async def auto_scrape(
                     # Use no_autoflush to prevent premature flush of transient objects
                     with session.no_autoflush:
                         success = await asyncio.to_thread(
-                            tvdb_indexer._update_show_metadata, item  # type: ignore
+                            tvdb_indexer._update_show_metadata,
+                            item,  # type: ignore
                         )
 
                     if success:
