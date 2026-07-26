@@ -25,6 +25,10 @@ services:
             - SYS_ADMIN
         security_opt:
             - apparmor:unconfined
+        # Streaming cache defaults to /dev/shm (RAM). Keep shm modest; raise only if
+        # you intentionally want a larger RAM cache. Prefer disk cache_dir for >1GiB.
+        # Also set a container memory limit in production to avoid host OOM cascades:
+        #   mem_limit: 4g
         shm_size: 1024m
         devices:
             - /dev/fuse
@@ -35,6 +39,7 @@ services:
             - RIVEN_FORCE_ENV=true
             # Prefer Compose service name for DNS; riven-db remains an alias for older configs.
             - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
+            # Optional: move cache off RAM — e.g. RIVEN_FILESYSTEM_CACHE_DIR=/riven/data/cache
         healthcheck:
             test: curl -s http://localhost:8080 >/dev/null || exit 1
             interval: 30s
