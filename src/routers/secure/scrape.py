@@ -1403,8 +1403,8 @@ async def auto_scrape(
                     # Use no_autoflush to prevent premature flush of transient objects
                     with session.no_autoflush:
                         success = await asyncio.to_thread(
-                            tvdb_indexer._update_show_metadata,
-                            item,  # type: ignore
+                            tvdb_indexer._update_show_metadata,  # type: ignore[reportPrivateUsage]
+                            item,
                         )
 
                     if success:
