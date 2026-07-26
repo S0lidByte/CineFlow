@@ -109,7 +109,8 @@ def resolve_cache_max_bytes(
     """
 
     configured_bytes = max(0, int(configured_mb)) * 1024 * 1024
-    free = int(free_bytes) if free_bytes is not None else 0
+    has_free_space_measurement = free_bytes is not None
+    free = int(free_bytes) if has_free_space_measurement else 0
     on_tmpfs = is_tmpfs_path(cache_dir) if tmpfs is None else bool(tmpfs)
 
     effective = configured_bytes
@@ -119,7 +120,7 @@ def resolve_cache_max_bytes(
         # Prefer the hard cap so a huge /dev/shm (or host shm) cannot authorize
         # multi-GiB RAM cache that OOMs the container.
         tmpfs_cap = tmpfs_hard_cap_bytes
-        if free > 0:
+        if has_free_space_measurement:
             tmpfs_cap = min(tmpfs_cap, int(free * TMPFS_FREE_FRACTION))
 
         if effective > tmpfs_cap:
@@ -130,7 +131,10 @@ def resolve_cache_max_bytes(
                 f"(configured {configured_mb} MB). "
                 "Move filesystem.cache_dir off /dev/shm onto disk to allow a larger cache."
             )
-    elif free > 0 and configured_bytes > int(free * DISK_FREE_FRACTION):
+    elif (
+        has_free_space_measurement
+        and configured_bytes > int(free * DISK_FREE_FRACTION)
+    ):
         effective = int(free * DISK_FREE_FRACTION)
         reason = (
             f"cache_max_size_mb clamped to available space: "

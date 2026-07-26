@@ -72,6 +72,28 @@ def test_tmpfs_respects_half_free_when_smaller_than_hard_cap() -> None:
     assert result.effective_max_bytes < TMPFS_CACHE_HARD_CAP_BYTES
 
 
+def test_tmpfs_zero_free_caps_to_zero() -> None:
+    result = resolve_cache_max_bytes(
+        Path("/dev/shm/riven-cache"),
+        10240,
+        free_bytes=0,
+        tmpfs=True,
+    )
+    assert result.clamped is True
+    assert result.effective_max_bytes == 0
+
+
+def test_disk_zero_free_caps_to_zero() -> None:
+    result = resolve_cache_max_bytes(
+        Path("/riven/data/cache"),
+        10240,
+        free_bytes=0,
+        tmpfs=False,
+    )
+    assert result.clamped is True
+    assert result.effective_max_bytes == 0
+
+
 def test_is_tmpfs_path_detects_dev_shm_prefix() -> None:
     from program.services.streaming.cache_sizing import is_tmpfs_path
 
