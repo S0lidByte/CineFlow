@@ -157,6 +157,8 @@ class Downloader(Runner[None, DownloaderBase]):
                         )
 
                         if self.update_item_attributes(item, download_result, service):
+                            # True includes noop success when matched episode(s)
+                            # already have filesystem_entry (do not blacklist).
                             logger.log(
                                 "DEBRID",
                                 f"Downloaded {item.log_string} from '{stream.raw_title}' [{stream.infohash}] using {service.key}",
@@ -533,10 +535,14 @@ class Downloader(Runner[None, DownloaderBase]):
                     continue
 
                 if episode.filesystem_entry:
+                    # Already linked — treat as matched (noop). Returning False
+                    # here used to raise NoMatchingFilesException and blacklist
+                    # otherwise-good streams (e.g. pack download when one episode
+                    # was already completed).
                     logger.debug(
-                        f"Episode {episode.log_string} already has filesystem_entry; skipping"
+                        f"Episode {episode.log_string} already has filesystem_entry; treating as matched"
                     )
-
+                    found = True
                     continue
 
                 if episode.state not in [
