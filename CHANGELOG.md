@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.3](https://github.com/S0lidByte/CineFlow/compare/v1.28.2...v1.28.3) (2026-07-26)
+
+
+### Bug Fixes
+
+* **vfs:** hard-cap tmpfs streaming cache to prevent OOM kills ([#173](https://github.com/S0lidByte/CineFlow/issues/173)) ([ca051c0](https://github.com/S0lidByte/CineFlow/commit/ca051c0339cf4d40d58861ec87750f09614ccc63))
+
 ## [1.28.2](https://github.com/S0lidByte/CineFlow/compare/v1.28.1...v1.28.2) (2026-07-26)
 
 
