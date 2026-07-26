@@ -84,4 +84,5 @@ jobs:
             src/tests/test_rivenvfs.py \
             src/tests/test_trakt_client_id.py \
             src/tests/test_trakt_oauth_refresh.py \
-            src/tests/test_trakt_extract_ids.py
+            src/tests/test_trakt_extract_ids.py \
+            src/tests/test_plex_webhook_dry_run.py

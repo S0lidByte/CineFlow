@@ -594,6 +594,22 @@ class PlexWatchlistModel(Updatable):
     )
 
 
+class PlexWebhookModel(Observable):
+    """Inbound Plex (or Tautulli relay) webhook for watch/scrobble events.
+
+    Dry-run maps GUIDs only — no Trakt writes until a later phase.
+    """
+
+    webhook_secret: str = Field(
+        default="",
+        description=(
+            "Optional shared secret for POST /webhook/plex. When set, requests must "
+            "include matching X-Webhook-Secret header or webhook_secret query param "
+            "(in addition to API auth). Put the secret in the Plex webhook URL."
+        ),
+    )
+
+
 class TraktOauthModel(BaseModel):
     oauth_client_id: str = Field(default="", description="Trakt OAuth client ID")
     oauth_client_secret: str = Field(
@@ -671,6 +687,10 @@ class ContentModel(Observable):
     plex_watchlist: PlexWatchlistModel = Field(
         default_factory=lambda: PlexWatchlistModel(),
         description="Plex Watchlist configuration",
+    )
+    plex_webhook: PlexWebhookModel = Field(
+        default_factory=lambda: PlexWebhookModel(),
+        description="Plex inbound webhook (scrobble dry-run / future Trakt history)",
     )
     mdblist: MdblistModel = Field(
         default_factory=lambda: MdblistModel(), description="MDBList configuration"
