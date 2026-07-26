@@ -18,8 +18,8 @@ from program.services.scrapers.shared import (
     get_ranking_overrides,
     normalize_rtn_language_settings,
     ranking_model,
-    ranking_settings,
 )
+from program.settings import settings_manager
 from program.settings.models import RTNSettingsModel
 from program.settings.ranking_descriptions import (
     ATTRIBUTE_TITLES,
@@ -84,6 +84,10 @@ class RankingTestRequest(BaseModel):
     ranking_overrides: dict[str, list[str]] | None = Field(
         default=None,
         description="Optional category→attribute map to force-enable fetch without saving",
+    )
+    for_anime: bool = Field(
+        default=False,
+        description="When true (and ranking payload omitted), base overrides on ranking_anime",
     )
     ranking: dict[str, Any] | None = Field(
         default=None,
@@ -387,9 +391,12 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             settings_model = RTNSettingsModel(**body.ranking)
         else:
-            settings_model = RTNSettingsModel(**ranking_settings.model_dump())
+            base = settings_manager.get_effective_rtn_model(for_anime=body.for_anime)
+            settings_model = RTNSettingsModel(**base.model_dump())
             if body.ranking_overrides:
-                overridden = get_ranking_overrides(body.ranking_overrides)
+                overridden = get_ranking_overrides(
+                    body.ranking_overrides, for_anime=body.for_anime
+                )
                 if overridden is not None:
                     settings_model = RTNSettingsModel(**overridden.model_dump())
 

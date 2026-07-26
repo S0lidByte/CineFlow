@@ -38,7 +38,6 @@ from program.services.scrapers import Scraping
 from program.services.scrapers.funnel import ScrapeFunnelStats, remember_funnel_summary
 from program.services.scrapers.shared import get_ranking_overrides
 from program.settings import settings_manager
-from program.settings.models import RTNSettingsModel
 from program.types import Event
 from program.utils.locking import ItemLock
 from program.utils.request import CircuitBreakerOpen
@@ -652,14 +651,21 @@ def scrape_item(
             raise HTTPException(
                 status_code=422, detail=f"Invalid ranking_overrides JSON: {e}"
             ) from e
-    rtn_settings_override_model = get_ranking_overrides(parsed_ranking_overrides)
-    overrides: dict[str, Any] = (
-        rtn_settings_override_model.model_dump() if rtn_settings_override_model else {}
-    )
-    if min_filesize_override is not None:
-        overrides["min_filesize"] = min_filesize_override
-    if max_filesize_override is not None:
-        overrides["max_filesize"] = max_filesize_override
+
+    def build_scrape_overrides(*, for_anime: bool) -> dict[str, Any]:
+        rtn_settings_override_model = get_ranking_overrides(
+            parsed_ranking_overrides, for_anime=for_anime
+        )
+        built: dict[str, Any] = (
+            rtn_settings_override_model.model_dump()
+            if rtn_settings_override_model
+            else {}
+        )
+        if min_filesize_override is not None:
+            built["min_filesize"] = min_filesize_override
+        if max_filesize_override is not None:
+            built["max_filesize"] = max_filesize_override
+        return built
 
     def apply_custom_params(item: MediaItem) -> None:
         """Apply custom scrape parameters (not persisted to DB)"""
@@ -712,6 +718,9 @@ def scrape_item(
 
                 # Apply custom params to the detached item
                 apply_custom_params(item)
+                overrides = build_scrape_overrides(
+                    for_anime=bool(getattr(item, "is_anime", False))
+                )
 
                 all_streams: dict[str, Stream] = {}
                 total_services = len(scraper.initialized_services)
@@ -792,6 +801,9 @@ def scrape_item(
         )
         assert item
         apply_custom_params(item)
+        overrides = build_scrape_overrides(
+            for_anime=bool(getattr(item, "is_anime", False))
+        )
 
         with settings_manager.override(**overrides):
             funnel = ScrapeFunnelStats()
@@ -1288,20 +1300,6 @@ async def auto_scrape(
 ) -> MessageResponse:
     """Trigger auto scraping. For TV shows, optionally provide season_numbers to scrape specific seasons."""
 
-    rtn_settings_override_model = get_ranking_overrides(request.ranking_overrides)
-    if not rtn_settings_override_model:
-        rtn_settings_override_model = RTNSettingsModel(
-            **settings_manager.settings.ranking.model_dump()
-        )
-
-    # Create overrides dict
-    overrides: dict[str, Any] = rtn_settings_override_model.model_dump()
-
-    if request.min_filesize_override is not None:
-        overrides["min_filesize"] = request.min_filesize_override
-    if request.max_filesize_override is not None:
-        overrides["max_filesize"] = request.max_filesize_override
-
     with db_session() as session:
         item = resolve_media_item(
             session,
@@ -1314,6 +1312,22 @@ async def auto_scrape(
 
         if not item:
             raise HTTPException(status_code=404, detail="Item not found")
+
+        # Only inject RTN overrides when the client sent ranking_overrides.
+        # Empty overrides leave pack selection to get_effective_rtn_model(item).
+        rtn_settings_override_model = get_ranking_overrides(
+            request.ranking_overrides,
+            for_anime=bool(getattr(item, "is_anime", False)),
+        )
+        overrides: dict[str, Any] = (
+            rtn_settings_override_model.model_dump()
+            if rtn_settings_override_model
+            else {}
+        )
+        if request.min_filesize_override is not None:
+            overrides["min_filesize"] = request.min_filesize_override
+        if request.max_filesize_override is not None:
+            overrides["max_filesize"] = request.max_filesize_override
 
         requested_season_numbers = _requested_season_numbers(request)
         episode_numbers_by_season = _normalize_episode_numbers(request.episode_numbers)

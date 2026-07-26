@@ -34,6 +34,7 @@ class SubtitleProvider(ABC):
         season: int | None = None,
         episode: int | None = None,
         language: str = "en",
+        tmdb_id: str | None = None,
     ) -> list[SubtitleItem]:
         """
         Search for subtitles.
@@ -47,6 +48,7 @@ class SubtitleProvider(ABC):
             season: Season number (for TV shows)
             episode: Episode number (for TV shows)
             language: ISO 639-3 language code
+            tmdb_id: Optional TMDB ID (preferred by some providers, e.g. SubDL)
 
         Returns:
             list of subtitle results

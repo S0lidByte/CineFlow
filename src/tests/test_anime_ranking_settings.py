@@ -105,3 +105,44 @@ def test_anime_and_movie_ranking_are_independently_mutable():
     finally:
         ranking.options.title_similarity = prev_movie_sim
         ranking_anime.options.title_similarity = prev_anime_sim
+
+
+def test_get_ranking_overrides_bases_on_anime_pack():
+    from program.services.scrapers.shared import get_ranking_overrides
+
+    ranking = settings_manager.settings.ranking
+    ranking_anime = settings_manager.settings.ranking_anime
+    prev_movie_dub = ranking.custom_ranks.extras.dubbed.fetch
+    prev_anime_dub = ranking_anime.custom_ranks.extras.dubbed.fetch
+    prev_anime_sim = ranking_anime.options.title_similarity
+
+    try:
+        ranking.custom_ranks.extras.dubbed.fetch = False
+        ranking_anime.custom_ranks.extras.dubbed.fetch = True
+        ranking_anime.options.title_similarity = 0.61
+
+        # Force-enable resolutions only — base pack fields must survive
+        overridden = get_ranking_overrides(
+            {"resolutions": ["r1080p"]}, for_anime=True
+        )
+        assert overridden is not None
+        assert overridden.options.title_similarity == 0.61
+        assert overridden.custom_ranks.extras.dubbed.fetch is True
+        assert overridden.resolutions.r1080p is True
+
+        movie_overridden = get_ranking_overrides(
+            {"resolutions": ["r1080p"]}, for_anime=False
+        )
+        assert movie_overridden is not None
+        assert movie_overridden.custom_ranks.extras.dubbed.fetch is False
+    finally:
+        ranking.custom_ranks.extras.dubbed.fetch = prev_movie_dub
+        ranking_anime.custom_ranks.extras.dubbed.fetch = prev_anime_dub
+        ranking_anime.options.title_similarity = prev_anime_sim
+
+
+def test_get_ranking_overrides_empty_returns_none():
+    from program.services.scrapers.shared import get_ranking_overrides
+
+    assert get_ranking_overrides(None, for_anime=True) is None
+    assert get_ranking_overrides({}, for_anime=False) is None

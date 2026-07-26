@@ -251,6 +251,7 @@ class OpenSubtitlesProvider(SubtitleProvider):
         season: int | None = None,
         episode: int | None = None,
         language: str = "en",
+        tmdb_id: str | None = None,
     ) -> list[SubtitleItem]:
         """
         Search subtitles using multi-strategy approach.
@@ -269,11 +270,13 @@ class OpenSubtitlesProvider(SubtitleProvider):
             search_tags: Comma-separated tags (release group, format) for OpenSubtitles
             season: Season number (for TV shows)
             episode: Episode number (for TV shows)
-            language: Language code (ISO 639-1, ISO 639-2, or ISO 639-3)
+            language: ISO 639-3 language code
+            tmdb_id: Unused (OpenSubtitles is IMDB/hash based)
 
         Returns:
             list of subtitle results, prioritized by match type
         """
+        _ = tmdb_id  # OpenSubtitles is IMDB/hash based
 
         try:
             if not self._ensure_authenticated():
