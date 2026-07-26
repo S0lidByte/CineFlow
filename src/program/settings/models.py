@@ -853,6 +853,19 @@ class AIOStreamsConfig(Observable):
     )
 
 
+class StremThruConfig(Observable):
+    enabled: bool = Field(default=False, description="Enable StremThru Torznab scraper")
+    url: EmptyOrUrl = Field(
+        default="https://stremthru.13377001.xyz",
+        description="StremThru instance URL (self-hosted or public)",
+    )
+    timeout: int = Field(default=30, ge=1, description="Request timeout in seconds")
+    retries: int = Field(
+        default=1, ge=0, description="Number of retries for failed requests"
+    )
+    ratelimit: bool = Field(default=True, description="Enable rate limiting")
+
+
 class ScraperModel(Observable):
     after_2: float = Field(
         default=2, description="Hours to wait after 2 failed scrapes"
@@ -943,6 +956,10 @@ class ScraperModel(Observable):
     aiostreams: AIOStreamsConfig = Field(
         default_factory=lambda: AIOStreamsConfig(),
         description="AIOStreams configuration",
+    )
+    stremthru: StremThruConfig = Field(
+        default_factory=lambda: StremThruConfig(),
+        description="StremThru Torznab scraper configuration",
     )
 
 
