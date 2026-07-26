@@ -1,6 +1,7 @@
 import time
 from http import HTTPStatus
 from typing import Self
+from urllib.parse import urlparse
 
 import httpx
 from kink import di
@@ -32,6 +33,23 @@ class DebridCDNUrl:
         if url is None:
             return "<no-url>"
         return sanitize_url_for_logs(url)
+
+    @staticmethod
+    def _cdn_hosts_equivalent(url_a: str | None, url_b: str | None) -> bool:
+        """
+        True when both URLs are the same string or share the same CDN hostname.
+
+        Real-Debrid can re-issue a new path/token on a retired NXDOMAIN host;
+        treating that as a successful refresh loops ConnectError forever.
+        """
+        if not url_a or not url_b:
+            return False
+        if url_a == url_b:
+            return True
+
+        host_a = (urlparse(url_a).hostname or "").lower()
+        host_b = (urlparse(url_b).hostname or "").lower()
+        return bool(host_a and host_b and host_a == host_b)
 
     def __init__(self, entry: MediaEntry) -> None:
         self.filename = entry.original_filename
@@ -82,6 +100,8 @@ class DebridCDNUrl:
             retry_after = getattr(e, "retry_after_seconds", None)
             if isinstance(retry_after, (int, float)):
                 self._set_refresh_cooldown(float(retry_after))
+            raise
+        except RefreshedURLIdenticalException:
             raise
         except Exception as e:
             retry_after = getattr(e, "retry_after_seconds", None)
@@ -134,6 +154,22 @@ class DebridCDNUrl:
             self.url = url
         return False
 
+    def _log_transport_failure(self, *, kind: str, attempt: int, error: Exception) -> None:
+        """
+        Log CDN transport failures without triple-ERROR spam on open retries.
+
+        First attempt stays WARNING (ops-visible once); later attempts are DEBUG
+        because a refresh was already attempted on attempt 1.
+        """
+        message = (
+            f"{kind} while validating CDN URL "
+            f"{self._sanitize_logged_url(self.url)}: {error}"
+        )
+        if attempt == 1:
+            logger.warning(message)
+        else:
+            logger.debug(message)
+
     def validate(
         self,
         attempt_refresh: bool = True,
@@ -167,9 +203,7 @@ class DebridCDNUrl:
 
                         return self.url
             except httpx.TimeoutException as e:
-                logger.error(
-                    f"Timeout while validating CDN URL {self._sanitize_logged_url(self.url)}: {e}"
-                )
+                self._log_transport_failure(kind="Timeout", attempt=attempt, error=e)
                 if self._maybe_refresh_after_transport_failure(
                     attempt_refresh=attempt_refresh,
                     attempt=attempt,
@@ -178,9 +212,10 @@ class DebridCDNUrl:
             except httpx.ConnectError as e:
                 # Dead/retired RD CDN hostnames (e.g. NXDOMAIN on 109-4.download…)
                 # must refresh — retrying the same URL just spam-logs the same error.
-                logger.error(
-                    f"Connection error while validating CDN URL "
-                    f"{self._sanitize_logged_url(self.url)}: {e}"
+                self._log_transport_failure(
+                    kind="Connection error",
+                    attempt=attempt,
+                    error=e,
                 )
                 if self._maybe_refresh_after_transport_failure(
                     attempt_refresh=attempt_refresh,
@@ -248,7 +283,15 @@ class DebridCDNUrl:
 
                 return None
 
-            if url == self.url:
+            if self._cdn_hosts_equivalent(url, self.url):
+                logger.warning(
+                    f"CDN refresh returned identical/dead host for {self.filename}; "
+                    f"marking link dead and scheduling re-scrape"
+                )
+                di[VFSDatabase].schedule_dead_link_rescrape(
+                    entry=entry,
+                    session=session,
+                )
                 raise RefreshedURLIdenticalException
 
             self.url = url

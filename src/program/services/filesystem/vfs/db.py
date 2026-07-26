@@ -97,6 +97,46 @@ class VFSDatabase:
 
             return None
 
+    def schedule_dead_link_rescrape(
+        self,
+        entry: MediaEntry,
+        session: Session,
+    ) -> bool:
+        """
+        Blacklist the active stream, reset the media item, and enqueue a VFS event
+        so a working download can replace a dead CDN link.
+
+        Returns True when a re-scrape was scheduled.
+        """
+        if not entry.media_item:
+            return False
+
+        from program.program import Program
+
+        item_id = entry.media_item.id
+
+        def mutation(i: MediaItem, s: Session) -> None:
+            i.blacklist_active_stream()
+            i.reset()
+
+        apply_item_mutation(
+            program=di[Program],
+            item=entry.media_item,
+            mutation_fn=mutation,
+            session=session,
+        )
+
+        session.commit()
+
+        di[Program].em.add_event(
+            Event(
+                "VFS",
+                item_id,
+            )
+        )
+
+        return True
+
     def refresh_unrestricted_url(
         self,
         entry: MediaEntry,
@@ -113,8 +153,6 @@ class VFSDatabase:
             logger.warning("No downloader available to refresh unrestricted URL")
 
             return None
-
-        from program.program import Program
 
         # Find service by matching the key attribute (services dict uses class as key)
         service = next(
@@ -156,29 +194,7 @@ class VFSDatabase:
                 )
 
                 # If un-restricting fails, reset the MediaItem to trigger a new download
-                if entry.media_item:
-                    item_id = entry.media_item.id
-
-                    def mutation(i: MediaItem, s: Session):
-                        i.blacklist_active_stream()
-                        i.reset()
-
-                    apply_item_mutation(
-                        program=di[Program],
-                        item=entry.media_item,
-                        mutation_fn=mutation,
-                        session=session,
-                    )
-
-                    session.commit()
-
-                    di[Program].em.add_event(
-                        Event(
-                            "VFS",
-                            item_id,
-                        )
-                    )
-
+                if self.schedule_dead_link_rescrape(entry=entry, session=session):
                     return None
                 raise
             except Exception as e:
