@@ -154,19 +154,23 @@ class RivenVFS(pyfuse3.Operations):
         except Exception:
             free_bytes = 0
 
-        configured_bytes = int(size_mb) * 1024 * 1024
-        effective_max_bytes = configured_bytes
+        from program.services.streaming.cache_sizing import resolve_cache_max_bytes
 
-        if free_bytes > 0 and configured_bytes > int(free_bytes * 0.9):
-            effective_max_bytes = int(free_bytes * 0.9)
-            logger.bind(component="RivenVFS").warning(
-                f"cache_max_size_mb clamped to available space: {effective_max_bytes // (1024 * 1024)} MB"
-            )
+        sizing = resolve_cache_max_bytes(
+            cache_dir,
+            size_mb,
+            free_bytes=free_bytes,
+        )
+
+        if sizing.clamped and sizing.reason:
+            # tmpfs over-budget is CRITICAL: bare Linux "Killed" / OOM follows.
+            level = "CRITICAL" if sizing.is_tmpfs else "WARNING"
+            logger.bind(component="RivenVFS").log(level, sizing.reason)
 
         di[Cache] = Cache(
             cfg=CacheConfig(
                 cache_dir=cache_dir,
-                max_size_bytes=effective_max_bytes,
+                max_size_bytes=sizing.effective_max_bytes,
                 ttl_seconds=self.fs.cache_ttl_seconds,
                 eviction=self.fs.cache_eviction,
                 metrics_enabled=self.fs.cache_metrics,

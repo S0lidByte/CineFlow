@@ -160,6 +160,13 @@ class MediaStream:
                 "Cache thrashing may occur with concurrent reads, causing poor performance."
             )
 
+        if stream_settings.chunk_size_mb > 8:
+            logger.warning(
+                f"stream.chunk_size_mb={stream_settings.chunk_size_mb} is large; "
+                "each concurrent Plex open holds that much RAM while fetching. "
+                "Prefer 1–4 MB to reduce OOM risk (especially with cache_dir on /dev/shm)."
+            )
+
         # Use proxy client if provider requires it
         if (
             provider in PROXY_REQUIRED_PROVIDERS

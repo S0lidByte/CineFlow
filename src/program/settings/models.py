@@ -315,10 +315,21 @@ class FilesystemModel(Observable):
     )
     cache_dir: Path = Field(
         default=Path("/dev/shm/riven-cache"),
-        description="Directory for caching downloaded chunks",
+        description=(
+            "Directory for caching downloaded chunks. "
+            "Default /dev/shm/riven-cache is RAM-backed (tmpfs): large budgets can "
+            "OOM-kill the process (bare 'Killed'). Prefer a disk path under your "
+            "data volume for caches above ~1 GiB. On tmpfs, Riven hard-caps at 1 GiB."
+        ),
     )
     cache_max_size_mb: int = Field(
-        default=10240, ge=0, description="Maximum cache size in MB (10 GiB default)"
+        default=10240,
+        ge=0,
+        description=(
+            "Maximum cache size in MB (10 GiB default on disk). "
+            "When cache_dir is on tmpfs (/dev/shm), effective size is hard-capped "
+            "at 1 GiB to avoid OOM kills regardless of this value."
+        ),
     )
     cache_ttl_seconds: int = Field(
         default=2 * 60 * 60,
