@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.28.2](https://github.com/S0lidByte/CineFlow/compare/v1.28.1...v1.28.2) (2026-07-26)
+
+
+### Bug Fixes
+
+* **cache:** release index lock before disk I/O ([f13d786](https://github.com/S0lidByte/CineFlow/commit/f13d786017164ab5f0d3cc49f25c5c1c25889cd1))
+* **cache:** release index lock before disk I/O ([1f5cc3e](https://github.com/S0lidByte/CineFlow/commit/1f5cc3e6826bdfba300dc064df9f33c2d6d386b0))
+
 ## [1.28.1](https://github.com/S0lidByte/CineFlow/compare/v1.28.0...v1.28.1) (2026-07-26)
 
 
