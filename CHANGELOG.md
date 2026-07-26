@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.1](https://github.com/S0lidByte/CineFlow/compare/v1.26.0...v1.26.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **downloaders:** treat existing filesystem_entry as match noop ([#160](https://github.com/S0lidByte/CineFlow/issues/160)) ([d20c22b](https://github.com/S0lidByte/CineFlow/commit/d20c22bc65b39feaecfb40e45532cfe568ce8cf6))
+
 ## [1.26.0](https://github.com/S0lidByte/CineFlow/compare/v1.25.0...v1.26.0) (2026-07-26)
 
 
