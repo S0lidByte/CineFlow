@@ -1145,6 +1145,15 @@ class AppModel(Observable):
         default=False,
         description="Enable detailed stream request/response logging",
     )
+    stream_tracing_sample_every: int = Field(
+        default=50,
+        ge=1,
+        description=(
+            "When stream tracing is on, emit 1 of every N high-frequency STREAM "
+            "lines (cache_hit / hot body reads). Lifecycle, scans, and URL refresh "
+            "always log. Set to 1 to log every hot event (previous behavior)."
+        ),
+    )
     retry_interval: int = Field(
         default=60 * 60 * 24,
         ge=0,
