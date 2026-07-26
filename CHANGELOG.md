@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.1](https://github.com/S0lidByte/CineFlow/compare/v1.28.0...v1.28.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **cdn:** re-scrape when refresh returns identical NXDOMAIN host ([#167](https://github.com/S0lidByte/CineFlow/issues/167)) ([a4ff491](https://github.com/S0lidByte/CineFlow/commit/a4ff491580c7b3b72001ce68b55e16a62f282188))
+
 ## [1.28.0](https://github.com/S0lidByte/CineFlow/compare/v1.27.0...v1.28.0) (2026-07-26)
 
 
