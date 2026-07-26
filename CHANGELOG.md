@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.0](https://github.com/S0lidByte/CineFlow/compare/v1.25.0...v1.26.0) (2026-07-26)
+
+
+### Features
+
+* **settings:** add connection test probes for key integrations ([#158](https://github.com/S0lidByte/CineFlow/issues/158)) ([889cf20](https://github.com/S0lidByte/CineFlow/commit/889cf207a12770b889a2f4f7f906a315b5d266fe))
+
 ## [1.25.0](https://github.com/S0lidByte/CineFlow/compare/v1.24.2...v1.25.0) (2026-07-26)
 
 
