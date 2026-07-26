@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.0](https://github.com/S0lidByte/CineFlow/compare/v1.23.0...v1.24.0) (2026-07-26)
+
+
+### Features
+
+* **stream:** sample high-frequency STREAM trace logs ([#150](https://github.com/S0lidByte/CineFlow/issues/150)) ([fff3d5d](https://github.com/S0lidByte/CineFlow/commit/fff3d5da4e8cd6f09c0ca277a1b4b748e359f6ac))
+
 ## [1.23.0](https://github.com/S0lidByte/CineFlow/compare/v1.22.0...v1.23.0) (2026-07-26)
 
 
