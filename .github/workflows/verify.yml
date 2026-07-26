@@ -57,6 +57,7 @@ jobs:
             src/tests/test_hls_params.py \
             src/tests/test_scraper_episode_season_match.py \
             src/tests/test_downloader_cooldown.py \
+            src/tests/test_downloader_existing_filesystem_entry.py \
             src/tests/test_blacklist_idempotent.py \
             src/tests/test_scraper_base.py \
             src/tests/test_scraper_language_settings.py \
