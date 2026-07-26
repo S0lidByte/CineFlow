@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.21.0](https://github.com/S0lidByte/CineFlow/compare/v1.20.0...v1.21.0) (2026-07-26)
+
+
+### Features
+
+* **plex:** add scrobble webhook dry-run with GUID mapping ([#144](https://github.com/S0lidByte/CineFlow/issues/144)) ([32ec45d](https://github.com/S0lidByte/CineFlow/commit/32ec45dc5a3135fbf84cdbf4fb86ea44cbdcabcf))
+* **trakt:** refresh OAuth access tokens on 401 ([#143](https://github.com/S0lidByte/CineFlow/issues/143)) ([4839f23](https://github.com/S0lidByte/CineFlow/commit/4839f23fcb2ef324c36137ae95fe1536863ee465))
+
 ## [1.20.0](https://github.com/S0lidByte/CineFlow/compare/v1.19.3...v1.20.0) (2026-07-25)
 
 
