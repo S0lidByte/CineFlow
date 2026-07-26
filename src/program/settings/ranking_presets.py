@@ -7,7 +7,7 @@ aligned. Presets never auto-enable Scraping soft-opt-ins.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 RankingPresetId = Literal[
     "balanced",
@@ -300,3 +300,71 @@ def matching_mode_by_id(mode_id: str) -> dict[str, Any] | None:
         if mode["id"] == mode_id:
             return mode
     return None
+
+
+def apply_ranking_preset(base: Any, preset_id: str) -> Any:
+    """Apply a Ranking Studio preset onto a deep-copied RTN SettingsModel.
+
+    Mirrors the frontend ``applyRankingPreset`` contract: toggles
+    ``custom_ranks.*.fetch`` from ``enableFetch``, then merges options,
+    resolutions, languages, require/exclude/preferred. Does not touch Scraping
+    soft-opt-ins.
+    """
+    from RTN.models import SettingsModel
+
+    preset = preset_by_id(preset_id)
+    if preset is None:
+        raise ValueError(f"Unknown ranking preset: {preset_id}")
+
+    if isinstance(base, SettingsModel):
+        next_settings = SettingsModel(**base.model_dump())
+    else:
+        next_settings = SettingsModel(**dict(base))
+
+    enable_fetch = cast(dict[str, list[str]], preset.get("enableFetch") or {})
+    ranks = next_settings.custom_ranks
+    for category in ranks.__class__.model_fields:
+        category_obj = getattr(ranks, category)
+        if category_obj is None or not getattr(category_obj, "model_fields", None):
+            continue
+        enabled = set(enable_fetch.get(category, []))
+        for attr in category_obj.__class__.model_fields:
+            rank_attr = getattr(category_obj, attr, None)
+            if rank_attr is not None and hasattr(rank_attr, "fetch"):
+                rank_attr.fetch = attr in enabled
+
+    if preset.get("options"):
+        options = next_settings.options
+        for key, value in cast(dict[str, Any], preset["options"]).items():
+            if hasattr(options, key):
+                setattr(options, key, value)
+            elif isinstance(options, dict):
+                options[key] = value
+
+    if preset.get("resolutions"):
+        resolutions = next_settings.resolutions
+        for key, value in cast(dict[str, Any], preset["resolutions"]).items():
+            if hasattr(resolutions, key):
+                setattr(resolutions, key, value)
+
+    if preset.get("languages"):
+        languages = cast(dict[str, Any], preset["languages"])
+        for field in ("required", "allowed", "exclude", "preferred"):
+            if field in languages:
+                setattr(next_settings.languages, field, list(languages[field] or []))
+
+    if "require" in preset and preset["require"] is not None:
+        next_settings.require = list(cast(list[str], preset["require"]))
+    if "exclude" in preset and preset["exclude"] is not None:
+        next_settings.exclude = list(cast(list[str], preset["exclude"]))
+    if "preferred" in preset and preset["preferred"] is not None:
+        next_settings.preferred = list(cast(list[str], preset["preferred"]))
+
+    return next_settings
+
+
+def default_anime_rtn_settings() -> Any:
+    """Default independent anime ranking: Anime Dub Friendly preset on RTN defaults."""
+    from RTN.models import SettingsModel
+
+    return apply_ranking_preset(SettingsModel(), "anime_dub")
