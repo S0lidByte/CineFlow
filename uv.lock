@@ -56,7 +56,7 @@ wheels = [
 
 [[package]]
 name = "apprise"
-version = "1.9.9"
+version = "1.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
@@ -67,9 +67,9 @@ dependencies = [
     { name = "requests-oauthlib" },
     { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/20/f4/be5c7e39b83a2285ab62ae7c19bb10704836f59c0a5b4c471730f54c9f98/apprise-1.9.9.tar.gz", hash = "sha256:fd622c0df16bdc79ed385539735573488cafe2405d25747e87eebd6b09b26012", size = 2032822, upload-time = "2026-03-21T17:49:14.041Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ff/f7/95a52cda9355f32c5db9ef77bac18e85977472d29c555fafd825cf60c309/apprise-1.12.0.tar.gz", hash = "sha256:ffe9860d99cbde05fd156c610d4bcb49d953200c4ed3cb2db001ed50722fc142", size = 2477874, upload-time = "2026-07-04T16:15:36.67Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e6/2f/54d068d7e011a8b4e0aae3e93b09a30b33bcf780829fe70c6e8876aeb0e0/apprise-1.9.9-py3-none-any.whl", hash = "sha256:55ceb8827a1c783d683881c9f77fa42eb43b3fc91b854419c452d557101c7068", size = 1519940, upload-time = "2026-03-21T17:49:11.847Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/e9/acfea54abdd66a059ff82995d3703eca3a27df3dc1bdc6afaf8a30a854fe/apprise-1.12.0-py3-none-any.whl", hash = "sha256:28edabfec5a9d5dbcd9aa28bdfd8928ecb68764e40214b6e648eab6d974b5a93", size = 1797824, upload-time = "2026-07-04T16:15:34.228Z" },
 ]
 
 [[package]]
@@ -439,7 +439,7 @@ wheels = [
 
 [[package]]
 name = "fastapi"
-version = "0.135.3"
+version = "0.140.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -448,9 +448,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f7/e6/7adb4c5fa231e82c35b8f5741a9f2d055f520c29af5546fd70d3e8e1cd2e/fastapi-0.135.3.tar.gz", hash = "sha256:bd6d7caf1a2bdd8d676843cdcd2287729572a1ef524fc4d65c17ae002a1be654", size = 396524, upload-time = "2026-04-01T16:23:58.188Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0d/fb/fd7671137d9fa3df1d93a2f5111eb982709201724b29f211e4beb2d58688/fastapi-0.140.0.tar.gz", hash = "sha256:f338951b82fd74ca8f843163aec43ea1a1ce84d515415a50fa98fa25572a5544", size = 420968, upload-time = "2026-07-24T21:16:41.187Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/a4/5caa2de7f917a04ada20018eccf60d6cc6145b0199d55ca3711b0fc08312/fastapi-0.135.3-py3-none-any.whl", hash = "sha256:9b0f590c813acd13d0ab43dd8494138eb58e484bfac405db1f3187cfc5810d98", size = 117734, upload-time = "2026-04-01T16:23:59.328Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/76/6d9e25ad88da9d3ff744bcdbec4736e38c2288611d43f673a5d9bfa27c07/fastapi-0.140.0-py3-none-any.whl", hash = "sha256:e951c0a0d9540bf5d9a2a9e078fd415da2ab7e312d435139e7d9e2e7fe9f0b23", size = 130863, upload-time = "2026-07-24T21:16:42.89Z" },
 ]
 
 [[package]]
@@ -1614,14 +1614,14 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.13.2,<2" },
-    { name = "apprise", specifier = ">=1.8.1,<2" },
+    { name = "apprise", specifier = ">=1.12.0,<2" },
     { name = "apscheduler", specifier = ">=3.10.4,<4" },
     { name = "babel", specifier = ">=2.17.0,<3" },
     { name = "bencodepy", specifier = ">=0.9.5,<0.10" },
     { name = "cachetools", specifier = ">=5.3.3,<8" },
     { name = "coverage", specifier = ">=7.6.8,<8" },
     { name = "dill", specifier = ">=0.3.8,<0.5" },
-    { name = "fastapi", specifier = ">=0.110.0,<1" },
+    { name = "fastapi", specifier = ">=0.140.0,<1" },
     { name = "httpx", extras = ["http2", "socks"], specifier = ">=0.28.1,<0.29" },
     { name = "jsonschema", specifier = ">=4.23.0,<5" },
     { name = "kink", specifier = ">=0.8.1,<0.10" },
