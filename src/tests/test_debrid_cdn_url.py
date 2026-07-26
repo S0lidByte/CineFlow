@@ -1,8 +1,10 @@
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
 
-from program.utils.debrid_cdn_url import DebridCDNUrl
+from program.services.streaming.exceptions import DebridServiceLinkUnavailable
+from program.utils.debrid_cdn_url import DebridCDNUrl, RefreshedURLIdenticalException
 
 
 def _cdn_with_url(url: str) -> DebridCDNUrl:
@@ -44,6 +46,17 @@ def test_sanitize_logged_url_redacts_sensitive_query_params():
 def test_sanitize_logged_url_no_query():
     url = "https://example.com/stream/file"
     assert DebridCDNUrl._sanitize_logged_url(url) == url
+
+
+def test_cdn_hosts_equivalent_same_url_and_same_host():
+    dead = "https://109-4.download.real-debrid.com/d/DEAD/file.mkv"
+    same_host = "https://109-4.download.real-debrid.com/d/NEWTOKEN/file.mkv"
+    other = "https://45.download.real-debrid.com/d/LIVE/file.mkv"
+
+    assert DebridCDNUrl._cdn_hosts_equivalent(dead, dead) is True
+    assert DebridCDNUrl._cdn_hosts_equivalent(dead, same_host) is True
+    assert DebridCDNUrl._cdn_hosts_equivalent(dead, other) is False
+    assert DebridCDNUrl._cdn_hosts_equivalent(None, dead) is False
 
 
 def test_validate_refreshes_on_connect_error():
@@ -96,3 +109,84 @@ def test_validate_refreshes_on_timeout():
     ):
         assert cdn.validate() == live
         refresh.assert_called_once()
+
+
+def test_validate_identical_refresh_after_connect_error_raises_link_unavailable():
+    """ConnectError + identical refresh must surface LinkUnavailable (VFS re-scrape)."""
+    dead = "https://109-4.download.real-debrid.com/d/DEAD/file.mkv"
+    cdn = _cdn_with_url(dead)
+
+    stream_cm = MagicMock()
+    stream_cm.__enter__.side_effect = httpx.ConnectError("Name does not resolve")
+    stream_cm.__exit__.return_value = None
+
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.__exit__.return_value = None
+    client.stream.return_value = stream_cm
+
+    with (
+        patch("program.utils.debrid_cdn_url.httpx.Client", return_value=client),
+        patch.object(
+            cdn,
+            "_refresh_with_cooldown",
+            side_effect=RefreshedURLIdenticalException,
+        ),
+    ):
+        with pytest.raises(DebridServiceLinkUnavailable):
+            cdn.validate()
+
+
+def test_refresh_identical_host_schedules_rescrape():
+    """Same NXDOMAIN host with a new path must mark dead + re-scrape, not loop."""
+    dead = "https://109-4.download.real-debrid.com/d/DEAD/file.mkv"
+    same_host = "https://109-4.download.real-debrid.com/d/NEWTOKEN/file.mkv"
+    cdn = _cdn_with_url(dead)
+
+    vfs_db = MagicMock()
+    vfs_db.refresh_unrestricted_url.return_value = same_host
+    vfs_db.schedule_dead_link_rescrape.return_value = True
+
+    session = MagicMock()
+    session.merge.return_value = cdn.entry
+    session_cm = MagicMock()
+    session_cm.__enter__.return_value = session
+    session_cm.__exit__.return_value = None
+
+    with (
+        patch("program.utils.debrid_cdn_url.db_session", return_value=session_cm),
+        patch("program.utils.debrid_cdn_url.di") as mock_di,
+    ):
+        mock_di.__getitem__.return_value = vfs_db
+        with pytest.raises(RefreshedURLIdenticalException):
+            cdn._refresh()
+
+    vfs_db.schedule_dead_link_rescrape.assert_called_once_with(
+        entry=cdn.entry,
+        session=session,
+    )
+
+
+def test_refresh_different_host_returns_new_url():
+    dead = "https://109-4.download.real-debrid.com/d/DEAD/file.mkv"
+    live = "https://45.download.real-debrid.com/d/LIVE/file.mkv"
+    cdn = _cdn_with_url(dead)
+
+    vfs_db = MagicMock()
+    vfs_db.refresh_unrestricted_url.return_value = live
+
+    session = MagicMock()
+    session.merge.return_value = cdn.entry
+    session_cm = MagicMock()
+    session_cm.__enter__.return_value = session
+    session_cm.__exit__.return_value = None
+
+    with (
+        patch("program.utils.debrid_cdn_url.db_session", return_value=session_cm),
+        patch("program.utils.debrid_cdn_url.di") as mock_di,
+    ):
+        mock_di.__getitem__.return_value = vfs_db
+        assert cdn._refresh() == live
+
+    vfs_db.schedule_dead_link_rescrape.assert_not_called()
+    assert cdn.url == live
