@@ -114,6 +114,26 @@ class DebridCDNUrl:
 
             return cls(entry)
 
+    def _maybe_refresh_after_transport_failure(
+        self,
+        *,
+        attempt_refresh: bool,
+        attempt: int,
+    ) -> bool:
+        """
+        Attempt one CDN URL refresh after a transport or auth failure.
+
+        Returns True when the caller should abort validation immediately
+        (refresh disabled on first failure).
+        """
+        if attempt != 1:
+            return False
+        if not attempt_refresh:
+            return True
+        if url := self._refresh_with_cooldown():
+            self.url = url
+        return False
+
     def validate(
         self,
         attempt_refresh: bool = True,
@@ -150,29 +170,37 @@ class DebridCDNUrl:
                 logger.error(
                     f"Timeout while validating CDN URL {self._sanitize_logged_url(self.url)}: {e}"
                 )
+                if self._maybe_refresh_after_transport_failure(
+                    attempt_refresh=attempt_refresh,
+                    attempt=attempt,
+                ):
+                    return None
             except httpx.ConnectError as e:
+                # Dead/retired RD CDN hostnames (e.g. NXDOMAIN on 109-4.download…)
+                # must refresh — retrying the same URL just spam-logs the same error.
                 logger.error(
                     f"Connection error while validating CDN URL "
                     f"{self._sanitize_logged_url(self.url)}: {e}"
                 )
+                if self._maybe_refresh_after_transport_failure(
+                    attempt_refresh=attempt_refresh,
+                    attempt=attempt,
+                ):
+                    return None
             except httpx.HTTPStatusError as e:
                 status_code = e.response.status_code
 
-                if (
-                    status_code
-                    in (
-                        HTTPStatus.NOT_FOUND,
-                        HTTPStatus.GONE,
-                        HTTPStatus.FORBIDDEN,
-                        HTTPStatus.UNAUTHORIZED,
-                    )
-                    and attempt == 1
+                if status_code in (
+                    HTTPStatus.NOT_FOUND,
+                    HTTPStatus.GONE,
+                    HTTPStatus.FORBIDDEN,
+                    HTTPStatus.UNAUTHORIZED,
                 ):
                     # Only attempt to refresh the URL on the first failure
-                    if attempt_refresh:
-                        if url := self._refresh_with_cooldown():
-                            self.url = url
-                    else:
+                    if self._maybe_refresh_after_transport_failure(
+                        attempt_refresh=attempt_refresh,
+                        attempt=attempt,
+                    ):
                         return None
             except RefreshedURLIdenticalException:
                 raise
