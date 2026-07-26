@@ -157,7 +157,9 @@ class TraktAPI:
 
         all_data = list[DataModel]()
 
-        def _request_page(requested_page: int, *, allow_refresh: bool = True):
+        def _request_page(
+            requested_page: int, *, allow_refresh: bool = True
+        ) -> PaginatedResponse[DataModel] | None:
             response = self.session.get(
                 url,
                 params={
