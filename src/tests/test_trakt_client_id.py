@@ -94,6 +94,8 @@ def test_oauth_token_exchange_posts_json_body_not_form():
     assert "Authorization" not in kwargs["headers"]
     assert settings.oauth.access_token == "new-access"
     assert settings.oauth.refresh_token == "new-refresh"
+    assert api.headers["Authorization"] == "Bearer new-access"
+    assert api.session.headers["Authorization"] == "Bearer new-access"
 
 
 def test_oauth_token_exchange_logs_failure_body():
