@@ -26,6 +26,7 @@ def _validate_ranking_in_settings(settings_dict: dict[str, Any]) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+
 router = APIRouter(
     prefix="/settings",
     tags=["settings"],

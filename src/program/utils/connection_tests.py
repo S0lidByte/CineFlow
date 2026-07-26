@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
-from typing import Literal
+from typing import Literal, cast
 from xmlrpc.client import ServerProxy
 
 import httpx
@@ -156,12 +156,17 @@ def _probe_real_debrid() -> ConnectionTestResponse:
         return _fail(started, f"HTTP {response.status_code}")
 
     try:
-        payload = response.json()
+        payload_obj: object = response.json()
     except ValueError:
         return _fail(started, "Invalid response")
 
-    username = payload.get("username") if isinstance(payload, dict) else None
-    if isinstance(username, str) and username.strip():
+    username: str | None = None
+    if isinstance(payload_obj, dict):
+        typed_payload = cast(dict[str, object], payload_obj)
+        raw_username = typed_payload.get("username")
+        if isinstance(raw_username, str):
+            username = raw_username
+    if username and username.strip():
         return _ok(started, f"Connected as {username.strip()}")
     return _ok(started, "Connected")
 
@@ -266,7 +271,9 @@ def _probe_prowlarr() -> ConnectionTestResponse:
 
 def _probe_opensubtitles() -> ConnectionTestResponse:
     started = time.perf_counter()
-    settings = settings_manager.settings.post_processing.subtitle.providers.opensubtitles
+    settings = (
+        settings_manager.settings.post_processing.subtitle.providers.opensubtitles
+    )
     username = (settings.username or "").strip()
     password = settings.password or ""
     user_agent = (settings.user_agent or "").strip() or "VLSub 0.11.1"
@@ -338,15 +345,17 @@ def _probe_subdl() -> ConnectionTestResponse:
         return _fail(started, f"HTTP {response.status_code}")
 
     try:
-        payload = response.json()
+        payload_obj: object = response.json()
     except ValueError:
         return _fail(started, "Invalid response")
 
-    if isinstance(payload, dict):
-        status = payload.get("status")
+    if isinstance(payload_obj, dict):
+        typed_payload = cast(dict[str, object], payload_obj)
+        status = typed_payload.get("status")
         if status is False:
-            err = payload.get("error") or payload.get("message") or "Unauthorized"
-            return _fail(started, str(err) if isinstance(err, str) else "Unauthorized")
+            raw_err = typed_payload.get("error") or typed_payload.get("message")
+            err_msg = raw_err if isinstance(raw_err, str) else "Unauthorized"
+            return _fail(started, err_msg)
 
     return _ok(started, "Connected to SubDL")
 
