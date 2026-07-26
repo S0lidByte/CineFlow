@@ -21,7 +21,7 @@ from program.settings.models import SubtitleConfig
 
 from .providers.opensubtitles import OpenSubtitlesProvider
 from .providers.subdl import SubDLProvider
-from .utils import calculate_opensubtitles_hash
+from .utils import calculate_opensubtitles_hash, subtitle_result_title_ok
 
 
 class SubtitleService(AnalysisService[SubtitleConfig]):
@@ -497,11 +497,36 @@ class SubtitleService(AnalysisService[SubtitleConfig]):
             logger.debug(f"No {language} subtitles found for {item.log_string}")
             return
 
+        # Reject weak matches whose filename/movie_name is a different title
+        # (Atlantis P0: fulltext returned Game.of.Thrones for Stargate Atlantis).
+        expected_title = item.top_title or item.title or ""
+        accepted = list[SubtitleItem]()
+        for result in all_results:
+            if subtitle_result_title_ok(
+                expected_title,
+                matched_by=result.matched_by,
+                movie_name=result.movie_name,
+                filename=result.filename,
+            ):
+                accepted.append(result)
+            else:
+                logger.warning(
+                    f"Rejecting {result.provider} subtitle '{result.filename}' "
+                    f"(matched_by={result.matched_by}) for {item.log_string}: "
+                    f"title does not match '{expected_title}'"
+                )
+
+        if not accepted:
+            logger.debug(
+                f"No {language} subtitles with matching title for {item.log_string}"
+            )
+            return
+
         # Sort by score (highest first)
-        all_results.sort(key=lambda x: x.score, reverse=True)
+        accepted.sort(key=lambda x: x.score, reverse=True)
 
         # Try to download the best subtitle
-        for subtitle_info in all_results[:3]:  # Try top 3 results
+        for subtitle_info in accepted[:3]:  # Try top 3 results
             try:
                 provider_name = subtitle_info.provider
                 provider = next(

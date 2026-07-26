@@ -259,6 +259,7 @@ class OpenSubtitlesProvider(SubtitleProvider):
         According to OpenSubtitles API documentation:
         - Priority: moviehash+moviebytesize > tag > imdbid > query
         - When moviehash and moviebytesize are provided, other parameters are ignored
+        - IMDB + season/episode is always preferred over fulltext when an IMDB ID exists
         - When tag is provided with imdbid, it filters results by release group/format
         - Multiple search criteria can be sent in a single request
 
@@ -302,14 +303,19 @@ class OpenSubtitlesProvider(SubtitleProvider):
                     f"OpenSubtitles search strategy 1: moviehash={video_hash[:8]}...{video_hash[-8:]}, size={file_size:,} bytes"
                 )
 
-            # Strategy 2: imdbid + filename + tag (release-specific match)
-            if imdb_id and search_tags:
-                imdb_id = imdb_id.lstrip("tt")  # Remove leading 'tt' from IMDB ID
+            # Strategy 2: imdbid + season/episode (tags optional, not required).
+            # Prefer IMDB identity over fulltext even when release tags are missing —
+            # otherwise por/other langs can fall through to fulltext-only and attach
+            # wrong-title files that share SxxExx (e.g. Game of Thrones for Atlantis).
+            if imdb_id:
+                imdb_numeric = imdb_id.lstrip("tt")
                 criteria = {
                     "sublanguageid": opensubtitles_lang,
-                    "imdbid": imdb_id,  # Remove leading 'tt' from IMDB ID
-                    "tags": search_tags,
+                    "imdbid": imdb_numeric,
                 }
+
+                if search_tags:
+                    criteria["tags"] = search_tags
 
                 if season is not None:
                     criteria["season"] = str(season)
@@ -320,7 +326,8 @@ class OpenSubtitlesProvider(SubtitleProvider):
                 search_criteria.append(criteria)
 
                 logger.trace(
-                    f"OpenSubtitles search strategy 2: imdbid={imdb_id}, tags={search_tags}, season={season}, episode={episode}"
+                    f"OpenSubtitles search strategy 2: imdbid={imdb_numeric}, "
+                    f"tags={search_tags or '-'}, season={season}, episode={episode}"
                 )
 
             # strategy 3: filename
