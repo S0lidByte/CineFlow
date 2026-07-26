@@ -8,6 +8,12 @@ from program.settings import settings_manager
 from program.settings.models import AppModel
 from program.settings.ranking_descriptions import enrich_ranking_schema
 from program.settings.ranking_patterns import validate_ranking_payload_patterns
+from program.utils.connection_tests import (
+    SUPPORTED_SERVICES,
+    ConnectionService,
+    ConnectionTestResponse,
+    run_connection_test,
+)
 
 from ..models.shared import MessageResponse
 
@@ -287,3 +293,24 @@ async def set_settings(
         ) from e
 
     return MessageResponse(message="Settings updated successfully.")
+
+
+@router.post(
+    "/test-connection/{service}",
+    operation_id="test_settings_connection",
+    response_model=ConnectionTestResponse,
+)
+async def test_settings_connection(
+    service: Annotated[
+        ConnectionService,
+        Path(description="Integration to probe (saved settings only)"),
+    ],
+) -> ConnectionTestResponse:
+    """Probe a third-party integration using saved settings.
+
+    Returns ``{ok, latency_ms, message}``. Messages never include secrets.
+    Hard wall-clock timeout is ≤5 seconds per probe.
+    """
+    if service not in SUPPORTED_SERVICES:
+        raise HTTPException(status_code=404, detail="Unknown service")
+    return run_connection_test(service)
