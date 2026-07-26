@@ -1,7 +1,7 @@
 """Shared functions for scrapers."""
 
 from datetime import datetime
-from typing import cast
+from typing import Literal, cast
 
 from loguru import logger
 from RTN import (
@@ -104,6 +104,39 @@ def normalize_rtn_language_settings(settings: SettingsModel) -> None:
 
 def _item_is_anime(item: MediaItem | object) -> bool:
     return bool(getattr(item, "is_anime", False))
+
+
+def resolve_ranking_pack(
+    item: MediaItem | object,
+) -> Literal["ranking", "ranking_anime"]:
+    """Resolve which ranking pack applies for scrape ranking.
+
+    Prefer the first matching library profile (settings order) that sets
+    ``ranking_pack``. Otherwise fall back to ``item.is_anime`` routing.
+    """
+    from program.services.library_profile_matcher import LibraryProfileMatcher
+    from program.settings.models import RankingPackKey
+
+    profiles = settings_manager.settings.filesystem.library_profiles or {}
+    try:
+        matching = LibraryProfileMatcher().get_matching_profiles(item)  # type: ignore[arg-type]
+    except Exception:
+        matching = []
+
+    for profile_key in matching:
+        profile = profiles.get(profile_key)
+        pack: RankingPackKey | None = (
+            profile.ranking_pack if profile is not None else None
+        )
+        if pack is not None:
+            return pack
+
+    return "ranking_anime" if _item_is_anime(item) else "ranking"
+
+
+def item_uses_anime_ranking(item: MediaItem | object) -> bool:
+    """True when scrape ranking should use the anime pack for this item."""
+    return resolve_ranking_pack(item) == "ranking_anime"
 
 
 def _scraping_settings() -> ScraperModel:
@@ -211,9 +244,7 @@ def _resolve_scrape_aliases(
 
     raw = item.get_aliases() or {}
     aliases = {
-        k: list(v)
-        for k, v in raw.items()
-        if k not in active_settings.languages.exclude
+        k: list(v) for k, v in raw.items() if k not in active_settings.languages.exclude
     }
     return _merge_remake_aliases(item.top_title or "", aliases)
 
@@ -515,7 +546,7 @@ def _prepare_rtn_ranking_context(
     """Build RTN instance, settings, title, and aliases for ranking."""
 
     correct_title = item.top_title
-    for_anime = _item_is_anime(item)
+    for_anime = item_uses_anime_ranking(item)
     active_settings = settings_manager.get_effective_rtn_model(for_anime=for_anime)
     _normalize_rtn_language_settings(active_settings)
     active_settings = _apply_anime_extras_dubbed_soft_opt_in(item, active_settings)
@@ -523,8 +554,7 @@ def _prepare_rtn_ranking_context(
     # Module-level ``rtn`` is built from movie/show ranking only — never reuse it
     # for anime packs even when active_settings match ranking_anime defaults.
     is_default_settings = (
-        not for_anime
-        and active_settings.model_dump() == ranking_settings.model_dump()
+        not for_anime and active_settings.model_dump() == ranking_settings.model_dump()
     )
     rtn_instance = rtn if is_default_settings else RTN(active_settings, ranking_model)
 
