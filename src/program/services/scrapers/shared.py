@@ -508,11 +508,17 @@ def _prepare_rtn_ranking_context(
     """Build RTN instance, settings, title, and aliases for ranking."""
 
     correct_title = item.top_title
-    active_settings = settings_manager.get_effective_rtn_model()
+    for_anime = _item_is_anime(item)
+    active_settings = settings_manager.get_effective_rtn_model(for_anime=for_anime)
     _normalize_rtn_language_settings(active_settings)
     active_settings = _apply_anime_extras_dubbed_soft_opt_in(item, active_settings)
 
-    is_default_settings = active_settings.model_dump() == ranking_settings.model_dump()
+    # Module-level ``rtn`` is built from movie/show ranking only — never reuse it
+    # for anime packs even when active_settings match ranking_anime defaults.
+    is_default_settings = (
+        not for_anime
+        and active_settings.model_dump() == ranking_settings.model_dump()
+    )
     rtn_instance = rtn if is_default_settings else RTN(active_settings, ranking_model)
 
     aliases = _resolve_scrape_aliases(item, active_settings)

@@ -285,8 +285,16 @@ def enrich_ranking_schema(schema: dict[str, Any]) -> dict[str, Any]:
         if ranking is not None:
             _set_desc(
                 ranking,
-                "RTN result ranking and trash filters. Reject reasons in logs map to "
-                "custom_ranks.<category>.<attribute> (denied by: <category>_<attribute>).",
+                "RTN result ranking and trash filters for movies/non-anime shows. "
+                "Reject reasons in logs map to custom_ranks.<category>.<attribute> "
+                "(denied by: <category>_<attribute>). Anime uses ranking_anime.",
+            )
+        ranking_anime = _as_schema_object(properties.get("ranking_anime"))
+        if ranking_anime is not None:
+            _set_desc(
+                ranking_anime,
+                "Independent RTN ranking for anime (is_anime). Defaults to Anime "
+                "Dub Friendly. Soft-opt-ins under Scraping still apply on top.",
             )
 
     defs = _as_schema_object(schema.get("$defs"))

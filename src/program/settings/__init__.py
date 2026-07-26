@@ -245,12 +245,16 @@ class SettingsManager:
             return overrides[key]
         return default
 
-    def get_effective_rtn_model(self):
-        """Get the effective RTN settings, merging global settings with active overrides."""
+    def get_effective_rtn_model(self, *, for_anime: bool = False):
+        """Get the effective RTN settings, merging global settings with active overrides.
+
+        Anime items use ``ranking_anime``; movies/shows use ``ranking``. Manual
+        scrape overrides (context) still win on top of either pack.
+        """
         from RTN.models import SettingsModel
 
-        # Start with global settings
-        ranking_settings = self.settings.ranking.model_dump()
+        source = self.settings.ranking_anime if for_anime else self.settings.ranking
+        ranking_settings = source.model_dump()
 
         # Apply overrides
         overrides = self._overrides_ctx.get()

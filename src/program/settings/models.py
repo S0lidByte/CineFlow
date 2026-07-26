@@ -952,6 +952,13 @@ class ScraperModel(Observable):
 class RTNSettingsModel(SettingsModel, Observable): ...
 
 
+def _default_ranking_anime() -> RTNSettingsModel:
+    """Independent anime ranking defaults from the Anime Dub Friendly preset."""
+    from program.settings.ranking_presets import default_anime_rtn_settings
+
+    return RTNSettingsModel(**default_anime_rtn_settings().model_dump())
+
+
 # Application Settings
 
 
@@ -1176,9 +1183,18 @@ class AppModel(Observable):
     ranking: RTNSettingsModel = Field(
         default_factory=lambda: RTNSettingsModel(),
         description=(
-            "RTN ranking and trash filters. DEBUG rejects map to "
-            "custom_ranks.<category>.<attribute> as denied by: <category>_<attribute> "
-            "(e.g. audio_dolby_digital_plus)."
+            "RTN ranking and trash filters for movies and non-anime shows. "
+            "DEBUG rejects map to custom_ranks.<category>.<attribute> as "
+            "denied by: <category>_<attribute> (e.g. audio_dolby_digital_plus). "
+            "Anime items use ranking_anime instead."
+        ),
+    )
+    ranking_anime: RTNSettingsModel = Field(
+        default_factory=lambda: _default_ranking_anime(),
+        description=(
+            "Independent RTN ranking for anime items (is_anime). Defaults to the "
+            "Anime Dub Friendly preset so anime can be tuned separately from "
+            "movies/shows. Soft-opt-ins under Scraping still apply on top."
         ),
     )
     indexer: IndexerModel = Field(
