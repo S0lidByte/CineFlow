@@ -58,6 +58,24 @@ type ReadType = Literal[
 ]
 
 
+def should_emit_hot_stream_trace(counter: int, every: int) -> bool:
+    """Whether the Nth hot STREAM event should be logged.
+
+    ``every=1`` logs all events (legacy behavior). ``every=50`` logs the 1st,
+    51st, 101st, … event so playback stays diagnosable without drowning logs.
+    """
+
+    if every <= 1:
+        return True
+    if counter < 1:
+        return False
+    return counter % every == 1
+
+
+# High-frequency read types that flood logs during sequential playback.
+_HOT_STREAM_READ_TYPES: frozenset[str] = frozenset({"cache_hit", "body_read"})
+
+
 if TYPE_CHECKING:
     from pyfuse3 import FileHandleT
 else:
@@ -96,6 +114,7 @@ class MediaStream:
             trio_util.AsyncValue(None)
         )
         self.enable_tracing = settings_manager.settings.enable_stream_tracing
+        self._hot_trace_counter = 0
 
         # Store initial URL to avoid redundant unrestrict calls
         self.target_url: trio_util.AsyncValue[str] = trio_util.AsyncValue(initial_url)
@@ -125,14 +144,10 @@ class MediaStream:
             file_size=file_size,
         )
 
-        if self.enable_tracing:
-            logger.log(
-                "STREAM",
-                self.build_log_message(
-                    f"Initialized stream with chunk size {self.config.chunk_size / (1024 * 1024):.2f} MB. "
-                    f"file_size={self.file_metadata.file_size} bytes",
-                ),
-            )
+        self._trace_stream(
+            f"Initialized stream with chunk size {self.config.chunk_size / (1024 * 1024):.2f} MB. "
+            f"file_size={self.file_metadata.file_size} bytes",
+        )
 
         # Validate cache size
         # Cache needs to hold 10 chunks (10MiB) to avoid thrashing with concurrent reads
@@ -153,6 +168,18 @@ class MediaStream:
             self.async_client = di[ProxyClient]
         else:
             self.async_client = di[AsyncClient]
+
+    def _trace_stream(self, message: str, *, hot: bool = False) -> None:
+        """Emit a STREAM log line, optionally sampling high-frequency events."""
+
+        if not self.enable_tracing:
+            return
+        if hot:
+            self._hot_trace_counter += 1
+            every = settings_manager.settings.stream_tracing_sample_every
+            if not should_emit_hot_stream_trace(self._hot_trace_counter, every):
+                return
+        logger.log("STREAM", self.build_log_message(message))
 
     def __repr__(self) -> str:
         return (
@@ -204,21 +231,13 @@ class MediaStream:
         try:
             self.is_streaming.value = True
 
-            if self.enable_tracing:
-                logger.log(
-                    "STREAM",
-                    self.build_log_message("Starting stream lifecycle"),
-                )
+            self._trace_stream("Starting stream lifecycle")
 
             yield
         finally:
             self.is_streaming.value = False
 
-            if self.enable_tracing:
-                logger.log(
-                    "STREAM",
-                    self.build_log_message("Stream lifecycle ended"),
-                )
+            self._trace_stream("Stream lifecycle ended")
 
     @asynccontextmanager
     async def manage_connection(
@@ -697,13 +716,10 @@ class MediaStream:
 
         async with self.capture_stream_errors():
             async with self.read_lifecycle(chunk_range=read_range) as read_type:
-                if self.enable_tracing:
-                    logger.log(
-                        "STREAM",
-                        self.build_log_message(
-                            f"Performing {read_type} for [{request_start}-{request_end}]"
-                        ),
-                    )
+                self._trace_stream(
+                    f"Performing {read_type} for [{request_start}-{request_end}]",
+                    hot=read_type in _HOT_STREAM_READ_TYPES,
+                )
 
                 match read_type:
                     case "cache_hit":
@@ -748,13 +764,10 @@ class MediaStream:
 
         await self._wait_until_chunks_ready(chunk_range=chunk_range)
 
-        if self.enable_tracing:
-            logger.log(
-                "STREAM",
-                self.build_log_message(
-                    f"Found cache, attempting to read {start}-{end}"
-                ),
-            )
+        self._trace_stream(
+            f"Found cache, attempting to read {start}-{end}",
+            hot=True,
+        )
 
         cached_data = await self._read_cache(
             start=start,
@@ -762,13 +775,10 @@ class MediaStream:
         )
 
         if cached_data:
-            if self.enable_tracing:
-                logger.log(
-                    "STREAM",
-                    self.build_log_message(
-                        f"Found data {start}-{end} ({len(cached_data)} bytes) from cache"
-                    ),
-                )
+            self._trace_stream(
+                f"Found data {start}-{end} ({len(cached_data)} bytes) from cache",
+                hot=True,
+            )
 
             return cached_data
 
@@ -1262,13 +1272,9 @@ class MediaStream:
             fresh_url = entry_info.url
 
             if fresh_url and fresh_url != self.target_url.value:
-                if self.enable_tracing:
-                    logger.log(
-                        "STREAM",
-                        self.build_log_message(
-                            f"Refreshed URL for {self.file_metadata.original_filename}"
-                        ),
-                    )
+                self._trace_stream(
+                    f"Refreshed URL for {self.file_metadata.original_filename}"
+                )
 
                 self.target_url.value = fresh_url
 
