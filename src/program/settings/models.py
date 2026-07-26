@@ -227,6 +227,9 @@ class LibraryProfileFilterRules(BaseModel):
         return self
 
 
+RankingPackKey = Literal["ranking", "ranking_anime"]
+
+
 class LibraryProfile(BaseModel):
     """Library profile configuration for organizing media into different libraries"""
 
@@ -235,6 +238,16 @@ class LibraryProfile(BaseModel):
         description="VFS path prefix for this profile (e.g., '/kids', '/anime')"
     )
     enabled: bool = Field(default=True, description="Enable this profile")
+    ranking_pack: RankingPackKey | None = Field(
+        default=None,
+        description=(
+            "Optional ranking pack for scrape ranking when this profile matches. "
+            "'ranking' = Movies & Shows; 'ranking_anime' = Anime. "
+            "None = fall back to item.is_anime routing. "
+            "When multiple profiles match, the first enabled profile (settings "
+            "order) with ranking_pack set wins."
+        ),
+    )
     filter_rules: LibraryProfileFilterRules = Field(
         default_factory=lambda: LibraryProfileFilterRules(),
         description="Metadata filter rules for matching items",
@@ -273,6 +286,7 @@ class FilesystemModel(Observable):
                 name="Anime",
                 library_path="/anime",
                 enabled=True,
+                ranking_pack="ranking_anime",
                 filter_rules=LibraryProfileFilterRules(is_anime=True),
             ),
             # Example profile (disabled by default) - enable or customize as needed

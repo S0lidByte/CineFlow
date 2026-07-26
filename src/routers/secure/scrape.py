@@ -36,7 +36,10 @@ from program.services.downloaders.models import (
 from program.services.downloaders.shared import DownloaderBase
 from program.services.scrapers import Scraping
 from program.services.scrapers.funnel import ScrapeFunnelStats, remember_funnel_summary
-from program.services.scrapers.shared import get_ranking_overrides
+from program.services.scrapers.shared import (
+    get_ranking_overrides,
+    item_uses_anime_ranking,
+)
 from program.settings import settings_manager
 from program.types import Event
 from program.utils.locking import ItemLock
@@ -729,7 +732,7 @@ def scrape_item(
                 # Apply custom params to the detached item
                 apply_custom_params(item)
                 overrides = build_scrape_overrides(
-                    for_anime=bool(getattr(item, "is_anime", False))
+                    for_anime=item_uses_anime_ranking(item)
                 )
 
                 all_streams: dict[str, Stream] = {}
@@ -811,9 +814,7 @@ def scrape_item(
         )
         assert item
         apply_custom_params(item)
-        overrides = build_scrape_overrides(
-            for_anime=bool(getattr(item, "is_anime", False))
-        )
+        overrides = build_scrape_overrides(for_anime=item_uses_anime_ranking(item))
 
         with settings_manager.override(**overrides):
             funnel = ScrapeFunnelStats()
@@ -1327,7 +1328,7 @@ async def auto_scrape(
         # Empty overrides leave pack selection to get_effective_rtn_model(item).
         rtn_settings_override_model = get_ranking_overrides(
             request.ranking_overrides,
-            for_anime=bool(getattr(item, "is_anime", False)),
+            for_anime=item_uses_anime_ranking(item),
         )
         overrides: dict[str, Any] = (
             rtn_settings_override_model.model_dump()

@@ -78,6 +78,7 @@ jobs:
             src/tests/test_scrape_funnel.py \
             src/tests/test_ranking_soft_opt_in.py \
             src/tests/test_anime_ranking_settings.py \
+            src/tests/test_per_library_ranking_packs.py \
             src/tests/test_stats_needs_attention.py \
             src/tests/test_settings_connection.py \
             src/tests/test_stremthru_scraper.py \
