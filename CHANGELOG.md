@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.28.4](https://github.com/S0lidByte/CineFlow/compare/v1.28.3...v1.28.4) (2026-07-27)
+
+
+### Bug Fixes
+
+* **updaters:** fix service_name property, path normalization, and test fixtures ([63525bb](https://github.com/S0lidByte/CineFlow/commit/63525bbda0a248b4bd6af15d8245683eee67ef29))
+* **vfs:** handle DebridServiceFairUsageLimitException in CDNUrl validate and suppress per-file log spam ([d4495cb](https://github.com/S0lidByte/CineFlow/commit/d4495cb08b845f1f6764769cda22b7e71474d396))
+
 ## [1.28.3](https://github.com/S0lidByte/CineFlow/compare/v1.28.2...v1.28.3) (2026-07-26)
 
 
