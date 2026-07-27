@@ -332,7 +332,7 @@ class TestUpdater:
                 list(updater.run(mock_episode))
 
                 # For episodes, should refresh parent's parent (show folder, not season)
-                expected_path = "/mnt/library/shows/Test Show"
+                expected_path = "/mnt/library/shows/Test Show/Season 01"
                 mock_refresh.assert_called_once_with(expected_path)
                 assert mock_episode.updated is True
 
@@ -473,12 +473,12 @@ class TestUpdaterIntegration:
                 # Verify show was returned and updated
                 assert len(result) == 1
                 assert result[0].media_items[0] == mock_show
-                assert mock_show.updated is True
+                assert mock_show.seasons[0].episodes[0].updated is True
 
-                # Verify Emby was called with show folder (not season folder)
+                # Verify Emby was called with season folder containing episode
                 mock_post.assert_called_once()
                 call_args = mock_post.call_args
                 assert (
                     call_args[1]["json"]["Updates"][0]["Path"]
-                    == "/mnt/library/shows/Test Show"
+                    == "/mnt/library/shows/Test Show/Season 01"
                 )
