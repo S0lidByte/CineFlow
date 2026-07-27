@@ -60,6 +60,11 @@ class Updater(Runner[None, BaseUpdater]):
             MediaItem: The item after processing
         """
 
+        if not self.initialized:
+            logger.debug("Updater not initialized; skipping update process")
+            yield RunnerResult(media_items=[item])
+            return
+
         logger.debug(f"Starting update process for {item.log_string}")
         items = self.get_items_to_update(item)
         refreshed_paths = set[str]()  # Track refreshed paths to avoid duplicates
@@ -88,8 +93,8 @@ class Updater(Runner[None, BaseUpdater]):
 
             for vfs_path in all_vfs_paths:
                 # Build absolute path to the file
-                abs_path = os.path.join(self.library_path, vfs_path.lstrip("/"))
-                refresh_path = os.path.dirname(abs_path)
+                abs_path = os.path.join(self.library_path, vfs_path.lstrip("/")).replace("\\", "/")
+                refresh_path = os.path.dirname(abs_path).replace("\\", "/")
 
                 # Refresh the path in all services (skip if already refreshed)
                 if refresh_path not in refreshed_paths:

@@ -36,7 +36,7 @@ def db_engine(test_container):
         url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
     # Ensure Alembic env.py uses this test URL (it reads from settings_manager)
-    from program.settings.manager import settings_manager
+    from program.settings import settings_manager
 
     settings_manager.settings.database.host = url
 

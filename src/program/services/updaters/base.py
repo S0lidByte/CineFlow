@@ -26,6 +26,13 @@ class BaseUpdater(ABC):
         self.key = service_name
         self.initialized = False
 
+    @property
+    def service_name(self) -> str:
+        key = getattr(self, "key", "")
+        if key.endswith("updater"):
+            return key[:-7].capitalize()
+        return key.capitalize() if key else "Unknown"
+
     def _initialize(self):
         """Initialize the updater by validating configuration."""
 

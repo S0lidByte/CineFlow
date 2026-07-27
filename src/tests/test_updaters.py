@@ -19,6 +19,10 @@ def mock_movie():
     movie.type = "movie"
     movie.filesystem_entry = Mock()
     movie.filesystem_entry.path = "/movies/Test Movie (2020)/Test Movie (2020).mkv"
+    movie.media_entry = Mock()
+    movie.media_entry.get_all_vfs_paths.return_value = [
+        "/movies/Test Movie (2020)/Test Movie (2020).mkv"
+    ]
     movie.updated = False
     movie.log_string = "Test Movie (2020)"
     return movie
@@ -31,20 +35,32 @@ def mock_episode():
     episode.type = "episode"
     episode.filesystem_entry = Mock()
     episode.filesystem_entry.path = "/shows/Test Show/Season 01/Test Show S01E01.mkv"
+    episode.media_entry = Mock()
+    episode.media_entry.get_all_vfs_paths.return_value = [
+        "/shows/Test Show/Season 01/Test Show S01E01.mkv"
+    ]
     episode.updated = False
     episode.log_string = "Test Show S01E01"
     return episode
 
 
 @pytest.fixture
-def mock_show():
+def mock_show(mock_episode):
     """Create a mock show with season and episode"""
     show = Mock(spec=Show)
     show.type = "show"
     show.filesystem_entry = Mock()
     show.filesystem_entry.path = "/shows/Test Show/Season 01/Test Show S01E01.mkv"
+    show.media_entry = Mock()
+    show.media_entry.get_all_vfs_paths.return_value = [
+        "/shows/Test Show/Season 01/Test Show S01E01.mkv"
+    ]
     show.updated = False
     show.log_string = "Test Show"
+    season = Mock()
+    season.episodes = [mock_episode]
+    mock_episode.available_in_vfs = True
+    show.seasons = [season]
     return show
 
 
@@ -323,7 +339,7 @@ class TestUpdater:
     def test_run_no_filesystem_entry(self, mock_settings, mock_movie):
         """Test run() when item has no filesystem entry"""
         mock_settings["emby"].settings.updaters.emby.enabled = True
-        mock_movie.filesystem_entry = None
+        mock_movie.media_entry = None
 
         with patch.object(EmbyUpdater, "validate", return_value=True):
             updater = Updater()
@@ -426,7 +442,7 @@ class TestUpdaterIntegration:
 
                 # Verify item was returned and updated
                 assert len(result) == 1
-                assert result[0] == mock_movie
+                assert result[0].media_items[0] == mock_movie
                 assert mock_movie.updated is True
 
                 # Verify Emby was called with correct path
@@ -456,7 +472,7 @@ class TestUpdaterIntegration:
 
                 # Verify show was returned and updated
                 assert len(result) == 1
-                assert result[0] == mock_show
+                assert result[0].media_items[0] == mock_show
                 assert mock_show.updated is True
 
                 # Verify Emby was called with show folder (not season folder)
