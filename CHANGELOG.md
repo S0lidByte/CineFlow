@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.5](https://github.com/S0lidByte/CineFlow/compare/v1.28.4...v1.28.5) (2026-07-27)
+
+
+### Bug Fixes
+
+* **vfs:** raise DebridServiceLinkUnavailable on missing MediaEntry in DebridCDNUrl.from_filename ([18b37f6](https://github.com/S0lidByte/CineFlow/commit/18b37f6d4db81892a514f25eb1e603e301436067))
+
 ## [1.28.4](https://github.com/S0lidByte/CineFlow/compare/v1.28.3...v1.28.4) (2026-07-27)
 
 
