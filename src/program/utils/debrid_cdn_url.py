@@ -130,7 +130,10 @@ class DebridCDNUrl:
             )
 
             if not entry:
-                raise ValueError("Could not find entry info for CDN URL validation")
+                raise DebridServiceLinkUnavailable(
+                    provider="vfs",
+                    link=filename,
+                )
 
             return cls(entry)
 

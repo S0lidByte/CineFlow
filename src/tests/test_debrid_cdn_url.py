@@ -190,3 +190,17 @@ def test_refresh_different_host_returns_new_url():
 
     vfs_db.schedule_dead_link_rescrape.assert_not_called()
     assert cdn.url == live
+
+
+def test_from_filename_missing_entry_raises_link_unavailable():
+    session = MagicMock()
+    session.query.return_value.filter.return_value.first.return_value = None
+    session_cm = MagicMock()
+    session_cm.__enter__.return_value = session
+    session_cm.__exit__.return_value = None
+
+    with patch("program.utils.debrid_cdn_url.db_session", return_value=session_cm):
+        with pytest.raises(DebridServiceLinkUnavailable) as exc_info:
+            DebridCDNUrl.from_filename("missing_file.mkv")
+
+        assert "missing_file.mkv" in str(exc_info.value)
