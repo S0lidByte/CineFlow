@@ -89,7 +89,7 @@ def test_fair_usage_warning_logged_once_per_cooldown(rd_downloader):
     ]
 
     assert len(warning_calls) == 1
-    assert len(debug_calls) == 2
+    assert len(debug_calls) == 0
     rd_downloader.api.session.post.assert_not_called()
 
 

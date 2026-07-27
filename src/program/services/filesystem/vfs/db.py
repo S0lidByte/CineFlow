@@ -181,12 +181,9 @@ class VFSDatabase:
                     )
 
                     return entry.unrestricted_url
-            except DebridServiceFairUsageLimitException as e:
-                # Provider already logs WARNING once per cooldown; keep this at debug
-                # so client open-retries (~2s) do not triple-spam the log.
-                logger.debug(
-                    f"Fair usage limit reached when unrestricting URL for {entry.original_filename}: {e}"
-                )
+            except DebridServiceFairUsageLimitException:
+                # Downloader and VFS log WARNING once per cooldown window;
+                # re-raise without per-file log spam on sequential open retries.
                 raise
             except DebridServiceLinkUnavailable as e:
                 logger.warning(

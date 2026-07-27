@@ -710,11 +710,6 @@ class RealDebridDownloader(DownloaderBase):
                     f"Skipping unrestrict: Fair usage limit active for {self.key} "
                     f"until {until_iso} (~{remaining:.0f}s)"
                 )
-        else:
-            logger.debug(
-                f"Fair usage cooldown active for {self.key} until {until_iso} "
-                f"(~{remaining:.0f}s remaining)"
-            )
 
         raise DebridServiceFairUsageLimitException(
             provider=self.key,

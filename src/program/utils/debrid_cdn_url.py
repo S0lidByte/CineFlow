@@ -237,7 +237,10 @@ class DebridCDNUrl:
                         attempt=attempt,
                     ):
                         return None
-            except RefreshedURLIdenticalException:
+            except (
+                RefreshedURLIdenticalException,
+                DebridServiceFairUsageLimitException,
+            ):
                 raise
             except Exception as e:
                 logger.error(
