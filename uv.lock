@@ -1531,7 +1531,7 @@ wheels = [
 
 [[package]]
 name = "riven"
-version = "1.28.7"
+version = "1.28.8"
 source = { virtual = "." }
 dependencies = [
     { name = "alembic" },
@@ -1603,7 +1603,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13.2,<2" },
     { name = "apprise", specifier = ">=1.12.0,<2" },
     { name = "apscheduler", specifier = ">=3.10.4,<4" },
-    { name = "babel", specifier = ">=2.17.0,<3" },
+    { name = "babel", specifier = ">=2.18.0,<3" },
     { name = "bencodepy", specifier = ">=0.9.5,<0.10" },
     { name = "cachetools", specifier = ">=5.3.3,<8" },
     { name = "coverage", specifier = ">=7.15.2,<8" },
@@ -1628,7 +1628,7 @@ requires-dist = [
     { name = "pyfuse3", marker = "sys_platform == 'linux'", specifier = ">=3.4.0,<4" },
     { name = "python-dotenv", specifier = ">=1.0.1,<2" },
     { name = "python-multipart", specifier = ">=0.0.31" },
-    { name = "rank-torrent-name", specifier = ">=1.9.3,<2" },
+    { name = "rank-torrent-name", specifier = ">=1.11.1,<2" },
     { name = "requests", extras = ["socks"], specifier = ">=2.32.5,<3" },
     { name = "requests-cache", specifier = ">=1.2.1,<2" },
     { name = "requests-ratelimiter", specifier = ">=0.7.0,<0.11" },
