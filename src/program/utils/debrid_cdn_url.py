@@ -22,6 +22,21 @@ class RefreshedURLIdenticalException(Exception):
     """Exception raised when a refreshed URL is identical to the previous URL."""
 
 
+# Ghost-entry healing: validate() → None does not raise LinkUnavailable, so VFS
+# nodes stay listed but unplayable. After N consecutive soft-failures (with no
+# refresh cooldown / fair-usage deferral), schedule a dead-link re-scrape.
+PERSISTENT_VALIDATE_NONE_THRESHOLD = 2
+_RESCRAPE_DEDUP_SECONDS = 1800.0
+_validate_none_counts: dict[str, int] = {}
+_rescrape_scheduled_until: dict[str, float] = {}
+
+
+def clear_persistent_validate_failure_state() -> None:
+    """Test helper: reset in-process ghost-entry counters."""
+    _validate_none_counts.clear()
+    _rescrape_scheduled_until.clear()
+
+
 class DebridCDNUrl:
     """DebridCDNUrl class"""
 
@@ -173,6 +188,67 @@ class DebridCDNUrl:
         else:
             logger.debug(message)
 
+    def _clear_validate_none_count(self) -> None:
+        _validate_none_counts.pop(self.filename, None)
+
+    def _maybe_schedule_after_validate_none(self) -> None:
+        """
+        Heal ghost VFS entries: repeated validate()→None without an active
+        refresh cooldown schedules dead-link re-scrape (blacklist + fetch again).
+
+        Skips while refresh is deferred (fair usage / circuit breaker) so
+        transient RD pressure from #177 does not immediately remove items.
+        """
+        if self._get_refresh_cooldown_remaining() > 0:
+            return
+
+        filename = self.filename
+        now = time.monotonic()
+        if _rescrape_scheduled_until.get(filename, 0.0) > now:
+            return
+
+        count = _validate_none_counts.get(filename, 0) + 1
+        _validate_none_counts[filename] = count
+
+        if count < PERSISTENT_VALIDATE_NONE_THRESHOLD:
+            logger.debug(
+                f"CDN validate returned no link for {filename} "
+                f"({count}/{PERSISTENT_VALIDATE_NONE_THRESHOLD}); "
+                f"will re-scrape after threshold"
+            )
+            return
+
+        _validate_none_counts.pop(filename, None)
+        _rescrape_scheduled_until[filename] = now + _RESCRAPE_DEDUP_SECONDS
+
+        try:
+            from program.services.filesystem.vfs.db import VFSDatabase
+
+            with db_session() as session:
+                entry = session.merge(self.entry)
+                scheduled = di[VFSDatabase].schedule_dead_link_rescrape(
+                    entry=entry,
+                    session=session,
+                )
+                if not scheduled:
+                    _rescrape_scheduled_until.pop(filename, None)
+                    logger.debug(
+                        f"Ghost-entry re-scrape not scheduled for {filename} "
+                        f"(no media item on entry)"
+                    )
+                    return
+
+            logger.warning(
+                f"Persistent CDN validate failure for {filename}; "
+                f"scheduled automatic re-scrape after "
+                f"{PERSISTENT_VALIDATE_NONE_THRESHOLD} soft failures"
+            )
+        except Exception as e:
+            _rescrape_scheduled_until.pop(filename, None)
+            logger.warning(
+                f"Failed to schedule ghost-entry re-scrape for {filename}: {e}"
+            )
+
     def validate(
         self,
         attempt_refresh: bool = True,
@@ -196,6 +272,8 @@ class DebridCDNUrl:
                         if url := self._refresh_with_cooldown():
                             self.url = url
                         else:
+                            if attempt == 1:
+                                self._maybe_schedule_after_validate_none()
                             return None
                     else:
                         return None
@@ -204,6 +282,7 @@ class DebridCDNUrl:
                     with client.stream(method="GET", url=self.url) as response:
                         response.raise_for_status()
 
+                        self._clear_validate_none_count()
                         return self.url
             except httpx.TimeoutException as e:
                 self._log_transport_failure(kind="Timeout", attempt=attempt, error=e)
@@ -251,6 +330,8 @@ class DebridCDNUrl:
                     f"{self._sanitize_logged_url(self.url)}: {e}"
                 )
 
+                if attempt == 1:
+                    self._maybe_schedule_after_validate_none()
                 return None
 
             if self._get_refresh_cooldown_remaining() > 0:
@@ -262,6 +343,7 @@ class DebridCDNUrl:
                     attempt=attempt + 1,
                 )
 
+            self._maybe_schedule_after_validate_none()
             return None
         except RefreshedURLIdenticalException as e:
             # If the URL hasn't changed after refreshing, it is likely dead.
