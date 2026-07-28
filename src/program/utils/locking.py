@@ -43,7 +43,7 @@ class ItemLock:
             try:
                 await asyncio.wait_for(lock.acquire(), timeout=timeout)
                 return True
-            except (asyncio.TimeoutError, TimeoutError):
+            except TimeoutError:
                 return False
 
         await lock.acquire()

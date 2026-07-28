@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from RTN.models import SettingsModel
+
 from program.services.scrapers.shared import _prepare_rtn_ranking_context
 from program.settings import settings_manager
 from program.settings.ranking_presets import (
     apply_ranking_preset,
     default_anime_rtn_settings,
 )
-from RTN.models import SettingsModel
 
 
 class AnimeItem:

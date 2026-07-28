@@ -76,7 +76,7 @@ class ServerSentEventManager:
                     # Wait for events with a timeout to send keepalive
                     data = await asyncio.wait_for(queue.get(), timeout=30.0)
                     yield f"data: {data}\n\n"
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # Send keepalive comment to prevent connection timeout
                     yield ": keepalive\n\n"
         finally:

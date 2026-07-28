@@ -7,6 +7,7 @@ from RTN import RTN, DefaultRanking
 from RTN.exceptions import GarbageTorrent
 from RTN.models import SettingsModel
 
+from program.services.scrapers.shared import normalize_rtn_language_settings
 from program.settings.models import RTNSettingsModel
 from program.settings.ranking_patterns import (
     MAX_PATTERN_LENGTH,
@@ -14,7 +15,6 @@ from program.settings.ranking_patterns import (
     validate_pattern_lists,
     validate_ranking_payload_patterns,
 )
-from program.services.scrapers.shared import normalize_rtn_language_settings
 
 WEBDL_DDP = "The.Movie.2024.2160p.WEB-DL.DDP5.1.Atmos.H.265-GROUP"
 ANIME_MULTI = "Dragon Ball Z Resurrection F 2015 MULTi TRUEFRENCH 1080p BluRay x264"
