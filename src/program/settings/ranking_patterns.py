@@ -138,7 +138,7 @@ def validate_pattern_string(
         return PatternIssue(field, index, pattern, redos)
     try:
         compile_rtn_pattern(pattern)
-    except Exception as exc:  # noqa: BLE001 — surface compile errors to UI
+    except Exception as exc:
         return PatternIssue(field, index, pattern, f"Invalid regex: {exc}")
     return None
 

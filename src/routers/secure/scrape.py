@@ -1433,7 +1433,7 @@ async def auto_scrape(
                             f"TVDB metadata update returned failure for {item.log_string}"
                         )
 
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.warning(f"Metadata sync timed out for {item.log_string}")
                     raise HTTPException(
                         status_code=504, detail="Metadata sync timed out"

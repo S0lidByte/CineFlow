@@ -12,7 +12,6 @@ from program.services.scrapers.stremthru import StremThru, TorznabResponse
 from program.settings import settings_manager
 from program.settings.models import AppModel, StremThruConfig
 
-
 TORZNAB_FIXTURE = {
     "@attributes": {"version": "2.0"},
     "channel": {

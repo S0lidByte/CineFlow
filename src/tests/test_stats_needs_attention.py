@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from routers.secure.default import NeedsAttentionItem, StatsResponse
 from program.media.state import States
+from routers.secure.default import NeedsAttentionItem, StatsResponse
 
 
 def test_needs_attention_item_roundtrip():

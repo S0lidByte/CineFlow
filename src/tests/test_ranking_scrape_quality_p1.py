@@ -121,7 +121,7 @@ def test_anime_country_mismatch_skipped():
         absolute_number=None,
         parent=None,
         top_title="Anime",
-        get_aliases=lambda: {},
+        get_aliases=dict,
     )
     non_anime = SimpleNamespace(
         is_anime=False,
@@ -133,7 +133,7 @@ def test_anime_country_mismatch_skipped():
         absolute_number=None,
         parent=None,
         top_title="Movie",
-        get_aliases=lambda: {},
+        get_aliases=dict,
     )
 
     # Parsed torrent claims US while item is UK — should filter non-anime only.
@@ -174,8 +174,9 @@ def test_anime_country_mismatch_skipped():
 
 
 def test_normalize_infohash_hex_only():
-    from routers.secure.ranking import _normalize_infohash
     from fastapi import HTTPException
+
+    from routers.secure.ranking import _normalize_infohash
 
     assert _normalize_infohash("A" * 40) == "a" * 40
     with pytest.raises(HTTPException) as exc:
