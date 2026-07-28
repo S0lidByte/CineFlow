@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.8](https://github.com/S0lidByte/CineFlow/compare/v1.28.7...v1.28.8) (2026-07-28)
+
+
+### Bug Fixes
+
+* **cdn:** re-scrape immediately on NXDOMAIN after failed refresh ([#186](https://github.com/S0lidByte/CineFlow/issues/186)) ([a380812](https://github.com/S0lidByte/CineFlow/commit/a38081282bcf689816e8d3f4710a5c58e9377a44))
+
 ## [1.28.7](https://github.com/S0lidByte/CineFlow/compare/v1.28.6...v1.28.7) (2026-07-28)
 
 
