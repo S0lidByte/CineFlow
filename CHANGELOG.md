@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.7](https://github.com/S0lidByte/CineFlow/compare/v1.28.6...v1.28.7) (2026-07-28)
+
+
+### Bug Fixes
+
+* **vfs:** auto-rescrape ghost entries after persistent CDN validate failures ([#179](https://github.com/S0lidByte/CineFlow/issues/179)) ([505973e](https://github.com/S0lidByte/CineFlow/commit/505973e17a3bc8ba9a19ff579c9fbf299c8b085c))
+
 ## [1.28.6](https://github.com/S0lidByte/CineFlow/compare/v1.28.5...v1.28.6) (2026-07-28)
 
 
