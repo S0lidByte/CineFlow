@@ -11,15 +11,15 @@ from .subtitle_entry import SubtitleEntry
 
 __all__ = [
     "Episode",
+    "FilesystemEntry",
+    "MediaEntry",
     "MediaItem",
     "Movie",
     "Season",
     "Show",
     "States",
-    "FilesystemEntry",
-    "MediaEntry",
-    "SubtitleEntry",
-    "StreamRelation",
     "Stream",
     "StreamBlacklistRelation",
+    "StreamRelation",
+    "SubtitleEntry",
 ]

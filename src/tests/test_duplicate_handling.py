@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""
+﻿"""
 Test script to verify duplicate handling works correctly.
 This script tests the new duplicate handling functionality.
 """
@@ -135,3 +134,4 @@ class TestDuplicateHandling:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+

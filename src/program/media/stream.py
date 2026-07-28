@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import sqlalchemy
 from RTN import Torrent
@@ -103,7 +103,7 @@ class Stream(Base):
     def __hash__(self):
         return hash(self.infohash)
 
-    def __eq__(self, other: Any):
+    def __eq__(self, other: object):
         return isinstance(other, Stream) and self.infohash == other.infohash
 
     def to_dict(self):

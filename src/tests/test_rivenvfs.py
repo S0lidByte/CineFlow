@@ -86,10 +86,10 @@ def _ensure_pyfuse3() -> None:
 
 _ensure_pyfuse3()
 
-import pyfuse3  # noqa: E402
+import pyfuse3
 
-from program.services.filesystem.vfs.rivenvfs import RivenVFS  # noqa: E402
-from program.services.filesystem.vfs.vfs_node import VFSDirectory, VFSFile  # noqa: E402
+from program.services.filesystem.vfs.rivenvfs import RivenVFS
+from program.services.filesystem.vfs.vfs_node import VFSDirectory, VFSFile
 
 
 @pytest.fixture
