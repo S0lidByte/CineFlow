@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.10](https://github.com/S0lidByte/CineFlow/compare/v1.28.9...v1.28.10) (2026-07-28)
+
+
+### Bug Fixes
+
+* **vfs:** cap dead-link open recursion to prevent RecursionError ([#190](https://github.com/S0lidByte/CineFlow/issues/190)) ([6dcb692](https://github.com/S0lidByte/CineFlow/commit/6dcb69293dcb5621cbf8d17b47335a8002ec1257))
+
 ## [1.28.9](https://github.com/S0lidByte/CineFlow/compare/v1.28.8...v1.28.9) (2026-07-28)
 
 
