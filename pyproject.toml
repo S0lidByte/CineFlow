@@ -173,6 +173,7 @@ ignore = [
   "SIM401",  # if-else-block-instead-of-dict-get
   "PYI036", "FURB162", "ASYNC230", "PERF102",
   "PLR0917",  # too many positional args (FastAPI/handlers)
+  "PIE807",  # prefer list over lambda — conflicts with pyright on Field(default_factory)
 ]
 
 
