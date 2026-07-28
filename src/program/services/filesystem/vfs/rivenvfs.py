@@ -200,6 +200,12 @@ class RivenVFS(pyfuse3.Operations):
         # Set of paths currently being streamed
         self._active_streams = dict[str, MediaStream]()
 
+        # Dead-link open recovery: single-flight + log rate-limit per original_filename
+        # (Plex + duplicate library profiles used to stampede FUSE into unmount).
+        self._dead_link_recovery_inflight: set[str] = set()
+        self._dead_link_recovery_cooldown_until: dict[str, float] = {}
+        self._dead_link_log_until: dict[str, float] = {}
+
         # Lock for managing active streams dict.
         # NOTE: This is (re-)initialized inside _fuse_runner before each trio.run() call
         # to avoid "AssertionError: task._runner is self" when the FUSE loop restarts.
@@ -1736,6 +1742,40 @@ class RivenVFS(pyfuse3.Operations):
     # inode that is also LinkUnavailable recurses until RecursionError and can
     # take down the FUSE session (seen when NXDOMAIN/ghost entries churn).
     _MAX_DEAD_LINK_OPEN_ATTEMPTS = 2
+    _DEAD_LINK_LOG_COOLDOWN_S = 30.0
+    _DEAD_LINK_WAIT_S = 15.0
+
+    def _should_log_dead_link(self, filename: str) -> bool:
+        """Rate-limit dead-link warnings (Plex opens the same file via many paths)."""
+        now = time.monotonic()
+        until = self._dead_link_log_until.get(filename, 0.0)
+        if now < until:
+            return False
+        self._dead_link_log_until[filename] = now + self._DEAD_LINK_LOG_COOLDOWN_S
+        return True
+
+    def _try_begin_dead_link_recovery(self, filename: str) -> bool:
+        """
+        Single-flight dead-link wait per original_filename.
+
+        Concurrent opens (duplicate library profiles + Plex retries) used to each
+        block the FUSE loop for up to 30s and unmount the session.
+        """
+        now = time.monotonic()
+        if filename in self._dead_link_recovery_inflight:
+            return False
+        # Brief cooldown after a failed wait so open storms don't immediately re-enter.
+        if self._dead_link_recovery_cooldown_until.get(filename, 0.0) > now:
+            return False
+        self._dead_link_recovery_inflight.add(filename)
+        return True
+
+    def _end_dead_link_recovery(self, filename: str, *, failed: bool) -> None:
+        self._dead_link_recovery_inflight.discard(filename)
+        if failed:
+            self._dead_link_recovery_cooldown_until[filename] = (
+                time.monotonic() + self._DEAD_LINK_LOG_COOLDOWN_S
+            )
 
     async def open(
         self,
@@ -1760,6 +1800,7 @@ class RivenVFS(pyfuse3.Operations):
 
                 path = node.path
                 entry_type = node.entry_type
+                original_filename = node.original_filename
 
             # Only validate the CDN URL for media entries; subtitles are read directly from the database
             if entry_type == "media":
@@ -1770,7 +1811,7 @@ class RivenVFS(pyfuse3.Operations):
                     validated_url = None
                     try:
                         validated_url = DebridCDNUrl.from_filename(
-                            node.original_filename
+                            original_filename
                         ).validate()
                     finally:
                         validate_ms = (time.perf_counter() - validate_started) * 1000
@@ -1785,10 +1826,6 @@ class RivenVFS(pyfuse3.Operations):
                         )
                         raise pyfuse3.FUSEError(errno.EIO)
                 except DebridServiceLinkUnavailable:
-                    logger.warning(
-                        f"Dead link for {node.path}; attempting to download a working one..."
-                    )
-
                     if _dead_link_attempts >= self._MAX_DEAD_LINK_OPEN_ATTEMPTS:
                         logger.error(
                             f"Dead-link recovery exhausted for {node.path} after "
@@ -1796,15 +1833,27 @@ class RivenVFS(pyfuse3.Operations):
                         )
                         raise pyfuse3.FUSEError(errno.EIO)
 
+                    if not self._try_begin_dead_link_recovery(original_filename):
+                        # Another open is already waiting / recently failed — fail fast.
+                        raise pyfuse3.FUSEError(errno.EIO)
+
+                    if self._should_log_dead_link(original_filename):
+                        logger.warning(
+                            f"Dead link for {node.path}; attempting to download a "
+                            f"working one (further opens for this file fail fast "
+                            f"until recovery finishes)..."
+                        )
+
+                    new_nodes: list[VFSFile] = []
                     try:
                         original_inode = node.inode
 
-                        with trio.fail_after(30):
+                        with trio.fail_after(self._DEAD_LINK_WAIT_S):
                             while True:
                                 new_nodes = [
                                     candidate
                                     for candidate in self._get_nodes_by_original_filename(
-                                        node.original_filename
+                                        original_filename
                                     )
                                     # _get_nodes_by_original_filename can yield multiple distinct
                                     # stream source nodes with the exact same original_filename but
@@ -1814,18 +1863,30 @@ class RivenVFS(pyfuse3.Operations):
 
                                 if new_nodes:
                                     logger.trace(
-                                        f"Found new file for {node.original_filename}"
+                                        f"Found new file for {original_filename}"
                                     )
 
                                     break
 
                                 await trio.sleep(1)
                     except trio.TooSlowError:
+                        self._end_dead_link_recovery(original_filename, failed=True)
                         logger.error(
                             f"Timeout waiting for new link to become available for path={node.path}"
                         )
 
                         raise pyfuse3.FUSEError(errno.ENOENT) from None
+                    except Exception:
+                        self._end_dead_link_recovery(original_filename, failed=True)
+                        raise
+                    else:
+                        # Cleared before recursive open so the next attempt can wait again.
+                        self._end_dead_link_recovery(
+                            original_filename, failed=not new_nodes
+                        )
+
+                    if not new_nodes:
+                        raise pyfuse3.FUSEError(errno.ENOENT)
 
                     logger.trace(f"Found new nodes after redownload: {new_nodes}")
 
