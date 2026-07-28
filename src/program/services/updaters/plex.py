@@ -21,7 +21,7 @@ class PlexUpdater(BaseUpdater):
         self.sections = dict[LibrarySection, list[str]]()
         self._initialize()
 
-    def validate(self) -> bool:  # noqa: C901
+    def validate(self) -> bool:
         """Validate Plex library"""
 
         if not self.settings.enabled:

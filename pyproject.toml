@@ -1,6 +1,6 @@
 [project]
 name = "riven"
-version = "1.28.8"
+version = "1.28.9"
 description = "Plex torrent streaming through Real Debrid and 3rd party services like Overseerr, Mdblist, etc."
 authors = [{ name = "Riven Developers" }]
 requires-python = "==3.13.*"
@@ -57,11 +57,11 @@ dev = [
     "pytest-mock>=3.14.0,<4",
     "responses==0.26.2",
     "pyfakefs>=5.4.1,<7",
-    "ruff>=0.13.3,<0.16",
+    "ruff>=0.16.0,<0.17",
     "isort>=5.10.1,<9",
     "codecov>=2.1.13,<3",
     "testcontainers>=4.8.0,<5",
-    "mypy>=1.11.2,<3",
+    "mypy>=2.3.0,<3",
     "requests-mock>=1.12.1,<2",
     "black>=25.9.0,<27",
     "pre-commit>=4.3.0,<5",
@@ -163,10 +163,20 @@ ignore = [
   "E741",    # ambiguous name from AllDebrid API field `l`
   "PLE1310", # lstrip duplicate chars (legacy)
   "SIM118",  # .keys() iteration (pydantic root models)
+  # Ruff 0.16+ rule surface — defer mass cleanup (same policy as style-debt ignores).
+  "BLE001",  # blind-except
+  "DTZ001", "DTZ005", "DTZ006", "DTZ007",  # naive datetime
+  "RUF009", "RUF010", "RUF012", "RUF046", "RUF059",  # ruff extras
+  "UP007", "UP017", "UP022", "UP031", "UP035", "UP037", "UP040", "UP043", "UP046",  # pyupgrade
+  "TRY002", "TRY004", "TRY203",  # tryceratops
+  "C408",  # unnecessary-collection-call
+  "SIM401",  # if-else-block-instead-of-dict-get
+  "PYI036", "FURB162", "ASYNC230", "PERF102",
+  "PLR0917",  # too many positional args (FastAPI/handlers)
+  "PIE807",  # prefer list over lambda — conflicts with pyright on Field(default_factory)
 ]
 
-[tool.ruff.lint.per-file-ignores]
-"src/tests/**" = ["S105", "S106"]
+
 extend-select = [
   "I",   # isort
   "C90", # mccabe complexity
@@ -183,3 +193,7 @@ extend-select = [
   "SIM", # flake8-simplify
   "ARG", # flake8-unused-arguments
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"src/tests/**" = ["S105", "S106"]
+"src/routers/secure/webhooks.py" = ["S105"]  # header name constant, not a password
