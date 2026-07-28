@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.6](https://github.com/S0lidByte/CineFlow/compare/v1.28.5...v1.28.6) (2026-07-28)
+
+
+### Bug Fixes
+
+* **realdebrid:** do not VFS-remove on transient unrestrict errors ([#177](https://github.com/S0lidByte/CineFlow/issues/177)) ([18dd8fc](https://github.com/S0lidByte/CineFlow/commit/18dd8fcb2c347332338b1e6a5eb135e4171ec364))
+
 ## [1.28.5](https://github.com/S0lidByte/CineFlow/compare/v1.28.4...v1.28.5) (2026-07-27)
 
 
