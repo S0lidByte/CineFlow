@@ -1732,11 +1732,18 @@ class RivenVFS(pyfuse3.Operations):
             logger.exception(f"readdir error for inode={fh}")
             raise pyfuse3.FUSEError(errno.EIO)
 
+    # Cap dead-link redownload → open() retries. Without this, a replacement
+    # inode that is also LinkUnavailable recurses until RecursionError and can
+    # take down the FUSE session (seen when NXDOMAIN/ghost entries churn).
+    _MAX_DEAD_LINK_OPEN_ATTEMPTS = 2
+
     async def open(
         self,
         inode: pyfuse3.InodeT,
         flags: int,
         ctx: pyfuse3.RequestContext,
+        *,
+        _dead_link_attempts: int = 0,
     ) -> pyfuse3.FileInfo:
         """Open a file for reading."""
 
@@ -1782,6 +1789,13 @@ class RivenVFS(pyfuse3.Operations):
                         f"Dead link for {node.path}; attempting to download a working one..."
                     )
 
+                    if _dead_link_attempts >= self._MAX_DEAD_LINK_OPEN_ATTEMPTS:
+                        logger.error(
+                            f"Dead-link recovery exhausted for {node.path} after "
+                            f"{_dead_link_attempts} open attempts; refusing further recursion"
+                        )
+                        raise pyfuse3.FUSEError(errno.EIO)
+
                     try:
                         original_inode = node.inode
 
@@ -1817,7 +1831,12 @@ class RivenVFS(pyfuse3.Operations):
 
                     inode = new_nodes[0].inode
 
-                    return await self.open(inode, flags, ctx)
+                    return await self.open(
+                        inode,
+                        flags,
+                        ctx,
+                        _dead_link_attempts=_dead_link_attempts + 1,
+                    )
                 except pyfuse3.FUSEError:
                     raise
                 except DebridServiceFairUsageLimitException as e:
@@ -1840,6 +1859,13 @@ class RivenVFS(pyfuse3.Operations):
                             f"cooldown; avoid simultaneous streams."
                         )
                     raise pyfuse3.FUSEError(errno.EIO)
+                except RecursionError:
+                    # logger.exception formats huge recursive stacks and can RecursionError again.
+                    logger.error(
+                        f"Recursion limit while validating CDN URL for {path}; "
+                        f"aborting open"
+                    )
+                    raise pyfuse3.FUSEError(errno.EIO) from None
                 except Exception as e:
                     logger.exception(f"Unexpected error whilst validating CDN URL: {e}")
 
