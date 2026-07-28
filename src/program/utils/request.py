@@ -29,7 +29,7 @@ class TokenBucket:
         last_refill (float): Timestamp of last refill (monotonic seconds).
     """
 
-    def __init__(self, rate: float, capacity: float | int, name: str | None = None):
+    def __init__(self, rate: float, capacity: float, name: str | None = None):
         """Initialize the token bucket."""
 
         self.name = name

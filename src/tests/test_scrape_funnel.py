@@ -104,7 +104,7 @@ def test_parse_results_accounts_for_every_input_in_funnel():
         country=None,
         is_anime=False,
         aired_at=None,
-        get_aliases=lambda: {},
+        get_aliases=dict,
     )
     results = {
         "e" * 40: "Completely Unrelated Junk 480p CAM XXX",

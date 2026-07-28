@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 def compute_transient_retry_delay(
     failure_count: int,
     *,
-    rate_limit_retry_after: float | int | None = None,
+    rate_limit_retry_after: float | None = None,
     base_delay: int = 60,
 ) -> float:
     """Seconds to wait before re-queueing after a transient EventManager failure.

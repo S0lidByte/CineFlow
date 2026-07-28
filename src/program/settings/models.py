@@ -915,7 +915,7 @@ class ScraperModel(Observable):
         ),
     )
     remake_alias_groups: list[list[str]] = Field(
-        default_factory=lambda: [],
+        default_factory=list,
         description=(
             "Groups of remake / alternate titles that should match each other when "
             "enable_remake_aliases is on. Each group is a list of titles, e.g. "

@@ -1,6 +1,6 @@
+import math
 from datetime import datetime
 from typing import Any, Literal
-import math
 
 import regex
 from pydantic import BaseModel, Field
@@ -43,12 +43,12 @@ episode_max_filesize = settings_manager.settings.downloaders.episode_filesize_mb
 
 # constraints for filesizes, follows the format tuple(min, max)
 MOVIE_MIN_FILESIZE, MOVIE_MAX_FILESIZE = (
-    movie_min_filesize if movie_min_filesize >= 0 else 0,
+    max(movie_min_filesize, 0),
     movie_max_filesize if movie_max_filesize > 0 else float("inf"),
 )
 
 EPISODE_MIN_FILESIZE, EPISODE_MAX_FILESIZE = (
-    episode_min_filesize if episode_min_filesize >= 0 else 0,
+    max(episode_min_filesize, 0),
     episode_max_filesize if episode_max_filesize > 0 else float("inf"),
 )
 

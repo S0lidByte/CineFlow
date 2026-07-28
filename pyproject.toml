@@ -163,10 +163,19 @@ ignore = [
   "E741",    # ambiguous name from AllDebrid API field `l`
   "PLE1310", # lstrip duplicate chars (legacy)
   "SIM118",  # .keys() iteration (pydantic root models)
+  # Ruff 0.16+ rule surface — defer mass cleanup (same policy as style-debt ignores).
+  "BLE001",  # blind-except
+  "DTZ001", "DTZ005", "DTZ006", "DTZ007",  # naive datetime
+  "RUF009", "RUF010", "RUF012", "RUF046", "RUF059",  # ruff extras
+  "UP007", "UP017", "UP022", "UP031", "UP035", "UP037", "UP040", "UP043", "UP046",  # pyupgrade
+  "TRY002", "TRY004", "TRY203",  # tryceratops
+  "C408",  # unnecessary-collection-call
+  "SIM401",  # if-else-block-instead-of-dict-get
+  "PYI036", "FURB162", "ASYNC230", "PERF102",
+  "PLR0917",  # too many positional args (FastAPI/handlers)
 ]
 
-[tool.ruff.lint.per-file-ignores]
-"src/tests/**" = ["S105", "S106"]
+
 extend-select = [
   "I",   # isort
   "C90", # mccabe complexity
@@ -183,3 +192,7 @@ extend-select = [
   "SIM", # flake8-simplify
   "ARG", # flake8-unused-arguments
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"src/tests/**" = ["S105", "S106"]
+"src/routers/secure/webhooks.py" = ["S105"]  # header name constant, not a password
