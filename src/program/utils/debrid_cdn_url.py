@@ -31,6 +31,19 @@ _validate_none_counts: dict[str, int] = {}
 _rescrape_scheduled_until: dict[str, float] = {}
 
 
+def _is_dns_failure(error: Exception) -> bool:
+    """True for NXDOMAIN / getaddrinfo failures on retired RD CDN hosts."""
+    msg = str(error).lower()
+    return (
+        "name does not resolve" in msg
+        or "nodename nor servname" in msg
+        or "temporary failure in name resolution" in msg
+        or "[errno -2]" in msg
+        or "errno -2" in msg
+        or "getaddrinfo failed" in msg
+    )
+
+
 def clear_persistent_validate_failure_state() -> None:
     """Test helper: reset in-process ghost-entry counters."""
     _validate_none_counts.clear()
@@ -191,6 +204,52 @@ class DebridCDNUrl:
     def _clear_validate_none_count(self) -> None:
         _validate_none_counts.pop(self.filename, None)
 
+    def _schedule_dead_link_now(self, *, reason: str) -> bool:
+        """
+        Schedule dead-link re-scrape once per filename within the dedupe window.
+
+        Returns True when a re-scrape was newly scheduled.
+        """
+        if self._get_refresh_cooldown_remaining() > 0:
+            return False
+
+        filename = self.filename
+        now = time.monotonic()
+        if _rescrape_scheduled_until.get(filename, 0.0) > now:
+            return False
+
+        _validate_none_counts.pop(filename, None)
+        _rescrape_scheduled_until[filename] = now + _RESCRAPE_DEDUP_SECONDS
+
+        try:
+            from program.services.filesystem.vfs.db import VFSDatabase
+
+            with db_session() as session:
+                entry = session.merge(self.entry)
+                scheduled = di[VFSDatabase].schedule_dead_link_rescrape(
+                    entry=entry,
+                    session=session,
+                )
+                if not scheduled:
+                    _rescrape_scheduled_until.pop(filename, None)
+                    logger.debug(
+                        f"Dead-link re-scrape not scheduled for {filename} "
+                        f"(no media item on entry)"
+                    )
+                    return False
+
+            logger.warning(
+                f"CDN link dead for {filename} ({reason}); "
+                f"scheduled automatic re-scrape"
+            )
+            return True
+        except Exception as e:
+            _rescrape_scheduled_until.pop(filename, None)
+            logger.warning(
+                f"Failed to schedule dead-link re-scrape for {filename}: {e}"
+            )
+            return False
+
     def _maybe_schedule_after_validate_none(self) -> None:
         """
         Heal ghost VFS entries: repeated validate()→None without an active
@@ -218,36 +277,9 @@ class DebridCDNUrl:
             )
             return
 
-        _validate_none_counts.pop(filename, None)
-        _rescrape_scheduled_until[filename] = now + _RESCRAPE_DEDUP_SECONDS
-
-        try:
-            from program.services.filesystem.vfs.db import VFSDatabase
-
-            with db_session() as session:
-                entry = session.merge(self.entry)
-                scheduled = di[VFSDatabase].schedule_dead_link_rescrape(
-                    entry=entry,
-                    session=session,
-                )
-                if not scheduled:
-                    _rescrape_scheduled_until.pop(filename, None)
-                    logger.debug(
-                        f"Ghost-entry re-scrape not scheduled for {filename} "
-                        f"(no media item on entry)"
-                    )
-                    return
-
-            logger.warning(
-                f"Persistent CDN validate failure for {filename}; "
-                f"scheduled automatic re-scrape after "
-                f"{PERSISTENT_VALIDATE_NONE_THRESHOLD} soft failures"
-            )
-        except Exception as e:
-            _rescrape_scheduled_until.pop(filename, None)
-            logger.warning(
-                f"Failed to schedule ghost-entry re-scrape for {filename}: {e}"
-            )
+        self._schedule_dead_link_now(
+            reason=f"{PERSISTENT_VALIDATE_NONE_THRESHOLD} soft validate failures"
+        )
 
     def validate(
         self,
@@ -299,11 +331,30 @@ class DebridCDNUrl:
                     attempt=attempt,
                     error=e,
                 )
+                dns_failure = _is_dns_failure(e)
+                url_before_refresh = self.url
                 if self._maybe_refresh_after_transport_failure(
                     attempt_refresh=attempt_refresh,
                     attempt=attempt,
                 ):
                     return None
+                # Refresh could not heal a retired CDN hostname: permanent for this
+                # torrent link. Soft-fail alone leaves ghost VFS entries forever.
+                if (
+                    dns_failure
+                    and attempt == 1
+                    and self._get_refresh_cooldown_remaining() <= 0
+                    and (
+                        self.url is None
+                        or self.url == url_before_refresh
+                        or self._cdn_hosts_equivalent(self.url, url_before_refresh)
+                    )
+                ):
+                    self._schedule_dead_link_now(reason="NXDOMAIN CDN host")
+                    raise DebridServiceLinkUnavailable(
+                        provider=self.provider,
+                        link=self.url or url_before_refresh or "Unknown URL",
+                    ) from e
             except httpx.HTTPStatusError as e:
                 status_code = e.response.status_code
 
@@ -322,6 +373,7 @@ class DebridCDNUrl:
             except (
                 RefreshedURLIdenticalException,
                 DebridServiceFairUsageLimitException,
+                DebridServiceLinkUnavailable,
             ):
                 raise
             except Exception as e:
