@@ -103,8 +103,9 @@ class VFSDatabase:
         session: Session,
     ) -> bool:
         """
-        Blacklist the active stream, reset the media item, and enqueue a VFS event
-        so a working download can replace a dead CDN link.
+        Blacklist the active stream, tear down VFS/download state (preserving
+        blacklisted streams), and enqueue a VFS event so a working download can
+        replace a dead CDN link.
 
         Returns True when a re-scrape was scheduled.
         """
@@ -116,8 +117,7 @@ class VFSDatabase:
         item_id = entry.media_item.id
 
         def mutation(i: MediaItem, s: Session) -> None:
-            i.blacklist_active_stream()
-            i.reset()
+            i.prepare_for_automatic_rescrape()
 
         apply_item_mutation(
             program=di[Program],
@@ -128,10 +128,17 @@ class VFSDatabase:
 
         session.commit()
 
+        logger.info(
+            f"Scheduling automatic re-scrape for item {item_id} "
+            f"({entry.media_item.log_string}) after dead CDN link"
+        )
+
+        # overrides bypass scrape cooldown so the pipeline re-runs immediately
         di[Program].em.add_event(
             Event(
                 "VFS",
                 item_id,
+                overrides={"automatic_rescrape": True},
             )
         )
 

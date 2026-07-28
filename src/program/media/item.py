@@ -756,6 +756,39 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
         self._reset()
         self.store_state()
 
+    def prepare_for_automatic_rescrape(self) -> None:
+        """
+        Tear down VFS/download state after an automatic dead-link removal.
+
+        Blacklists the active stream and keeps existing ``blacklisted_streams`` so
+        scrapers and the downloader do not immediately retry the same dead torrent.
+        Unlike :meth:`reset`, this does not recurse into child seasons/episodes.
+        """
+        self.blacklist_active_stream()
+
+        from program.program import riven
+
+        assert riven.services
+
+        filesystem_service = riven.services.filesystem
+
+        if filesystem_service.riven_vfs:
+            filesystem_service.riven_vfs.remove(self)
+
+        self.filesystem_entries.clear()
+        self.subtitles.clear()
+        self.streams.clear()
+        self.active_stream = None
+        self.updated = False
+        self.scraped_at = None
+        self.scraped_times = 0
+        self.failed_attempts = 0
+
+        logger.info(
+            f"Prepared {self.log_string} for automatic re-scrape after dead link "
+            f"({len(self.blacklisted_streams)} stream(s) blacklisted)"
+        )
+
     def _reset(self):
         """
         Reset the media item and its related associations to prepare for rescraping.
