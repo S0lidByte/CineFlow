@@ -1616,7 +1616,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13.2,<2" },
     { name = "apprise", specifier = ">=1.12.0,<2" },
     { name = "apscheduler", specifier = ">=3.10.4,<4" },
-    { name = "babel", specifier = ">=2.17.0,<3" },
+    { name = "babel", specifier = ">=2.18.0,<3" },
     { name = "bencodepy", specifier = ">=0.9.5,<0.10" },
     { name = "cachetools", specifier = ">=5.3.3,<8" },
     { name = "coverage", specifier = ">=7.6.8,<8" },
