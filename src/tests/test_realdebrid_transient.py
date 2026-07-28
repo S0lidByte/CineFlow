@@ -7,8 +7,10 @@ import pytest
 from program.services.downloaders.realdebrid import (
     RealDebridDownloader,
     RealDebridError,
+    RealDebridErrorCode,
     RealDebridTransientError,
 )
+from program.services.streaming.exceptions import DebridServiceLinkUnavailable
 from program.utils.request import CircuitBreakerOpen
 
 
@@ -17,6 +19,11 @@ def rd_downloader():
     with patch.object(RealDebridDownloader, "__init__", lambda *_: None):
         rd = RealDebridDownloader()
         rd.key = "realdebrid"
+        rd.api = Mock()
+        rd.api.BASE_URL = "https://api.real-debrid.com/rest/1.0"
+        rd.api.session = Mock()
+        rd._fair_usage_until = 0.0
+        rd._fair_usage_warned = False
         return rd
 
 
@@ -74,3 +81,58 @@ def test_get_instant_availability_451_returns_none(rd_downloader):
         side_effect=RealDebridError("[451] Infringing Torrent"),
     ):
         assert rd_downloader.get_instant_availability("deadbeef", "movie") is None
+
+
+def _unrestrict_error_response(error: str, code: RealDebridErrorCode) -> Mock:
+    response = Mock()
+    response.ok = False
+    response.status_code = 400
+    response.json.return_value = {"error": error, "error_code": code}
+    return response
+
+
+@pytest.mark.parametrize(
+    "code,error",
+    [
+        (
+            RealDebridErrorCode.HOSTER_TEMPORARY_UNAVAILABLE,
+            "hoster_temporarily_unavailable",
+        ),
+        (RealDebridErrorCode.HOSTER_LIMIT_REACHED, "hoster_limit_reached"),
+        (RealDebridErrorCode.SERVICE_UNAVAILABLE, "service_unavailable"),
+        (RealDebridErrorCode.RESOURCE_UNREACHABLE, "resource_unreachable"),
+        (RealDebridErrorCode.HOSTER_IN_MAINTENANCE, "hoster_in_maintenance"),
+    ],
+)
+def test_unrestrict_transient_codes_return_none_not_link_unavailable(
+    rd_downloader, code, error
+):
+    """Transient unrestrict codes must not raise LinkUnavailable (no VFS remove)."""
+    rd_downloader.api.session.post.return_value = _unrestrict_error_response(
+        error, code
+    )
+    rd_downloader._maybe_backoff = Mock()
+
+    assert rd_downloader.unrestrict_link("https://real-debrid.com/d/abc") is None
+
+
+@pytest.mark.parametrize(
+    "code,error",
+    [
+        (RealDebridErrorCode.INFRINGING_FILE, "infringing_file"),
+        (RealDebridErrorCode.FILE_UNAVAILABLE, "file_unavailable"),
+        (RealDebridErrorCode.FILE_NOT_ALLOWED, "file_not_allowed"),
+        (RealDebridErrorCode.TORRENT_FILE_INVALID, "torrent_file_invalid"),
+        (RealDebridErrorCode.RESOURCE_NOT_FOUND, "resource_not_found"),
+        (RealDebridErrorCode.UNSUPPORTED_HOSTER, "unsupported_hoster"),
+    ],
+)
+def test_unrestrict_permanent_codes_raise_link_unavailable(rd_downloader, code, error):
+    """Permanent dead links still raise LinkUnavailable → dead-link re-scrape."""
+    rd_downloader.api.session.post.return_value = _unrestrict_error_response(
+        error, code
+    )
+    rd_downloader._maybe_backoff = Mock()
+
+    with pytest.raises(DebridServiceLinkUnavailable):
+        rd_downloader.unrestrict_link("https://real-debrid.com/d/abc")

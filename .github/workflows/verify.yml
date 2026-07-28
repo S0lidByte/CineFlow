@@ -73,6 +73,8 @@ jobs:
             src/tests/test_subtitle_title_guard.py \
             src/tests/test_subdl_provider.py \
             src/tests/test_debrid_cdn_url.py \
+            src/tests/test_realdebrid_transient.py \
+            src/tests/test_realdebrid_fair_usage.py \
             src/tests/test_requests.py \
             src/tests/test_incremental_parse_results.py \
             src/tests/test_scrape_funnel.py \

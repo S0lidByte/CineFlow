@@ -73,6 +73,33 @@ class RealDebridErrorCode(IntEnum):
     DISABLED_ENDPOINT = 37
 
 
+# Permanent link death → DebridServiceLinkUnavailable → VFS dead-link re-scrape.
+_PERMANENT_LINK_UNAVAILABLE_CODES: frozenset[RealDebridErrorCode] = frozenset(
+    {
+        RealDebridErrorCode.RESOURCE_NOT_FOUND,
+        RealDebridErrorCode.UNSUPPORTED_HOSTER,
+        RealDebridErrorCode.FILE_UNAVAILABLE,
+        RealDebridErrorCode.TORRENT_FILE_INVALID,
+        RealDebridErrorCode.INFRINGING_FILE,
+        RealDebridErrorCode.FILE_NOT_ALLOWED,
+    }
+)
+
+# Provider/hoster blips — fail open without blacklisting or removing VFS nodes.
+_TRANSIENT_UNRESTRICT_CODES: frozenset[RealDebridErrorCode] = frozenset(
+    {
+        RealDebridErrorCode.RESOURCE_UNREACHABLE,
+        RealDebridErrorCode.HOSTER_IN_MAINTENANCE,
+        RealDebridErrorCode.HOSTER_LIMIT_REACHED,
+        RealDebridErrorCode.HOSTER_TEMPORARY_UNAVAILABLE,
+        RealDebridErrorCode.TOO_MANY_ACTIVE_DOWNLOADS,
+        RealDebridErrorCode.TRAFFIC_EXHAUSTED,
+        RealDebridErrorCode.SERVICE_UNAVAILABLE,
+        RealDebridErrorCode.TOO_MANY_REQUESTS,
+    }
+)
+
+
 class RealDebridErrorResponse(BaseModel):
     error: str
     error_code: RealDebridErrorCode
@@ -752,23 +779,21 @@ class RealDebridDownloader(DownloaderBase):
                     self._fair_usage_warned = False
 
                     self._raise_fair_usage(from_api=True)
-                if data.error_code in (
-                    RealDebridErrorCode.RESOURCE_UNREACHABLE,
-                    RealDebridErrorCode.RESOURCE_NOT_FOUND,
-                    RealDebridErrorCode.UNSUPPORTED_HOSTER,
-                    RealDebridErrorCode.HOSTER_LIMIT_REACHED,
-                    RealDebridErrorCode.HOSTER_TEMPORARY_UNAVAILABLE,
-                    RealDebridErrorCode.FILE_UNAVAILABLE,
-                    RealDebridErrorCode.SERVICE_UNAVAILABLE,
-                    RealDebridErrorCode.TORRENT_FILE_INVALID,
-                    RealDebridErrorCode.INFRINGING_FILE,
-                    RealDebridErrorCode.FILE_NOT_ALLOWED,
-                ):
+                if data.error_code in _PERMANENT_LINK_UNAVAILABLE_CODES:
                     logger.warning(
                         f"Link unavailable: {data.error} [error_code: {data.error_code}]"
                     )
 
                     raise DebridServiceLinkUnavailable(provider=self.key, link=link)
+                if data.error_code in _TRANSIENT_UNRESTRICT_CODES:
+                    # Do NOT raise LinkUnavailable — that schedules blacklist +
+                    # VFS remove via schedule_dead_link_rescrape. Transient hoster
+                    # / service codes should only fail this open attempt.
+                    logger.warning(
+                        f"Link temporarily unavailable: {data.error} "
+                        f"[error_code: {data.error_code}]; keeping VFS entry"
+                    )
+                    return None
                 logger.warning(
                     f"Direct unrestrict failed with status {response.status_code}: {data.error} [{data.error_code}]"
                 )
