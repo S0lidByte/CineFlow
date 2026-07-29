@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.12](https://github.com/S0lidByte/CineFlow/compare/v1.28.11...v1.28.12) (2026-07-29)
+
+
+### Bug Fixes
+
+* **vfs:** offload CDN validate and clear dead-link inflight on cancel ([#194](https://github.com/S0lidByte/CineFlow/issues/194)) ([6ec9ddf](https://github.com/S0lidByte/CineFlow/commit/6ec9ddf0d941036f558bf524b681580647b7aae2))
+
 ## [1.28.11](https://github.com/S0lidByte/CineFlow/compare/v1.28.10...v1.28.11) (2026-07-28)
 
 
