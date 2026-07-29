@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.11](https://github.com/S0lidByte/CineFlow/compare/v1.28.10...v1.28.11) (2026-07-28)
+
+
+### Bug Fixes
+
+* **vfs:** single-flight dead-link open recovery to prevent FUSE unmount ([#192](https://github.com/S0lidByte/CineFlow/issues/192)) ([15c1c9d](https://github.com/S0lidByte/CineFlow/commit/15c1c9d66c5e8be16c05c8935db870080bd671e6))
+
 ## [1.28.10](https://github.com/S0lidByte/CineFlow/compare/v1.28.9...v1.28.10) (2026-07-28)
 
 
