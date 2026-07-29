@@ -259,7 +259,7 @@ def test_cache_get_disk_io_off_trio_thread(
     calls: list[str] = []
     real_to_thread = trio.to_thread.run_sync
 
-    async def tracking_to_thread(fn, *args, **kwargs):  # noqa: ANN001
+    async def tracking_to_thread(fn, *args, **kwargs):
         calls.append(getattr(fn, "__name__", str(fn)))
         return await real_to_thread(fn, *args, **kwargs)
 
