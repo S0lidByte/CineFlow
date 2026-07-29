@@ -164,7 +164,8 @@ class MediaStream:
             logger.warning(
                 f"stream.chunk_size_mb={stream_settings.chunk_size_mb} is large; "
                 "each concurrent Plex open holds that much RAM while fetching. "
-                "Prefer 1–4 MB to reduce OOM risk (especially with cache_dir on /dev/shm)."
+                "Prefer 4–8 MB for multi-title playback (1–4 MB if cache_dir is "
+                "on /dev/shm or under memory pressure)."
             )
 
         # Use proxy client if provider requires it
