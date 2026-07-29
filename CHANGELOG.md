@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.13](https://github.com/S0lidByte/CineFlow/compare/v1.28.12...v1.28.13) (2026-07-29)
+
+
+### Bug Fixes
+
+* **stream:** restore multi-title concurrency via cache I/O and downloader backpressure ([#196](https://github.com/S0lidByte/CineFlow/issues/196)) ([cfa3957](https://github.com/S0lidByte/CineFlow/commit/cfa395789a188d58f4c9446b8c06947855bdfab2))
+
 ## [1.28.12](https://github.com/S0lidByte/CineFlow/compare/v1.28.11...v1.28.12) (2026-07-29)
 
 
