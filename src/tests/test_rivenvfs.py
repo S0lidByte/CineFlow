@@ -330,3 +330,103 @@ def test_sync_individual_flushes_pending_invalidations(mock_vfs):
     remove.assert_called_once_with(item)
     add.assert_called_once_with(item)
     flush.assert_called_once_with()
+
+
+def test_dead_link_recovery_clears_inflight_on_cancel(mock_vfs):
+    """Cancel during dead-link wait must clear inflight (no leak / no cooldown)."""
+
+    from program.services.streaming.exceptions import DebridServiceLinkUnavailable
+
+    filename = "dead.mkv"
+    inode = pyfuse3.InodeT(500)
+    mock_node = VFSFile(
+        name="dead.mkv",
+        inode=inode,
+        parent=mock_vfs._root,
+        original_filename=filename,
+        file_size=100,
+        created_at="2020-01-01T00:00:00",
+        updated_at="2020-01-01T00:00:00",
+        entry_type="media",
+    )
+    mock_vfs._inode_to_node[inode] = mock_node
+    mock_vfs._DEAD_LINK_WAIT_S = 30.0
+
+    async def _run() -> None:
+        started = trio.Event()
+
+        def _empty_nodes(_fn: str):
+            started.set()
+            return []
+
+        cdn_mock = MagicMock()
+        cdn_mock.validate = MagicMock(
+            side_effect=DebridServiceLinkUnavailable("rd", "https://cdn.example/dead")
+        )
+
+        with patch(
+            "program.services.filesystem.vfs.rivenvfs.DebridCDNUrl.from_filename",
+            return_value=cdn_mock,
+        ):
+            mock_vfs._get_nodes_by_original_filename = _empty_nodes
+
+            async with trio.open_nursery() as nursery:
+
+                async def _open_and_expect_cancel():
+                    with pytest.raises(trio.Cancelled):
+                        await mock_vfs.open(inode, 0, MagicMock())
+
+                nursery.start_soon(_open_and_expect_cancel)
+                await started.wait()
+                # Give open a chance to add inflight + enter sleep.
+                await trio.sleep(0.05)
+                assert filename in mock_vfs._dead_link_recovery_inflight
+                nursery.cancel_scope.cancel()
+
+            assert filename not in mock_vfs._dead_link_recovery_inflight
+            assert filename not in mock_vfs._dead_link_recovery_cooldown_until
+
+    trio.run(_run)
+
+
+def test_dead_link_recovery_cooldown_on_timeout(mock_vfs):
+    """TooSlowError during wait must clear inflight and apply cooldown."""
+
+    from program.services.streaming.exceptions import DebridServiceLinkUnavailable
+
+    filename = "timeout.mkv"
+    inode = pyfuse3.InodeT(501)
+    mock_node = VFSFile(
+        name="timeout.mkv",
+        inode=inode,
+        parent=mock_vfs._root,
+        original_filename=filename,
+        file_size=100,
+        created_at="2020-01-01T00:00:00",
+        updated_at="2020-01-01T00:00:00",
+        entry_type="media",
+    )
+    mock_vfs._inode_to_node[inode] = mock_node
+    mock_vfs._DEAD_LINK_WAIT_S = 0.05
+
+    cdn_mock = MagicMock()
+    cdn_mock.validate = MagicMock(
+        side_effect=DebridServiceLinkUnavailable("rd", "https://cdn.example/dead")
+    )
+
+    async def _run() -> None:
+        with (
+            patch(
+                "program.services.filesystem.vfs.rivenvfs.DebridCDNUrl.from_filename",
+                return_value=cdn_mock,
+            ),
+            patch.object(mock_vfs, "_get_nodes_by_original_filename", return_value=[]),
+        ):
+            with pytest.raises(pyfuse3.FUSEError) as exc_info:
+                await mock_vfs.open(inode, 0, MagicMock())
+            assert exc_info.value.errno == errno.ENOENT
+
+        assert filename not in mock_vfs._dead_link_recovery_inflight
+        assert filename in mock_vfs._dead_link_recovery_cooldown_until
+
+    trio.run(_run)
