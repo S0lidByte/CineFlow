@@ -1147,7 +1147,13 @@ class StreamModel(Observable):
     chunk_size_mb: int = Field(
         default=1,
         ge=1,
-        description="Chunk size in MB for streaming downloads (1 MB default). Note: Smaller chunks are generally more efficient, as the entire chunk must be downloaded before it can be read.",
+        description=(
+            "Chunk size in MB for streaming downloads (1 MB default). "
+            "Prefer 4–8 MB for multi-title playback with a disk cache: the entire "
+            "chunk must finish downloading before it can be read. Very large values "
+            "(e.g. 50–80 MB) help single-title ahead-of-playhead buffering but hurt "
+            "concurrent cold starts and amplify cache/FUSE stalls."
+        ),
     )
     connect_timeout_seconds: int = Field(
         default=10,

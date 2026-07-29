@@ -77,6 +77,19 @@ def test_all_services_in_cooldown_reschedules(downloader, mock_item):
     downloader.service.get_instant_availability.assert_not_called()
 
 
+def test_playback_active_defers_downloader(downloader, mock_item):
+    """Bulk Downloader must yield when VFS playback streams are open."""
+    with patch.object(Downloader, "_playback_active", return_value=True):
+        results = list(downloader.run(mock_item))
+
+    assert len(results) == 1
+    result = results[0]
+    assert mock_item in result.media_items
+    assert result.run_at is not None
+    assert result.run_at > datetime.now() - timedelta(seconds=5)
+    downloader.service.get_instant_availability.assert_not_called()
+
+
 def test_circuit_breaker_sets_cooldown_and_reschedules(downloader, mock_item):
     """CB exception should set a cooldown and reschedule (single provider)."""
     cb_exc = CircuitBreakerOpen("api.real-debrid.com", retry_after_seconds=25.0)

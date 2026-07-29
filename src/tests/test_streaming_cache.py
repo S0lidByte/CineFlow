@@ -204,6 +204,77 @@ def test_cache_concurrent_gets_hit(tmp_path: Path) -> None:
     trio.run(_run)
 
 
+def test_cache_concurrent_titles_use_different_shards(tmp_path: Path) -> None:
+    """Different cache_keys must map to independent shard locks and coexist."""
+    cache = _make_cache(tmp_path)
+
+    candidates = [
+        ("title-a.mkv", "title-b.mkv"),
+        ("show1.mkv", "movie2.mkv"),
+        ("alpha.mkv", "omega.mkv"),
+        ("x", "y"),
+    ]
+    found_pair = None
+    for ka, kb in candidates:
+        if cache._shard_for(ka) is not cache._shard_for(kb):
+            found_pair = (ka, kb)
+            break
+    assert found_pair is not None, "expected at least one distinct-shard key pair"
+
+    ka, kb = found_pair
+    payload_a = b"AAAA" * 50
+    payload_b = b"BBBB" * 50
+
+    async def _run() -> None:
+        await cache.put(ka, 0, payload_a)
+        await cache.put(kb, 0, payload_b)
+
+        results: dict[str, list[bytes]] = {ka: [], kb: []}
+
+        async def read_a() -> None:
+            results[ka].append(await cache.get(ka, 0, len(payload_a) - 1))
+
+        async def read_b() -> None:
+            results[kb].append(await cache.get(kb, 0, len(payload_b) - 1))
+
+        async with trio.open_nursery() as nursery:
+            for _ in range(12):
+                nursery.start_soon(read_a)
+                nursery.start_soon(read_b)
+
+        assert all(r == payload_a for r in results[ka])
+        assert all(r == payload_b for r in results[kb])
+        assert len(results[ka]) == 12
+        assert len(results[kb]) == 12
+
+    trio.run(_run)
+
+
+def test_cache_get_disk_io_off_trio_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """File reads must go through trio.to_thread so the FUSE loop stays free."""
+    cache = _make_cache(tmp_path)
+    payload = b"thread-offload-payload"
+    calls: list[str] = []
+    real_to_thread = trio.to_thread.run_sync
+
+    async def tracking_to_thread(fn, *args, **kwargs):  # noqa: ANN001
+        calls.append(getattr(fn, "__name__", str(fn)))
+        return await real_to_thread(fn, *args, **kwargs)
+
+    monkeypatch.setattr(trio.to_thread, "run_sync", tracking_to_thread)
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, payload)
+        got = await cache.get("movie.mkv", 0, len(payload) - 1)
+        assert got == payload
+
+    trio.run(_run)
+    assert "_write_file_bytes" in calls
+    assert "_read_file_slice" in calls
+
+
 def test_cache_eviction_unlinks_without_holding_thread_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

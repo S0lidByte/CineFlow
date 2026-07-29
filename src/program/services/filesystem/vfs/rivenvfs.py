@@ -199,6 +199,8 @@ class RivenVFS(pyfuse3.Operations):
 
         # Set of paths currently being streamed
         self._active_streams = dict[str, MediaStream]()
+        # Sync-readable active count for Downloader backpressure (updated with dict).
+        self._active_stream_count = 0
 
         # Dead-link open recovery: single-flight + log rate-limit per original_filename
         # (Plex + duplicate library profiles used to stampede FUSE into unmount).
@@ -334,7 +336,10 @@ class RivenVFS(pyfuse3.Operations):
                                 await stream.close()
 
                                 async with self._active_streams_lock:
-                                    self._active_streams.pop(stream_key, None)
+                                    if self._active_streams.pop(stream_key, None):
+                                        self._active_stream_count = len(
+                                            self._active_streams
+                                        )
                         except Exception:
                             logger.exception("Error during stream timeout check")
                 else:
@@ -1961,7 +1966,7 @@ class RivenVFS(pyfuse3.Operations):
         Streaming is on-demand via MediaStream:
         - Fixed-size chunk fetching (default ``chunk_size_mb`` = 1 MiB)
         - Read-type classification (header/footer scan, sequential, seek, body)
-        - Disk/shm block cache with per-chunk locking to avoid duplicate fetches
+        - Disk/shm block cache with per-title shard locks + thread-offloaded I/O
         - No adaptive prefetch of ahead-of-playback chunks
 
         Args:
@@ -2204,6 +2209,8 @@ class RivenVFS(pyfuse3.Operations):
                     stream_key = self._stream_key(path, fh)
                     async with self._active_streams_lock:
                         active_stream = self._active_streams.pop(stream_key, None)
+                        if active_stream is not None:
+                            self._active_stream_count = len(self._active_streams)
 
                     if active_stream:
                         await active_stream.close()
@@ -2338,5 +2345,15 @@ class RivenVFS(pyfuse3.Operations):
                     initial_url=entry_info.url,
                     nursery=self.stream_nursery,
                 )
+                self._active_stream_count = len(self._active_streams)
 
         return self._active_streams[stream_key]
+
+    @property
+    def active_stream_count(self) -> int:
+        """Number of open MediaStream sessions (for Downloader backpressure)."""
+        return self._active_stream_count
+
+    def has_active_streams(self) -> bool:
+        """True when any VFS media stream is open (playback in progress)."""
+        return self._active_stream_count > 0

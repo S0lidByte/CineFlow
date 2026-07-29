@@ -127,6 +127,20 @@ class FilesystemService(Runner[FilesystemModel]):
 
         return True
 
+    def has_active_streams(self) -> bool:
+        """True when VFS has open playback streams (Downloader should back off)."""
+        vfs = self.riven_vfs
+        if vfs is None:
+            return False
+        return bool(getattr(vfs, "has_active_streams", lambda: False)())
+
+    @property
+    def active_stream_count(self) -> int:
+        vfs = self.riven_vfs
+        if vfs is None:
+            return 0
+        return int(getattr(vfs, "active_stream_count", 0))
+
     @property
     def initialized(self) -> bool:
         """Check if the filesystem service is properly initialized"""

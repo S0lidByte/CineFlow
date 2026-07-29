@@ -115,16 +115,28 @@ class Cache:
     """
     Simple file-based block cache on disk with cross-chunk boundary support.
     We maintain a small in-memory LRU index for eviction decisions.
+
+    Concurrency model (multi-title playback):
+    - Brief global index lock for ``_index`` / ``_by_path`` / ``_total_bytes`` only.
+    - Per-``cache_key`` shard locks serialize writers (``put``) for the same title.
+    - ``get`` never holds a shard across disk I/O so duplicate-path opens overlap.
+    - Disk I/O runs in ``trio.to_thread`` so the FUSE/trio loop is never blocked
+      on ``open``/``read``/``write`` (critical with disk-backed ``cache_dir``).
     """
+
+    _SHARD_COUNT = 32
 
     def __init__(self, cfg: CacheConfig) -> None:
         self.cfg = cfg
         self._index = OrderedDict[str, CacheEntry]()
         self._by_path = dict[str, list[int]]()
         self._total_bytes = 0
-        self._lock = trio.Lock()
-        # Thread lock for synchronizing _index/_by_path access
+        # Brief global lock for index / eviction accounting only — never across I/O.
+        self._index_lock = trio.Lock()
+        # Thread lock for synchronizing _index/_by_path with sync has() callers.
         self._thread_lock = threading.Lock()
+        # Per-cache_key shards so concurrent titles do not wait on each other.
+        self._shard_locks = [trio.Lock() for _ in range(self._SHARD_COUNT)]
         self._metrics = Metrics(prom_enabled=cfg.metrics_enabled)
         self._last_log = 0.0  # Initialize last log timestamp
 
@@ -138,13 +150,44 @@ class Cache:
 
         trio.run(self._initialize)
 
+    def _shard_for(self, cache_key: str) -> trio.Lock:
+        # Stable across process lifetime; collisions only map unrelated keys together.
+        bucket = int(hashlib.sha1(cache_key.encode()).hexdigest(), 16) % self._SHARD_COUNT
+        return self._shard_locks[bucket]
+
+    @asynccontextmanager
+    async def _shard(self, cache_key: str) -> AsyncGenerator[None, None]:
+        """Serialize get/put for one cache_key; other titles use other shards."""
+        async with self._shard_for(cache_key):
+            yield
+
     @asynccontextmanager
     async def locks(self) -> AsyncGenerator[None, None]:
-        """Async context manager to acquire the cache locks."""
+        """Brief global index lock. Never hold across disk I/O."""
 
-        async with self._lock:
+        async with self._index_lock:
             with self._thread_lock:
                 yield
+
+    @staticmethod
+    def _read_file_slice(path: Path, offset: int, size: int) -> bytes:
+        with path.open("rb") as f:
+            f.seek(offset)
+            return f.read(size)
+
+    @staticmethod
+    def _read_file_all(path: Path) -> bytes | None:
+        try:
+            with path.open("rb") as f:
+                return f.read()
+        except FileNotFoundError:
+            return None
+
+    @staticmethod
+    def _write_file_bytes(path: Path, data: bytes) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("wb") as f:
+            f.write(data)
 
     async def _initialize(self) -> None:
         # Lazy-rebuild index for any pre-existing files so size limits apply after restart
@@ -357,7 +400,7 @@ class Cache:
                 evicted += 1
 
         if to_unlink:
-            self._unlink_cache_files(to_unlink)
+            await trio.to_thread.run_sync(self._unlink_cache_files, to_unlink)
         if evicted:
             self._metrics.record_evictions(evicted)
 
@@ -390,7 +433,7 @@ class Cache:
                     to_unlink.append(k)
 
         if to_unlink:
-            self._unlink_cache_files(to_unlink)
+            await trio.to_thread.run_sync(self._unlink_cache_files, to_unlink)
             self._metrics.record_evictions(len(to_unlink))
 
     async def get(self, cache_key: str, start: int, end: int) -> bytes:
@@ -401,6 +444,10 @@ class Cache:
 
         get_start_time = time.time()
         lock_wait_s = 0.0
+
+        # Do not hold the per-key shard across disk I/O — same title may be
+        # opened via multiple VFS paths (library profiles); readers must overlap.
+        # Writers serialize via ``put``'s shard lock.
 
         # Fast path: Try to find a single chunk that contains the entire request
         # This avoids holding the lock during file I/O for the common case
@@ -432,7 +479,7 @@ class Cache:
                             chunk_start_offset = chunk_start
                             # Don't update timestamps yet - do it after successful read
 
-        # Fast path: read single chunk outside the lock
+        # Fast path: read single chunk outside the index lock (off trio thread)
         if chunk_key and chunk_file:
             try:
                 read_start = time.time()
@@ -442,11 +489,12 @@ class Cache:
                 copy_end = end - chunk_start_offset
                 bytes_to_read = copy_end - copy_start + 1
 
-                # Optimization: Only read the slice we need, not the entire chunk!
-                # This is much faster for large chunks (128MB) when we only need 128KB
-                with chunk_file.open("rb") as f:
-                    f.seek(copy_start)
-                    result = f.read(bytes_to_read)
+                result = await trio.to_thread.run_sync(
+                    self._read_file_slice,
+                    chunk_file,
+                    copy_start,
+                    bytes_to_read,
+                )
 
                 read_time = time.time() - read_start
 
@@ -546,16 +594,19 @@ class Cache:
 
                     current_pos = chunk_end + 1
 
-        # Execute reads outside the lock to reduce contention
+        # Execute reads outside the index lock (off trio thread)
         if chunks_to_read:
             result_data = bytearray()
             chunks_used = list[tuple[str, float]]()
 
             for chunk_info in chunks_to_read:
                 try:
-                    with chunk_info.chunk_file.open("rb") as f:
-                        f.seek(chunk_info.copy_start)
-                        chunk_slice = f.read(chunk_info.bytes_to_read)
+                    chunk_slice = await trio.to_thread.run_sync(
+                        self._read_file_slice,
+                        chunk_info.chunk_file,
+                        chunk_info.copy_start,
+                        chunk_info.bytes_to_read,
+                    )
                 except FileNotFoundError:
                     # Chunk file missing, abort slow path
                     break
@@ -595,13 +646,7 @@ class Cache:
         # Fallback: Direct probe for exact key on filesystem and rebuild index
         k = self._key(cache_key, start)
         fp = self._file_for(k)
-        data: bytes | None = None
-
-        try:
-            with fp.open("rb") as f:
-                data = f.read()
-        except FileNotFoundError:
-            data = None
+        data = await trio.to_thread.run_sync(self._read_file_all, fp)
 
         if data is None:
             async with self.locks():
@@ -646,51 +691,52 @@ class Cache:
         k = self._key(cache_key, start)
         need = len(data)
 
-        if self.cfg.eviction == "TTL":
-            await self._evict_ttl()
-        else:
-            await self._evict_lru(need)
+        # Shard serializes writers for the same title; index lock stays brief.
+        async with self._shard(cache_key):
+            if self.cfg.eviction == "TTL":
+                await self._evict_ttl()
+            else:
+                await self._evict_lru(need)
 
-        fp = self._file_for(k)
+            fp = self._file_for(k)
 
-        try:
-            self._ensure_parent(fp)
-            with fp.open("wb") as f:
-                f.write(data)
+            try:
+                await trio.to_thread.run_sync(self._write_file_bytes, fp, data)
+                # Write metadata after successful data write (also disk I/O)
+                await trio.to_thread.run_sync(
+                    self._write_metadata, k, cache_key, start
+                )
+            except Exception as e:
+                logger.warning(f"Disk cache write failed: {e}")
+                return
 
-            # Write metadata after successful data write
-            self._write_metadata(k, cache_key, start)
-        except Exception as e:
-            logger.warning(f"Disk cache write failed: {e}")
-            return
+            async with self.locks():
+                prev = self._index.pop(k, None)
 
-        async with self.locks():
-            prev = self._index.pop(k, None)
+                if prev:
+                    self._total_bytes -= prev.size
+                    lst_prev = self._by_path.get(cache_key)
 
-            if prev:
-                self._total_bytes -= prev.size
-                lst_prev = self._by_path.get(cache_key)
+                    if lst_prev:
+                        idx_prev = bisect_right(lst_prev, start) - 1
 
-                if lst_prev:
-                    idx_prev = bisect_right(lst_prev, start) - 1
+                        if idx_prev >= 0 and lst_prev[idx_prev] == start:
+                            del lst_prev[idx_prev]
 
-                    if idx_prev >= 0 and lst_prev[idx_prev] == start:
-                        del lst_prev[idx_prev]
+                        if not lst_prev:
+                            self._by_path.pop(cache_key, None)
 
-                    if not lst_prev:
-                        self._by_path.pop(cache_key, None)
-
-            self._index[k] = CacheEntry(
-                key=k,
-                cache_key=cache_key,
-                start=start,
-                size=need,
-                mtime=time.time(),
-            )
-            lst = self._by_path.setdefault(cache_key, [])
-            insort(lst, start)
-            self._total_bytes += need
-            self._metrics.record_bytes_written(need)
+                self._index[k] = CacheEntry(
+                    key=k,
+                    cache_key=cache_key,
+                    start=start,
+                    size=need,
+                    mtime=time.time(),
+                )
+                lst = self._by_path.setdefault(cache_key, [])
+                insort(lst, start)
+                self._total_bytes += need
+                self._metrics.record_bytes_written(need)
 
     def has(self, cache_key: str, start: int, end: int) -> bool:
         """
