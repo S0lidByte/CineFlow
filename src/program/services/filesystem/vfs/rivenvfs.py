@@ -1810,9 +1810,13 @@ class RivenVFS(pyfuse3.Operations):
                     validate_started = time.perf_counter()
                     validated_url = None
                     try:
-                        validated_url = DebridCDNUrl.from_filename(
-                            original_filename
-                        ).validate()
+                        # CDN validate does sync HTTP / DB work — keep it off the
+                        # FUSE/trio loop (same pattern as _get_stream).
+                        validated_url = await trio.to_thread.run_sync(
+                            lambda: DebridCDNUrl.from_filename(
+                                original_filename
+                            ).validate()
+                        )
                     finally:
                         validate_ms = (time.perf_counter() - validate_started) * 1000
                         logger.trace(
@@ -1845,6 +1849,9 @@ class RivenVFS(pyfuse3.Operations):
                         )
 
                     new_nodes: list[VFSFile] = []
+                    # Default False so trio.Cancelled clears inflight without cooldown;
+                    # timeout / Exception set True to preserve storm protection.
+                    recovery_failed = False
                     try:
                         original_inode = node.inode
 
@@ -1870,19 +1877,21 @@ class RivenVFS(pyfuse3.Operations):
 
                                 await trio.sleep(1)
                     except trio.TooSlowError:
-                        self._end_dead_link_recovery(original_filename, failed=True)
+                        recovery_failed = True
                         logger.error(
                             f"Timeout waiting for new link to become available for path={node.path}"
                         )
 
                         raise pyfuse3.FUSEError(errno.ENOENT) from None
                     except Exception:
-                        self._end_dead_link_recovery(original_filename, failed=True)
+                        recovery_failed = True
                         raise
                     else:
                         # Cleared before recursive open so the next attempt can wait again.
+                        recovery_failed = not new_nodes
+                    finally:
                         self._end_dead_link_recovery(
-                            original_filename, failed=not new_nodes
+                            original_filename, failed=recovery_failed
                         )
 
                     if not new_nodes:
