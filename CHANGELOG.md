@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.29.0](https://github.com/S0lidByte/CineFlow/compare/v1.28.13...v1.29.0) (2026-07-30)
+
+
+### Features
+
+* **stream:** 4K no-buffer cache, prefetch, and VFS open resilience ([#198](https://github.com/S0lidByte/CineFlow/issues/198)) ([4ea886d](https://github.com/S0lidByte/CineFlow/commit/4ea886dc4dacc7c56437f8a4ca038044ba330a3e))
+
+
+### Bug Fixes
+
+* **stream:** satisfy pyright OrderedSet empty constructors ([4b86683](https://github.com/S0lidByte/CineFlow/commit/4b866832dc7863e007f4042b7b7cd995fe60c34d))
+* **stream:** satisfy pyright OrderedSet empty constructors ([a509b38](https://github.com/S0lidByte/CineFlow/commit/a509b38518d31d23e26ea60431d50d41bdeafd54))
+
 ## [1.28.13](https://github.com/S0lidByte/CineFlow/compare/v1.28.12...v1.28.13) (2026-07-29)
 
 
