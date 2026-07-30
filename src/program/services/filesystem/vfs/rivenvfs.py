@@ -363,10 +363,11 @@ class RivenVFS(pyfuse3.Operations):
 
         async with self._active_streams_lock:
             for stream_key, stream in list(self._active_streams.items()):
-                zero_progress = (
-                    stream.session_statistics.bytes_transferred == 0
-                    and stream.is_streaming.value
+                bytes_transferred = int(
+                    stream.session_statistics.bytes_transferred
                 )
+                is_streaming = bool(stream.is_streaming.value)
+                zero_progress = bytes_transferred == 0 and is_streaming
                 if stream.is_timed_out or zero_progress:
                     candidates[stream_key] = stream
 
