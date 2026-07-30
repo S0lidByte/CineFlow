@@ -25,10 +25,12 @@ services:
             - SYS_ADMIN
         security_opt:
             - apparmor:unconfined
-        # Streaming cache defaults to /dev/shm (RAM). Keep shm modest; raise only if
-        # you intentionally want a larger RAM cache. Prefer disk cache_dir for >1GiB.
-        # Also set a container memory limit in production to avoid host OOM cascades:
-        #   mem_limit: 4g
+        # Streaming cache defaults to /dev/shm (RAM). Default tmpfs_cache_max_mb=1024.
+        # For a ~10 GiB RAM hot cache (4K remux): set filesystem.tmpfs_cache_max_mb=10240,
+        # raise shm_size accordingly, and set mem_limit >= cache + 2–4 GiB headroom, e.g.:
+        #   shm_size: 12g
+        #   mem_limit: 16g
+        # Prefer disk cache_dir (warm) + optional cache_hot_dir on tmpfs for two-tier.
         shm_size: 1024m
         devices:
             - /dev/fuse

@@ -316,19 +316,39 @@ class FilesystemModel(Observable):
     cache_dir: Path = Field(
         default=Path("/dev/shm/riven-cache"),
         description=(
-            "Directory for caching downloaded chunks. "
+            "Warm (or sole) directory for caching downloaded chunks. "
             "Default /dev/shm/riven-cache is RAM-backed (tmpfs): large budgets can "
             "OOM-kill the process (bare 'Killed'). Prefer a disk path under your "
-            "data volume for caches above ~1 GiB. On tmpfs, Riven hard-caps at 1 GiB."
+            "data volume for large warm caches. On tmpfs, effective size is limited by "
+            "tmpfs_cache_max_mb (default 1 GiB) and half of free shm."
+        ),
+    )
+    cache_hot_dir: Path | None = Field(
+        default=None,
+        description=(
+            "Optional hot-tier directory (typically tmpfs). When set, new chunks are "
+            "written here first; LRU overflow is demoted to cache_dir (warm). "
+            "Leave empty for a single-tier cache."
         ),
     )
     cache_max_size_mb: int = Field(
         default=10240,
         ge=0,
         description=(
-            "Maximum cache size in MB (10 GiB default on disk). "
-            "When cache_dir is on tmpfs (/dev/shm), effective size is hard-capped "
-            "at 1 GiB to avoid OOM kills regardless of this value."
+            "Maximum warm (or sole) cache size in MB (10 GiB default on disk). "
+            "When cache_dir is on tmpfs (/dev/shm), effective size is also limited by "
+            "tmpfs_cache_max_mb and half of free shm."
+        ),
+    )
+    tmpfs_cache_max_mb: int = Field(
+        default=1024,
+        ge=0,
+        le=32768,
+        description=(
+            "Hard ceiling in MB when cache_dir or cache_hot_dir is on tmpfs/ramfs "
+            "(default 1024 = 1 GiB). Raise to e.g. 10240 for a ~10 GiB RAM hot cache, "
+            "and size Docker shm_size / mem_limit so mem_limit >= this budget + 2–4 GiB "
+            "headroom. Still clamped to half of reported free space on that mount."
         ),
     )
     cache_ttl_seconds: int = Field(
@@ -1149,10 +1169,20 @@ class StreamModel(Observable):
         ge=1,
         description=(
             "Chunk size in MB for streaming downloads (1 MB default). "
-            "Prefer 4–8 MB for multi-title playback with a disk cache: the entire "
-            "chunk must finish downloading before it can be read. Very large values "
-            "(e.g. 50–80 MB) help single-title ahead-of-playhead buffering but hurt "
-            "concurrent cold starts and amplify cache/FUSE stalls."
+            "Prefer 6–8 MB for 4K / remux single-title, or 4–8 MB for multi-title "
+            "with a disk cache: the entire chunk must finish downloading before it "
+            "can be read. Very large values (e.g. 50–80 MB) hurt concurrent cold "
+            "starts and amplify cache/FUSE stalls — use prefetch_chunks instead."
+        ),
+    )
+    prefetch_chunks: int = Field(
+        default=12,
+        ge=0,
+        le=64,
+        description=(
+            "On sequential body playback, fetch this many uncached chunks ahead of "
+            "the playhead (default 12; 0 disables). Bounded by N × chunk_size_mb so "
+            "multi-title stays safe. Required for smooth 4K without large chunk sizes."
         ),
     )
     connect_timeout_seconds: int = Field(
@@ -1163,7 +1193,11 @@ class StreamModel(Observable):
     chunk_wait_timeout_seconds: int = Field(
         default=10,
         ge=1,
-        description="Timeout in seconds for reading a chunk during streaming (10 seconds default)",
+        description=(
+            "Timeout in seconds for reading a chunk during streaming (10 seconds default). "
+            "Prefer 30+ for 4K remux when the CDN is slow so playhead wait does not "
+            "raise ChunksTooSlowException during cold start."
+        ),
     )
     activity_timeout_seconds: int = Field(
         default=60,

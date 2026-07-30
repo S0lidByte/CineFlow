@@ -107,7 +107,9 @@ def mock_vfs(tmp_path):
         patch.object(RivenVFS, "sync", return_value=None),
     ):
         mock_settings.settings.filesystem.cache_dir = cache_dir
+        mock_settings.settings.filesystem.cache_hot_dir = None
         mock_settings.settings.filesystem.cache_max_size_mb = 100
+        mock_settings.settings.filesystem.tmpfs_cache_max_mb = 1024
         mock_settings.settings.filesystem.cache_ttl_seconds = 3600
         mock_settings.settings.filesystem.cache_eviction = "LRU"
         mock_settings.settings.filesystem.cache_metrics = False
@@ -428,5 +430,42 @@ def test_dead_link_recovery_cooldown_on_timeout(mock_vfs):
 
         assert filename not in mock_vfs._dead_link_recovery_inflight
         assert filename in mock_vfs._dead_link_recovery_cooldown_until
+
+    trio.run(_run)
+
+
+def test_dead_link_non_owner_open_returns_eagain(mock_vfs):
+    """Concurrent opens while recovery is inflight must get EAGAIN, not EIO."""
+
+    from program.services.streaming.exceptions import DebridServiceLinkUnavailable
+
+    filename = "busy.mkv"
+    inode = pyfuse3.InodeT(502)
+    mock_node = VFSFile(
+        name="busy.mkv",
+        inode=inode,
+        parent=mock_vfs._root,
+        original_filename=filename,
+        file_size=100,
+        created_at="2020-01-01T00:00:00",
+        updated_at="2020-01-01T00:00:00",
+        entry_type="media",
+    )
+    mock_vfs._inode_to_node[inode] = mock_node
+    mock_vfs._dead_link_recovery_inflight.add(filename)
+
+    cdn_mock = MagicMock()
+    cdn_mock.validate = MagicMock(
+        side_effect=DebridServiceLinkUnavailable("rd", "https://cdn.example/dead")
+    )
+
+    async def _run() -> None:
+        with patch(
+            "program.services.filesystem.vfs.rivenvfs.DebridCDNUrl.from_filename",
+            return_value=cdn_mock,
+        ):
+            with pytest.raises(pyfuse3.FUSEError) as exc_info:
+                await mock_vfs.open(inode, 0, MagicMock())
+            assert exc_info.value.errno == errno.EAGAIN
 
     trio.run(_run)

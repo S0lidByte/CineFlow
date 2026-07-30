@@ -40,6 +40,7 @@ import threading
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -154,18 +155,58 @@ class RivenVFS(pyfuse3.Operations):
         except Exception:
             free_bytes = 0
 
-        from program.services.streaming.cache_sizing import resolve_cache_max_bytes
+        from program.services.streaming.cache_sizing import (
+            is_tmpfs_path,
+            resolve_cache_max_bytes,
+        )
+
+        tmpfs_cap_bytes = max(0, int(self.fs.tmpfs_cache_max_mb)) * 1024 * 1024
 
         sizing = resolve_cache_max_bytes(
             cache_dir,
             size_mb,
             free_bytes=free_bytes,
+            tmpfs_hard_cap_bytes=tmpfs_cap_bytes,
         )
 
         if sizing.clamped and sizing.reason:
             # tmpfs over-budget is CRITICAL: bare Linux "Killed" / OOM follows.
             level = "CRITICAL" if sizing.is_tmpfs else "WARNING"
             logger.bind(component="RivenVFS").log(level, sizing.reason)
+
+        hot_dir = self.fs.cache_hot_dir
+        hot_max_bytes = 0
+        if hot_dir is not None:
+            hot_dir = Path(hot_dir)
+            try:
+                hot_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            try:
+                hot_usage = shutil.disk_usage(
+                    str(hot_dir if hot_dir.exists() else hot_dir.parent)
+                )
+                hot_free = int(hot_usage.free)
+            except Exception:
+                hot_free = 0
+            # Hot tier budget: configured tmpfs cap, resolved against hot mount.
+            hot_configured_mb = (
+                self.fs.tmpfs_cache_max_mb
+                if is_tmpfs_path(hot_dir)
+                else min(self.fs.tmpfs_cache_max_mb, self.fs.cache_max_size_mb)
+            )
+            hot_sizing = resolve_cache_max_bytes(
+                hot_dir,
+                hot_configured_mb,
+                free_bytes=hot_free,
+                tmpfs_hard_cap_bytes=tmpfs_cap_bytes,
+            )
+            hot_max_bytes = hot_sizing.effective_max_bytes
+            if hot_sizing.clamped and hot_sizing.reason:
+                level = "CRITICAL" if hot_sizing.is_tmpfs else "WARNING"
+                logger.bind(component="RivenVFS").log(
+                    level, f"cache_hot_dir: {hot_sizing.reason}"
+                )
 
         di[Cache] = Cache(
             cfg=CacheConfig(
@@ -174,6 +215,8 @@ class RivenVFS(pyfuse3.Operations):
                 ttl_seconds=self.fs.cache_ttl_seconds,
                 eviction=self.fs.cache_eviction,
                 metrics_enabled=self.fs.cache_metrics,
+                hot_dir=hot_dir,
+                hot_max_size_bytes=hot_max_bytes,
             )
         )
 
@@ -1843,8 +1886,10 @@ class RivenVFS(pyfuse3.Operations):
                         raise pyfuse3.FUSEError(errno.EIO)
 
                     if not self._try_begin_dead_link_recovery(original_filename):
-                        # Another open is already waiting / recently failed — fail fast.
-                        raise pyfuse3.FUSEError(errno.EIO)
+                        # Another open is already waiting / recently failed — ask the
+                        # kernel/client to retry soon instead of hard EIO (Plex marks
+                        # Video/Audio as None after analyze EIO).
+                        raise pyfuse3.FUSEError(errno.EAGAIN)
 
                     if self._should_log_dead_link(original_filename):
                         logger.warning(
@@ -1976,7 +2021,7 @@ class RivenVFS(pyfuse3.Operations):
         - Fixed-size chunk fetching (default ``chunk_size_mb`` = 1 MiB)
         - Read-type classification (header/footer scan, sequential, seek, body)
         - Disk/shm block cache with per-title shard locks + thread-offloaded I/O
-        - No adaptive prefetch of ahead-of-playback chunks
+        - Sequential playhead prefetch (``stream.prefetch_chunks``, default 12)
 
         Args:
             fh: File handle from open()

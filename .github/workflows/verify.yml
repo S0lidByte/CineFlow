@@ -92,6 +92,8 @@ jobs:
             src/tests/test_stream_tracing_sample.py \
             src/tests/test_streaming_cache.py \
             src/tests/test_cache_sizing.py \
+            src/tests/test_cache_two_tier.py \
+            src/tests/test_stream_prefetch.py \
             src/tests/test_stream_tolerance_settings.py \
             src/tests/test_prom_cache_metrics.py \
             src/tests/test_rivenvfs.py \

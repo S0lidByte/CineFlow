@@ -34,6 +34,14 @@ class CacheConfig:
     ttl_seconds: int = 2 * 60 * 60  # 2 hours
     eviction: Literal["LRU", "TTL"] = "LRU"
     metrics_enabled: bool = True
+    # Optional hot tier (typically tmpfs). When set, puts go hot-first and
+    # LRU overflow is demoted to cache_dir (warm).
+    hot_dir: Path | None = None
+    hot_max_size_bytes: int = 0
+
+    @property
+    def two_tier(self) -> bool:
+        return self.hot_dir is not None and self.hot_max_size_bytes > 0
 
 
 @dataclass(frozen=True)
@@ -43,6 +51,7 @@ class CacheEntry:
     start: int
     size: int
     mtime: float
+    tier: Literal["hot", "warm"] = "warm"
 
 
 @dataclass(frozen=True)
@@ -131,6 +140,7 @@ class Cache:
         self._index = OrderedDict[str, CacheEntry]()
         self._by_path = dict[str, list[int]]()
         self._total_bytes = 0
+        self._hot_bytes = 0
         # Brief global lock for index / eviction accounting only — never across I/O.
         self._index_lock = trio.Lock()
         # Thread lock for synchronizing _index/_by_path with sync has() callers.
@@ -147,6 +157,14 @@ class Cache:
             logger.warning(
                 f"Disk cache directory init warning for {self.cfg.cache_dir}: {e}"
             )
+
+        if self.cfg.two_tier and self.cfg.hot_dir is not None:
+            try:
+                os.makedirs(self.cfg.hot_dir, exist_ok=True)
+            except Exception as e:
+                logger.warning(
+                    f"Hot cache directory init warning for {self.cfg.hot_dir}: {e}"
+                )
 
         trio.run(self._initialize)
 
@@ -200,21 +218,58 @@ class Cache:
         # Build index from on-disk files, ordered by mtime ascending for LRU correctness
         entries: list[CacheEntry] = []
 
+        roots: list[tuple[Path, Literal["hot", "warm"]]] = [
+            (self.cfg.cache_dir, "warm"),
+        ]
+        if self.cfg.two_tier and self.cfg.hot_dir is not None:
+            roots.insert(0, (self.cfg.hot_dir, "hot"))
+
         try:
-            for sub in self.cfg.cache_dir.iterdir():
+            for root, tier in roots:
                 try:
-                    if sub.is_dir():
-                        for fp in sub.iterdir():
-                            try:
-                                if not fp.is_file() or fp.suffix == ".meta":
-                                    continue
+                    if not root.exists():
+                        continue
+                    for sub in root.iterdir():
+                        try:
+                            if sub.is_dir():
+                                for fp in sub.iterdir():
+                                    try:
+                                        if not fp.is_file() or fp.suffix == ".meta":
+                                            continue
 
-                                key = fp.name
-                                st = fp.stat()
+                                        key = fp.name
+                                        st = fp.stat()
+                                        metadata = self._read_metadata(key, tier=tier)
 
-                                # Try to read metadata for this cache entry
-                                metadata = self._read_metadata(key)
-
+                                        if metadata:
+                                            cache_key, start = metadata
+                                            entries.append(
+                                                CacheEntry(
+                                                    key=key,
+                                                    cache_key=cache_key,
+                                                    start=start,
+                                                    size=int(st.st_size),
+                                                    mtime=float(st.st_mtime),
+                                                    tier=tier,
+                                                )
+                                            )
+                                        else:
+                                            logger.warning(
+                                                f"Removing orphaned cache file without metadata: {fp}"
+                                            )
+                                            try:
+                                                fp.unlink()
+                                                self._remove_metadata(key, tier=tier)
+                                            except Exception as e:
+                                                logger.warning(
+                                                    f"Failed to remove orphaned cache file {fp}: {e}"
+                                                )
+                                    except Exception:
+                                        continue
+                            elif sub.is_file() and sub.suffix != ".meta":
+                                key = sub.name
+                                st = sub.stat()
+                                metadata = self._read_metadata(key, tier=tier)
                                 if metadata:
                                     cache_key, start = metadata
                                     entries.append(
@@ -224,55 +279,22 @@ class Cache:
                                             start=start,
                                             size=int(st.st_size),
                                             mtime=float(st.st_mtime),
+                                            tier=tier,
                                         )
                                     )
                                 else:
-                                    # No metadata found - this is an orphaned file
                                     logger.warning(
-                                        f"Removing orphaned cache file without metadata: {fp}"
+                                        f"Removing orphaned cache file without metadata: {sub}"
                                     )
-
                                     try:
-                                        fp.unlink()
-                                        # Also remove any stale metadata file
-                                        self._remove_metadata(key)
+                                        sub.unlink()
+                                        self._remove_metadata(key, tier=tier)
                                     except Exception as e:
                                         logger.warning(
-                                            f"Failed to remove orphaned cache file {fp}: {e}"
+                                            f"Failed to remove orphaned cache file {sub}: {e}"
                                         )
-
-                            except Exception:
-                                continue
-                    elif sub.is_file() and sub.suffix != ".meta":
-                        key = sub.name
-                        st = sub.stat()
-
-                        # Try to read metadata for this cache entry
-                        metadata = self._read_metadata(key)
-                        if metadata:
-                            cache_key, start = metadata
-                            entries.append(
-                                CacheEntry(
-                                    key=key,
-                                    cache_key=cache_key,
-                                    start=start,
-                                    size=int(st.st_size),
-                                    mtime=float(st.st_mtime),
-                                )
-                            )
-                        else:
-                            # No metadata found - this is an orphaned file
-                            logger.warning(
-                                f"Removing orphaned cache file without metadata: {sub}"
-                            )
-                            try:
-                                sub.unlink()
-                                # Also remove any stale metadata file
-                                self._remove_metadata(key)
-                            except Exception as e:
-                                logger.warning(
-                                    f"Failed to remove orphaned cache file {sub}: {e}"
-                                )
+                        except Exception:
+                            continue
                 except Exception:
                     continue
         finally:
@@ -282,16 +304,27 @@ class Cache:
                 self._index.clear()
                 self._by_path.clear()
                 self._total_bytes = 0
+                self._hot_bytes = 0
 
                 for cache_entry in entries:
+                    # Prefer hot if the same key appears in both (shouldn't normally)
+                    existing = self._index.get(cache_entry.key)
+                    if existing and existing.tier == "hot" and cache_entry.tier == "warm":
+                        continue
+                    if existing:
+                        self._total_bytes -= existing.size
+                        if existing.tier == "hot":
+                            self._hot_bytes -= existing.size
+
                     self._index[cache_entry.key] = cache_entry
                     self._total_bytes += cache_entry.size
+                    if cache_entry.tier == "hot":
+                        self._hot_bytes += cache_entry.size
 
-                    # Rebuild _by_path index
                     lst = self._by_path.setdefault(cache_entry.cache_key, [])
-                    insort(lst, cache_entry.start)
+                    if cache_entry.start not in lst:
+                        insort(lst, cache_entry.start)
 
-            # If we are over budget, evict oldest until within max_disk_bytes
             try:
                 await self.trim()
             except Exception:
@@ -301,41 +334,56 @@ class Cache:
         h = hashlib.sha1(f"{path}|{start}".encode()).hexdigest()
         return h
 
-    def _file_for(self, key: str) -> Path:
+    def _file_for(
+        self, key: str, *, tier: Literal["hot", "warm"] = "warm"
+    ) -> Path:
         """Return cache file path without creating directories.
 
         Read paths (``get`` / ``has``) must not mkdir under the global lock —
         fanout dirs are created only on write via ``_ensure_parent``.
         """
         sub = key[:2]
+        if tier == "hot" and self.cfg.hot_dir is not None:
+            return self.cfg.hot_dir / sub / key
         return self.cfg.cache_dir / sub / key
 
     def _ensure_parent(self, path: Path) -> None:
         """Create the two-level fanout directory for a cache file (writes only)."""
         path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _metadata_file_for(self, key: str) -> Path:
+    def _metadata_file_for(
+        self, key: str, *, tier: Literal["hot", "warm"] = "warm"
+    ) -> Path:
         """Get the metadata sidecar file path for a cache entry."""
 
-        return self._file_for(key).with_suffix(".meta")
+        return self._file_for(key, tier=tier).with_suffix(".meta")
 
-    def _write_metadata(self, key: str, cache_key: str, start: int) -> None:
+    def _write_metadata(
+        self,
+        key: str,
+        cache_key: str,
+        start: int,
+        *,
+        tier: Literal["hot", "warm"] = "warm",
+    ) -> None:
         """Write metadata for a cache entry to a sidecar file."""
 
         metadata = {"cache_key": cache_key, "start": start}
 
         try:
-            meta_path = self._metadata_file_for(key)
+            meta_path = self._metadata_file_for(key, tier=tier)
             self._ensure_parent(meta_path)
             with meta_path.open("w") as f:
                 json.dump(metadata, f)
         except Exception as e:
             logger.warning(f"Failed to write cache metadata for {key}: {e}")
 
-    def _read_metadata(self, key: str) -> tuple[str, int] | None:
+    def _read_metadata(
+        self, key: str, *, tier: Literal["hot", "warm"] = "warm"
+    ) -> tuple[str, int] | None:
         """Read metadata for a cache entry from its sidecar file."""
 
-        metadata_file = self._metadata_file_for(key)
+        metadata_file = self._metadata_file_for(key, tier=tier)
 
         if not metadata_file.exists():
             return None
@@ -348,59 +396,146 @@ class Cache:
             logger.warning(f"Failed to read cache metadata for {key}: {e}")
             return None
 
-    def _remove_metadata(self, key: str) -> None:
+    def _remove_metadata(
+        self, key: str, *, tier: Literal["hot", "warm"] = "warm"
+    ) -> None:
         """Remove metadata file for a cache entry."""
 
         try:
-            metadata_file = self._metadata_file_for(key)
+            metadata_file = self._metadata_file_for(key, tier=tier)
 
             if metadata_file.exists():
                 metadata_file.unlink()
         except Exception as e:
             logger.warning(f"Failed to remove cache metadata for {key}: {e}")
 
-    def _unlink_cache_files(self, keys: list[str]) -> None:
+    def _unlink_cache_files(
+        self,
+        keys: list[str],
+        *,
+        tiers: dict[str, Literal["hot", "warm"]] | None = None,
+    ) -> None:
         """Delete cache payload + metadata files outside the index lock."""
         for k in keys:
-            fp = self._file_for(k)
+            tier = (tiers or {}).get(k, "warm")
+            fp = self._file_for(k, tier=tier)
             try:
                 if fp.exists():
                     fp.unlink()
             except Exception:
                 pass
-            self._remove_metadata(k)
+            self._remove_metadata(k, tier=tier)
+
+    @staticmethod
+    def _rename_or_copy(src: Path, dst: Path) -> None:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.replace(src, dst)
+        except OSError:
+            # Cross-device (tmpfs → disk): copy then unlink.
+            with src.open("rb") as rf, dst.open("wb") as wf:
+                wf.write(rf.read())
+            src.unlink(missing_ok=True)
+
+    def _demote_files_to_warm(self, key: str) -> None:
+        """Move payload + metadata from hot to warm on disk."""
+        hot_fp = self._file_for(key, tier="hot")
+        warm_fp = self._file_for(key, tier="warm")
+        hot_meta = self._metadata_file_for(key, tier="hot")
+        warm_meta = self._metadata_file_for(key, tier="warm")
+        if hot_fp.exists():
+            self._rename_or_copy(hot_fp, warm_fp)
+        if hot_meta.exists():
+            self._rename_or_copy(hot_meta, warm_meta)
+
+    async def _ensure_hot_capacity(self, need_bytes: int) -> None:
+        """Demote LRU hot entries to warm until hot tier can accept need_bytes."""
+        if not self.cfg.two_tier:
+            return
+
+        to_demote: list[CacheEntry] = []
+
+        async with self.locks():
+            target = max(0, self._hot_bytes + need_bytes - self.cfg.hot_max_size_bytes)
+            if target <= 0:
+                return
+
+            for k, cache_entry in list(self._index.items()):
+                if target <= 0:
+                    break
+                if cache_entry.tier != "hot":
+                    continue
+                # Re-insert at end temporarily? Better: collect and remove from hot accounting
+                to_demote.append(cache_entry)
+                self._hot_bytes -= cache_entry.size
+                target -= cache_entry.size
+                # Mark as warm in index before disk move
+                self._index[k] = CacheEntry(
+                    key=cache_entry.key,
+                    cache_key=cache_entry.cache_key,
+                    start=cache_entry.start,
+                    size=cache_entry.size,
+                    mtime=cache_entry.mtime,
+                    tier="warm",
+                )
+                self._index.move_to_end(k, last=False)  # demoted = coldest warm
+
+        for entry in to_demote:
+            try:
+                await trio.to_thread.run_sync(self._demote_files_to_warm, entry.key)
+            except Exception as e:
+                logger.warning(f"Failed to demote hot cache entry {entry.key}: {e}")
+
+        # Warm may now be over budget
+        if to_demote:
+            await self._evict_lru(0)
 
     async def _evict_lru(self, need_bytes: int = 0) -> None:
         # Index updates under lock; disk unlink after release so concurrent
         # cache.get() under Plex multi-open is not blocked on unlink I/O.
         to_unlink: list[str] = []
+        tiers: dict[str, Literal["hot", "warm"]] = {}
         evicted = 0
 
         async with self.locks():
+            # Prefer evicting warm; only evict hot if single-tier or still over.
             target = max(0, self._total_bytes + need_bytes - self.cfg.max_size_bytes)
 
             while target > 0 and self._index:
-                k, cache_entry = self._index.popitem(last=False)  # LRU
+                # Prefer warm LRU first when two-tier
+                victim_key = None
+                victim_entry = None
+                if self.cfg.two_tier:
+                    for k, entry in self._index.items():
+                        if entry.tier == "warm":
+                            victim_key, victim_entry = k, entry
+                            break
+                if victim_key is None:
+                    victim_key, victim_entry = next(iter(self._index.items()))
 
-                # Remove from per-path index
-                lst = self._by_path.get(cache_entry.cache_key)
+                assert victim_entry is not None
+                self._index.pop(victim_key)
 
+                lst = self._by_path.get(victim_entry.cache_key)
                 if lst:
-                    idx = bisect_right(lst, cache_entry.start) - 1
-
-                    if idx >= 0 and lst[idx] == cache_entry.start:
+                    idx = bisect_right(lst, victim_entry.start) - 1
+                    if idx >= 0 and lst[idx] == victim_entry.start:
                         del lst[idx]
-
                     if not lst:
-                        self._by_path.pop(cache_entry.cache_key, None)
+                        self._by_path.pop(victim_entry.cache_key, None)
 
-                to_unlink.append(k)
-                self._total_bytes -= cache_entry.size
-                target -= cache_entry.size
+                to_unlink.append(victim_key)
+                tiers[victim_key] = victim_entry.tier
+                self._total_bytes -= victim_entry.size
+                if victim_entry.tier == "hot":
+                    self._hot_bytes -= victim_entry.size
+                target -= victim_entry.size
                 evicted += 1
 
         if to_unlink:
-            await trio.to_thread.run_sync(self._unlink_cache_files, to_unlink)
+            await trio.to_thread.run_sync(
+                lambda: self._unlink_cache_files(to_unlink, tiers=tiers)
+            )
         if evicted:
             self._metrics.record_evictions(evicted)
 
@@ -408,6 +543,7 @@ class Cache:
         ttl = self.cfg.ttl_seconds
         now = time.time()
         to_unlink: list[str] = []
+        tiers: dict[str, Literal["hot", "warm"]] = {}
 
         async with self.locks():
             for k in list(self._index.keys()):
@@ -430,10 +566,15 @@ class Cache:
                             self._by_path.pop(cache_entry.cache_key, None)
 
                     self._total_bytes -= cache_entry.size
+                    if cache_entry.tier == "hot":
+                        self._hot_bytes -= cache_entry.size
                     to_unlink.append(k)
+                    tiers[k] = cache_entry.tier
 
         if to_unlink:
-            await trio.to_thread.run_sync(self._unlink_cache_files, to_unlink)
+            await trio.to_thread.run_sync(
+                lambda: self._unlink_cache_files(to_unlink, tiers=tiers)
+            )
             self._metrics.record_evictions(len(to_unlink))
 
     async def get(self, cache_key: str, start: int, end: int) -> bytes:
@@ -454,6 +595,7 @@ class Cache:
         chunk_key = None
         chunk_file = None
         chunk_start_offset = 0
+        chunk_tier: Literal["hot", "warm"] = "warm"
 
         lock_acquire = time.time()
         async with self.locks():
@@ -475,7 +617,8 @@ class Cache:
                         if start >= chunk_start and end <= chunk_end:
                             # Fast path: single chunk covers entire request
                             chunk_key = self._key(cache_key, chunk_start)
-                            chunk_file = self._file_for(chunk_key)
+                            chunk_tier = cache_entry.tier
+                            chunk_file = self._file_for(chunk_key, tier=chunk_tier)
                             chunk_start_offset = chunk_start
                             # Don't update timestamps yet - do it after successful read
 
@@ -524,6 +667,7 @@ class Cache:
                                     mtime=now,
                                     start=cache_entry.start,
                                     size=cache_entry.size,
+                                    tier=cache_entry.tier,
                                 )
 
                     self._metrics.record_hit(needed_len)
@@ -580,7 +724,7 @@ class Cache:
                     bytes_to_read = copy_end - copy_start + 1
 
                     # Plan this read operation
-                    chunk_file = self._file_for(chunk_key)
+                    chunk_file = self._file_for(chunk_key, tier=cache_entry.tier)
                     chunks_to_read.append(
                         ChunkInfo(
                             chunk_key=chunk_key,
@@ -637,6 +781,7 @@ class Cache:
                                         cache_key=cache_entry.cache_key,
                                         start=cache_entry.start,
                                         size=cache_entry.size,
+                                        tier=cache_entry.tier,
                                     )
 
                     self._metrics.record_hit(needed_len)
@@ -645,12 +790,22 @@ class Cache:
 
         # Fallback: Direct probe for exact key on filesystem and rebuild index
         k = self._key(cache_key, start)
-        fp = self._file_for(k)
-        data = await trio.to_thread.run_sync(self._read_file_all, fp)
+        data = None
+        found_tier: Literal["hot", "warm"] = "warm"
+        for probe_tier in (("hot", "warm") if self.cfg.two_tier else ("warm",)):
+            fp = self._file_for(k, tier=probe_tier)  # type: ignore[arg-type]
+            data = await trio.to_thread.run_sync(self._read_file_all, fp)
+            if data is not None:
+                found_tier = probe_tier  # type: ignore[assignment]
+                break
 
         if data is None:
             async with self.locks():
-                self._index.pop(k, None)
+                prev = self._index.pop(k, None)
+                if prev and prev.tier == "hot":
+                    self._hot_bytes = max(0, self._hot_bytes - prev.size)
+                if prev:
+                    self._total_bytes = max(0, self._total_bytes - prev.size)
 
             self._metrics.record_miss()
             # No log for cache misses - reduces noise (misses are expected and normal)
@@ -666,10 +821,13 @@ class Cache:
                     start=start,
                     size=sz,
                     mtime=time.time(),
+                    tier=found_tier,
                 )
                 lst = self._by_path.setdefault(cache_key, [])
                 insort(lst, start)
                 self._total_bytes += sz
+                if found_tier == "hot":
+                    self._hot_bytes += sz
 
         if end < start:
             return b""
@@ -690,21 +848,27 @@ class Cache:
 
         k = self._key(cache_key, start)
         need = len(data)
+        write_tier: Literal["hot", "warm"] = (
+            "hot" if self.cfg.two_tier else "warm"
+        )
 
         # Shard serializes writers for the same title; index lock stays brief.
         async with self._shard(cache_key):
+            if write_tier == "hot":
+                await self._ensure_hot_capacity(need)
+
             if self.cfg.eviction == "TTL":
                 await self._evict_ttl()
             else:
                 await self._evict_lru(need)
 
-            fp = self._file_for(k)
+            fp = self._file_for(k, tier=write_tier)
 
             try:
                 await trio.to_thread.run_sync(self._write_file_bytes, fp, data)
                 # Write metadata after successful data write (also disk I/O)
                 await trio.to_thread.run_sync(
-                    self._write_metadata, k, cache_key, start
+                    lambda: self._write_metadata(k, cache_key, start, tier=write_tier)
                 )
             except Exception as e:
                 logger.warning(f"Disk cache write failed: {e}")
@@ -715,6 +879,8 @@ class Cache:
 
                 if prev:
                     self._total_bytes -= prev.size
+                    if prev.tier == "hot":
+                        self._hot_bytes -= prev.size
                     lst_prev = self._by_path.get(cache_key)
 
                     if lst_prev:
@@ -732,10 +898,13 @@ class Cache:
                     start=start,
                     size=need,
                     mtime=time.time(),
+                    tier=write_tier,
                 )
                 lst = self._by_path.setdefault(cache_key, [])
                 insort(lst, start)
                 self._total_bytes += need
+                if write_tier == "hot":
+                    self._hot_bytes += need
                 self._metrics.record_bytes_written(need)
 
     def has(self, cache_key: str, start: int, end: int) -> bool:
@@ -760,8 +929,10 @@ class Cache:
             if end > chunk_end:
                 return False
 
+            tier = cache_entry.tier
+
         # Check file existence outside the lock
-        fp = self._file_for(k)
+        fp = self._file_for(k, tier=tier)
 
         return fp.exists()
 

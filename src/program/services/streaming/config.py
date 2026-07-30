@@ -26,6 +26,10 @@ class Config:
     # Tolerance for detecting scan reads. Any read that jumps more than this value is considered a scan.
     scan_tolerance_blocks: int = 25
 
+    # Number of uncached content chunks to fetch ahead of the playhead on
+    # sequential body playback (0 disables).
+    prefetch_chunks: int = 12
+
     @property
     def block_size(self) -> int:
         """Kernel block size; the byte length the OS reads/writes at a time."""

@@ -129,7 +129,8 @@ def resolve_cache_max_bytes(
                 f"tmpfs/ramfs cache_dir hard-capped to "
                 f"{effective // (1024 * 1024)} MB "
                 f"(configured {configured_mb} MB). "
-                "Move filesystem.cache_dir off /dev/shm onto disk to allow a larger cache."
+                "Raise filesystem.tmpfs_cache_max_mb (and container shm/mem limits) "
+                "for a larger RAM cache, or move cache_dir off tmpfs onto disk."
             )
     elif (
         has_free_space_measurement
