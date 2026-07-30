@@ -49,7 +49,7 @@ def test_prefetch_returns_next_uncached_chunks() -> None:
 def test_prefetch_disabled_when_count_zero() -> None:
     chunker = _chunker()
     ahead = chunker.get_prefetch_uncached(after_end=chunker.header_size, count=0)
-    assert ahead == OrderedSet()
+    assert ahead == OrderedSet([])
 
 
 def test_prefetch_empty_near_footer() -> None:
