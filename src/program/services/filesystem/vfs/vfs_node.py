@@ -62,18 +62,22 @@ class VFSDirectory(VFSNode):
 
         return self._children
 
-    def add_child(self, child: VFSNode) -> None:
+    def add_child(self, child: "VFSNode") -> None:
         """Add a child node to this directory."""
 
         child.parent = self
+        # Invalidate cached path so it is recomputed from the new parent chain.
+        child.__dict__.pop("path", None)
         self.children[child.name] = child
 
-    def remove_child(self, name: str) -> VFSNode | None:
+    def remove_child(self, name: str) -> "VFSNode | None":
         """Remove and return a child node by name."""
         child = self.children.pop(name, None)
 
         if child:
             child.parent = None
+            # Invalidate cached path — detached node has no valid path.
+            child.__dict__.pop("path", None)
 
         return child
 

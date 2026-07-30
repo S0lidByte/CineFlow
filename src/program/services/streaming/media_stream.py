@@ -92,6 +92,10 @@ class MediaStream:
     connections, fetching data, and managing playback.
     """
 
+    # M-5: Class-level flag set — warnings that should only appear once per
+    # process (not once per MediaStream construction during Plex library scans).
+    _startup_warnings_emitted: set[str] = set()
+
     def __init__(
         self,
         *,
@@ -152,24 +156,29 @@ class MediaStream:
             f"file_size={self.file_metadata.file_size} bytes",
         )
 
-        # Validate cache size
-        # Cache needs to hold 10 chunks (10MiB) to avoid thrashing with concurrent reads
+        # Validate cache size — emit only once so Plex scans don't flood logs.
         min_cache_mb = (self.config.chunk_size * 10) // (1024 * 1024)
 
         if fs.cache_max_size_mb < min_cache_mb:
-            logger.warning(
-                f"Cache size ({fs.cache_max_size_mb}MB) is too small. "
-                f"Minimum recommended: {min_cache_mb}MB. "
-                "Cache thrashing may occur with concurrent reads, causing poor performance."
-            )
+            warn_key = f"cache_size:{min_cache_mb}"
+            if warn_key not in MediaStream._startup_warnings_emitted:
+                MediaStream._startup_warnings_emitted.add(warn_key)
+                logger.warning(
+                    f"Cache size ({fs.cache_max_size_mb}MB) is too small. "
+                    f"Minimum recommended: {min_cache_mb}MB. "
+                    "Cache thrashing may occur with concurrent reads, causing poor performance."
+                )
 
         if stream_settings.chunk_size_mb > 8:
-            logger.warning(
-                f"stream.chunk_size_mb={stream_settings.chunk_size_mb} is large; "
-                "each concurrent Plex open holds that much RAM while fetching. "
-                "Prefer 4–8 MB for multi-title playback (1–4 MB if cache_dir is "
-                "on /dev/shm or under memory pressure)."
-            )
+            warn_key = f"chunk_size:{stream_settings.chunk_size_mb}"
+            if warn_key not in MediaStream._startup_warnings_emitted:
+                MediaStream._startup_warnings_emitted.add(warn_key)
+                logger.warning(
+                    f"stream.chunk_size_mb={stream_settings.chunk_size_mb} is large; "
+                    "each concurrent Plex open holds that much RAM while fetching. "
+                    "Prefer 4–8 MB for multi-title playback (1–4 MB if cache_dir is "
+                    "on /dev/shm or under memory pressure)."
+                )
 
         # Use proxy client if provider requires it (resolved per-request so pool
         # recycle can swap DI singletons without restarting MediaStream).
