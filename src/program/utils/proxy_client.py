@@ -3,6 +3,8 @@ import sniffio
 from httpx._client import UseClientDefault
 from httpx._types import AuthTypes
 
+from program.utils.stream_http import stream_http_limits, stream_http_timeout
+
 # Sentinel for default values
 USE_CLIENT_DEFAULT = UseClientDefault()
 
@@ -19,7 +21,10 @@ class ProxyClient(httpx.AsyncClient):
     def __init__(self, *, proxy_url: str) -> None:
         super().__init__(
             http2=True,
+            follow_redirects=True,
             proxy=proxy_url,
+            limits=stream_http_limits(),
+            timeout=stream_http_timeout(),
         )
 
     async def send(

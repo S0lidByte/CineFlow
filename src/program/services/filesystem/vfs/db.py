@@ -115,6 +115,7 @@ class VFSDatabase:
         from program.program import Program
 
         item_id = entry.media_item.id
+        log_string = entry.media_item.log_string
 
         def mutation(i: MediaItem, s: Session) -> None:
             i.prepare_for_automatic_rescrape()
@@ -130,7 +131,7 @@ class VFSDatabase:
 
         logger.info(
             f"Scheduling automatic re-scrape for item {item_id} "
-            f"({entry.media_item.log_string}) after dead CDN link"
+            f"({log_string}) after dead CDN link"
         )
 
         # overrides bypass scrape cooldown so the pipeline re-runs immediately

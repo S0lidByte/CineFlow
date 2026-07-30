@@ -338,14 +338,53 @@ class RivenVFS(pyfuse3.Operations):
                     async with trio.open_nursery() as nursery:
                         self.stream_nursery = nursery
 
-                        # Keep the stream nursery alive and ready to spawn tasks
-                        yield
+                        from program.services.streaming.http_pool import (
+                            register_stream_shed_callback,
+                        )
+
+                        register_stream_shed_callback(self._shed_stalled_streams)
+
+                        try:
+                            # Keep the stream nursery alive and ready to spawn tasks
+                            yield
+                        finally:
+                            register_stream_shed_callback(None)
 
                         # Cancel streams on exit
                         nursery.cancel_scope.cancel()
         finally:
             self._cleanup_mountpoint(self._mountpoint)
             self.mounted = False
+
+    async def _shed_stalled_streams(self) -> None:
+        """Close timed-out or zero-progress streams to free httpx pool slots."""
+
+        candidates: dict[str, MediaStream] = {}
+
+        async with self._active_streams_lock:
+            for stream_key, stream in list(self._active_streams.items()):
+                is_streaming = cast(bool, stream.is_streaming.value)
+                zero_progress = (
+                    stream.session_statistics.bytes_transferred == 0 and is_streaming
+                )
+                if stream.is_timed_out or zero_progress:
+                    candidates[stream_key] = stream
+
+        if not candidates:
+            return
+
+        logger.warning(
+            f"Shedding {len(candidates)} stalled stream(s) during HTTP pool heal"
+        )
+
+        for stream_key, stream in candidates.items():
+            try:
+                await stream.close()
+                async with self._active_streams_lock:
+                    if self._active_streams.pop(stream_key, None):
+                        self._active_stream_count = len(self._active_streams)
+            except Exception:
+                logger.exception(f"Error shedding stalled stream {stream_key}")
 
     async def _monitor_stream_timeouts(self) -> None:
         """Background task to monitor and close timed-out streams to clean up resources."""
