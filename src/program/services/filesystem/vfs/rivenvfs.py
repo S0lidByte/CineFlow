@@ -363,14 +363,11 @@ class RivenVFS(pyfuse3.Operations):
 
         async with self._active_streams_lock:
             for stream_key, stream in list(self._active_streams.items()):
-                # Explicit locals keep pyright from inferring Unknown from
-                # MediaStream attribute access under reportUnknownVariableType.
-                bytes_transferred: int = cast(
-                    int, stream.session_statistics.bytes_transferred
+                is_streaming = cast(bool, stream.is_streaming.value)
+                zero_progress = (
+                    stream.session_statistics.bytes_transferred == 0 and is_streaming
                 )
-                is_streaming: bool = bool(stream.is_streaming.value)
-                zero_progress: bool = bytes_transferred == 0 and is_streaming
-                if bool(stream.is_timed_out) or zero_progress:
+                if stream.is_timed_out or zero_progress:
                     candidates[stream_key] = stream
 
         if not candidates:
