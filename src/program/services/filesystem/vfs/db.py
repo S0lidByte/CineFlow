@@ -260,6 +260,9 @@ class VFSDatabase:
                     size=entry.file_size,
                     created=(entry.created_at.isoformat()),
                     modified=(entry.updated_at.isoformat()),
+                    # M-1: This method only queries MediaEntry rows (not SubtitleEntry),
+                    # so entry_type is always "media" here. Subtitles are read directly
+                    # from the DB by get_subtitle_content() and never reach this path.
                     entry_type="media",
                 )
         except DebridServiceLinkUnavailable:

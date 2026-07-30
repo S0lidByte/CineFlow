@@ -251,6 +251,13 @@ class RivenVFS(pyfuse3.Operations):
         self._dead_link_recovery_cooldown_until: dict[str, float] = {}
         self._dead_link_log_until: dict[str, float] = {}
 
+        # Rate-limit the one-time chunk-size warning so it doesn't fire on every
+        # MediaStream construction during Plex scans.
+        self._chunk_size_warning_emitted: bool = False
+
+        # Rate-limit the fair-usage warning inside open().
+        self._fair_usage_open_log_until: float = 0.0
+
         # Lock for managing active streams dict.
         # NOTE: This is (re-)initialized inside _fuse_runner before each trio.run() call
         # to avoid "AssertionError: task._runner is self" when the FUSE loop restarts.
@@ -394,14 +401,19 @@ class RivenVFS(pyfuse3.Operations):
                 f"Checking for timed-out streams. Active streams: {self._active_streams.values()}"
             )
 
-            active_stream_count = len(self._active_streams)
+            # Snapshot the dict *inside* the lock so we don't iterate a dict
+            # that another coroutine may mutate concurrently.
+            async with self._active_streams_lock:
+                stream_snapshot = dict(self._active_streams)
+
+            active_stream_count = len(stream_snapshot)
 
             if active_stream_count == 0:
                 logger.trace("No active streams to monitor")
             else:
                 timed_out_streams = {
                     stream_key: stream
-                    for stream_key, stream in list(self._active_streams.items())
+                    for stream_key, stream in stream_snapshot.items()
                     if stream.is_timed_out
                 }
 
@@ -508,10 +520,22 @@ class RivenVFS(pyfuse3.Operations):
                                 "original_filename must be provided for file nodes"
                             )
 
-                        assert file_size
-                        assert created_at
-                        assert updated_at
-                        assert entry_type
+                        if not file_size:
+                            raise ValueError(
+                                f"file_size must be > 0 for file node at {path!r}"
+                            )
+                        if not created_at:
+                            raise ValueError(
+                                f"created_at required for file node at {path!r}"
+                            )
+                        if not updated_at:
+                            raise ValueError(
+                                f"updated_at required for file node at {path!r}"
+                            )
+                        if not entry_type:
+                            raise ValueError(
+                                f"entry_type required for file node at {path!r}"
+                            )
 
                         child = VFSFile(
                             name=part,
@@ -930,13 +954,29 @@ class RivenVFS(pyfuse3.Operations):
 
             logger.debug(f"Re-matched {rematched_count} entries with updated profiles")
 
-        # Step 2: Clear VFS tree and rebuild from scratch
+        # Step 2: Clear VFS tree and rebuild from scratch.
+        # M-4: Preserve inodes currently held by open file handles so in-progress
+        # reads do not immediately receive ENOENT during a settings-triggered sync.
         logger.debug("Clearing VFS tree for rebuild")
 
         with self._tree_lock:
+            # Collect inodes that are pinned by open file handles.
+            pinned_inodes: set[int] = set()
+            for handle_info in self._file_handles.values():
+                inode = handle_info.get("inode")
+                if inode:
+                    pinned_inodes.add(int(inode))
+
             # Create new root node
             self._root = VFSRoot()
-            self._inode_to_node = {pyfuse3.ROOT_INODE: self._root}
+            new_inode_map: dict[int, VFSNode] = {pyfuse3.ROOT_INODE: self._root}
+
+            # Re-insert pinned nodes so in-progress reads keep working.
+            for inode_int, node in self._inode_to_node.items():
+                if inode_int in pinned_inodes:
+                    new_inode_map[inode_int] = node
+
+            self._inode_to_node = new_inode_map
 
         # Clear pending invalidations for this sync
         self._pending_invalidations.clear()
@@ -1401,6 +1441,19 @@ class RivenVFS(pyfuse3.Operations):
         normalized_path = self._normalize_path(path)
         inodes_to_invalidate = set[pyfuse3.InodeT]()
 
+        # M-3: Build the persistent-directory set once per call so we don't
+        # hit settings_manager (pydantic deserialization) on every prune step.
+        try:
+            profiles = settings_manager.settings.filesystem.library_profiles or {}
+            persistent_dirs: set[str] = {"/movies", "/shows"} | {
+                f"/{p.library_path.strip('/')}/{t}"
+                for p in profiles.values()
+                if p.enabled
+                for t in ("movies", "shows")
+            }
+        except Exception:
+            persistent_dirs = {"/movies", "/shows"}
+
         with self._tree_lock:
             node = self._get_node_by_path(normalized_path)
 
@@ -1426,7 +1479,7 @@ class RivenVFS(pyfuse3.Operations):
                 current_path = current.path
 
                 # Check if this is a persistent directory that should never be removed
-                if self._is_persistent_directory(current_path):
+                if current_path in persistent_dirs:
                     # This is a persistent directory - don't remove it, but invalidate cache
                     inodes_to_invalidate.add(current.inode)
                     break
@@ -2036,15 +2089,17 @@ class RivenVFS(pyfuse3.Operations):
             if flags & os.O_RDWR or flags & os.O_WRONLY:
                 raise pyfuse3.FUSEError(errno.EACCES)
 
-            # Create file handle with minimal metadata
-            # Everything else will be resolved from the inode when needed
-            fh = self._next_fh
-            self._next_fh = pyfuse3.FileHandleT(self._next_fh + 1)
-            self._file_handles[fh] = {
-                "inode": inode,  # Store inode to resolve node/metadata later
-                "last_read_end": 0,
-                "subtitle_content": None,
-            }
+            # H-2: Assign the file handle number under _tree_lock so concurrent
+            # open() coroutines cannot read the same counter value and produce
+            # duplicate file handles that clobber each other's _file_handles entry.
+            with self._tree_lock:
+                fh = self._next_fh
+                self._next_fh = pyfuse3.FileHandleT(self._next_fh + 1)
+                self._file_handles[fh] = {
+                    "inode": inode,  # Store inode to resolve node/metadata later
+                    "last_read_end": 0,
+                    "subtitle_content": None,
+                }
 
             logger.trace(f"open: path={path} fh={fh}")
 
@@ -2177,7 +2232,6 @@ class RivenVFS(pyfuse3.Operations):
                 original_filename=original_filename,
             )
 
-            is_fair_usage = False
 
             try:
                 return await stream.read(
@@ -2208,7 +2262,10 @@ class RivenVFS(pyfuse3.Operations):
                         stream.build_log_message(f"{exc.__class__.__name__}: {exc}")
                     )
 
-                is_fair_usage = True
+                # H-3: Returning b"" here silently truncates playback (kernel
+                # interprets empty bytes as EOF). EAGAIN tells the client to retry
+                # after the cooldown, which is the correct POSIX semantic.
+                raise pyfuse3.FUSEError(errno.EAGAIN) from e
             except* DebridServiceForbiddenException as e:
                 for exc in e.exceptions:
                     logger.error(
@@ -2267,11 +2324,6 @@ class RivenVFS(pyfuse3.Operations):
                         logger.error(f"{exc.__class__.__name__}: {exc}")
 
                 raise pyfuse3.FUSEError(errno.EIO)
-
-            if is_fair_usage:
-                return b""
-
-            raise pyfuse3.FUSEError(errno.EIO)
 
         except pyfuse3.FUSEError:
             raise
@@ -2417,28 +2469,38 @@ class RivenVFS(pyfuse3.Operations):
 
         stream_key = self._stream_key(path, fh)
 
-        if stream_key not in self._active_streams:
-            async with self._active_streams_lock:
-                # Get provider info and URL from database
-                entry_info = await trio.to_thread.run_sync(
-                    lambda: self.vfs_db.get_entry_by_original_filename(
-                        original_filename=original_filename,
-                    )
-                )
+        # C-1: Fast-path check without the lock to avoid serialising every read().
+        # A second check inside the lock below guards against the TOCTOU window
+        # where two concurrent read() coroutines both see stream_key absent and
+        # both proceed to create a MediaStream, orphaning one connection.
+        if stream_key in self._active_streams:
+            return self._active_streams[stream_key]
 
-                if not entry_info or not entry_info.url or not entry_info.provider:
-                    raise pyfuse3.FUSEError(errno.ENOENT)
+        async with self._active_streams_lock:
+            # Re-check inside the lock (double-checked locking).
+            if stream_key in self._active_streams:
+                return self._active_streams[stream_key]
 
-                self._active_streams[stream_key] = MediaStream(
-                    fh=fh,
-                    file_size=file_size,
-                    path=path,
+            # Get provider info and URL from database
+            entry_info = await trio.to_thread.run_sync(
+                lambda: self.vfs_db.get_entry_by_original_filename(
                     original_filename=original_filename,
-                    provider=entry_info.provider,
-                    initial_url=entry_info.url,
-                    nursery=self.stream_nursery,
                 )
-                self._active_stream_count = len(self._active_streams)
+            )
+
+            if not entry_info or not entry_info.url or not entry_info.provider:
+                raise pyfuse3.FUSEError(errno.ENOENT)
+
+            self._active_streams[stream_key] = MediaStream(
+                fh=fh,
+                file_size=file_size,
+                path=path,
+                original_filename=original_filename,
+                provider=entry_info.provider,
+                initial_url=entry_info.url,
+                nursery=self.stream_nursery,
+            )
+            self._active_stream_count = len(self._active_streams)
 
         return self._active_streams[stream_key]
 
