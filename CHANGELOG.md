@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.2](https://github.com/S0lidByte/CineFlow/compare/v1.29.1...v1.29.2) (2026-07-30)
+
+
+### Bug Fixes
+
+* **vfs:** harden stream races, fair-usage EOF, and sync inode pinning ([#203](https://github.com/S0lidByte/CineFlow/issues/203)) ([328bbb6](https://github.com/S0lidByte/CineFlow/commit/328bbb6896daefbb26b91432540b32560e9ce804))
+
 ## [1.29.1](https://github.com/S0lidByte/CineFlow/compare/v1.29.0...v1.29.1) (2026-07-30)
 
 
