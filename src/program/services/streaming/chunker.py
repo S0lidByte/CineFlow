@@ -348,11 +348,11 @@ class Chunker:
         """Return up to ``count`` uncached content chunks starting after ``after_end``."""
 
         if count <= 0:
-            return OrderedSet()
+            return OrderedSet[Chunk]([])
 
         next_pos = after_end + 1
         if next_pos >= self.footer_start or next_pos >= self.file_size:
-            return OrderedSet()
+            return OrderedSet[Chunk]([])
 
         # Request a contiguous window of N chunks; filter to uncached only.
         window = self.get_chunk_range(
@@ -360,7 +360,7 @@ class Chunker:
             size=count * self.chunk_size,
         )
         # Exclude footer / header-only edge cases from prefetch.
-        return OrderedSet(
+        return OrderedSet[Chunk](
             [
                 chunk
                 for chunk in window.uncached_chunks
