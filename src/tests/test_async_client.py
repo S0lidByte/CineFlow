@@ -84,4 +84,30 @@ def test_async_client_connection_limits_are_bounded():
     pool = client._transport._pool
     assert pool._max_connections == 200
     assert pool._max_keepalive_connections == 50
+    assert client.timeout.pool == 5.0
     asyncio.run(client.aclose())
+
+
+def test_proxy_client_connection_limits_match_async_client():
+    from program.utils.proxy_client import ProxyClient
+
+    client = ProxyClient(proxy_url="http://127.0.0.1:8888")
+    pool = client._transport._pool
+    assert pool._max_connections == 200
+    assert pool._max_keepalive_connections == 50
+    assert client.timeout.pool == 5.0
+    asyncio.run(client.aclose())
+
+
+def test_stream_http_helpers_expose_shared_limits():
+    from program.utils.stream_http import (
+        STREAM_MAX_CONNECTIONS,
+        stream_http_limits,
+        stream_http_timeout,
+    )
+
+    limits = stream_http_limits()
+    timeout = stream_http_timeout()
+    assert limits.max_connections == STREAM_MAX_CONNECTIONS == 200
+    assert limits.max_keepalive_connections == 50
+    assert timeout.pool == 5.0

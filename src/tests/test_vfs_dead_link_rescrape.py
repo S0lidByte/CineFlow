@@ -113,22 +113,25 @@ def test_schedule_dead_link_rescrape_queues_scrape_with_overrides(
     from program.services.filesystem.vfs.db import VFSDatabase
 
     episode = _episode_with_streams()
+    episode.prepare_for_automatic_rescrape = MagicMock()
     entry = MagicMock()
     entry.media_item = episode
     session = MagicMock()
     program = MagicMock()
     mock_di.__getitem__.return_value = program
 
+    def _apply_side_effect(*, program, item, mutation_fn, session):
+        mutation_fn(item, session)
+        # Mirror cascade clear of filesystem_entries → media_item becomes None
+        entry.media_item = None
+
+    mock_apply.side_effect = _apply_side_effect
+
     vfs_db = VFSDatabase(downloader=MagicMock())
 
     assert vfs_db.schedule_dead_link_rescrape(entry, session) is True
 
     mock_apply.assert_called_once()
-    mutation_fn = mock_apply.call_args.kwargs["mutation_fn"]
-    with patch.object(episode, "prepare_for_automatic_rescrape") as mock_prepare:
-        mutation_fn(episode, session)
-        mock_prepare.assert_called_once()
-
     session.commit.assert_called_once()
     program.em.add_event.assert_called_once()
     event = program.em.add_event.call_args.args[0]
@@ -136,6 +139,7 @@ def test_schedule_dead_link_rescrape_queues_scrape_with_overrides(
     assert event.emitted_by == "VFS"
     assert event.item_id == 42
     assert event.overrides == {"automatic_rescrape": True}
+    assert entry.media_item is None
 
 
 def test_state_transition_indexed_with_overrides_queues_scrape():

@@ -5,6 +5,7 @@ from httpx._types import AuthTypes
 from loguru import logger
 
 from program.settings import settings_manager
+from program.utils.stream_http import stream_http_limits, stream_http_timeout
 from program.utils.url_sanitizer import sanitize_url_for_logs
 
 
@@ -13,6 +14,7 @@ def _sanitize_logged_url(url: str) -> str:
     Backward-compatible helper for module-level URL sanitization tests.
     """
     return sanitize_url_for_logs(url)
+
 
 # Sentinel for default values
 USE_CLIENT_DEFAULT = UseClientDefault()
@@ -31,11 +33,8 @@ class AsyncClient(httpx.AsyncClient):
         super().__init__(
             http2=True,
             follow_redirects=True,
-            limits=httpx.Limits(
-                max_keepalive_connections=50,
-                max_connections=200,
-                keepalive_expiry=60,
-            ),
+            limits=stream_http_limits(),
+            timeout=stream_http_timeout(),
             event_hooks={"response": [self.raise_on_4xx_5xx]},
         )
 

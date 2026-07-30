@@ -69,6 +69,8 @@ jobs:
             src/tests/test_ranking_scrape_quality_p1.py \
             src/tests/test_mediaitem_runtime.py \
             src/tests/test_async_client.py \
+            src/tests/test_http_pool_heal.py \
+            src/tests/test_media_stream_pool.py \
             src/tests/test_opensubtitles_settings.py \
             src/tests/test_subtitle_title_guard.py \
             src/tests/test_subdl_provider.py \

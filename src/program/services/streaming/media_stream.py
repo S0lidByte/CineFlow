@@ -5,6 +5,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
+import sniffio
 import trio
 import trio_util
 from kink import di
@@ -37,6 +38,7 @@ from .exceptions import (
     RecoverableMediaStreamException,
 )
 from .file_metadata import FileMetadata
+from .http_pool import admit_stream_request, heal_on_pool_timeout
 from .recent_reads import Read, RecentReads
 from .session_statistics import SessionStatistics
 from .stream_connection import StreamConnection
@@ -169,14 +171,40 @@ class MediaStream:
                 "on /dev/shm or under memory pressure)."
             )
 
-        # Use proxy client if provider requires it
-        if (
+        # Use proxy client if provider requires it (resolved per-request so pool
+        # recycle can swap DI singletons without restarting MediaStream).
+        self._use_proxy_client = (
             provider in PROXY_REQUIRED_PROVIDERS
-            and settings_manager.settings.downloaders.proxy_url
-        ):
-            self.async_client = di[ProxyClient]
-        else:
-            self.async_client = di[AsyncClient]
+            and bool(settings_manager.settings.downloaders.proxy_url)
+        )
+        self._active_stream_connection: StreamConnection | None = None
+
+    def _resolve_async_client(self) -> httpx.AsyncClient:
+        """Return the current DI streaming client (supports pool recycle)."""
+
+        if self._use_proxy_client:
+            return di[ProxyClient]
+
+        return di[AsyncClient]
+
+    async def _force_aclose_active_response(self) -> None:
+        """Best-effort close of an in-flight httpx response to free pool slots."""
+
+        connection = self._active_stream_connection
+        self._active_stream_connection = None
+
+        if connection is None:
+            return
+
+        token = sniffio.current_async_library_cvar.set("asyncio")
+        try:
+            await connection.response.aclose()
+        except Exception:
+            logger.debug(
+                self.build_log_message("Failed to aclose active stream response")
+            )
+        finally:
+            sniffio.current_async_library_cvar.reset(token)
 
     def _trace_stream(self, message: str, *, hot: bool = False) -> None:
         """Emit a STREAM log line, optionally sampling high-frequency events."""
@@ -612,6 +640,7 @@ class MediaStream:
                 current_read_position=chunk_aligned_start,
                 reader=response.aiter_raw(chunk_size=self.config.chunk_size),
             )
+            self._active_stream_connection = stream_connection
 
             if self.enable_tracing:
                 logger.log(
@@ -622,7 +651,11 @@ class MediaStream:
                     ),
                 )
 
-            yield stream_connection
+            try:
+                yield stream_connection
+            finally:
+                if self._active_stream_connection is stream_connection:
+                    self._active_stream_connection = None
 
     async def close(self) -> None:
         """Immediately terminate the active stream."""
@@ -644,6 +677,9 @@ class MediaStream:
                 logger.warning(
                     self.build_log_message("Stream didn't stop within 5 seconds")
                 )
+
+        # Always attempt to free the httpx pool slot even if kill timed out.
+        await self._force_aclose_active_response()
 
         if self.enable_tracing:
             logger.log(
@@ -868,90 +904,92 @@ class MediaStream:
 
         max_attempts = 4
         backoffs = [0.2, 0.5, 1.0]
+        request_kind = "scan" if end is not None else "body"
 
         for attempt in range(max_attempts):
             try:
-                async with self.async_client.stream(
-                    method="GET",
-                    url=self.target_url.value,
-                    headers=headers,
-                    extensions=extensions,
-                ) as stream:
-                    stream.raise_for_status()
+                async with admit_stream_request(request_kind):
+                    async with self._resolve_async_client().stream(
+                        method="GET",
+                        url=self.target_url.value,
+                        headers=headers,
+                        extensions=extensions,
+                    ) as stream:
+                        stream.raise_for_status()
 
-                    content_length = stream.headers.get("Content-Length")
-                    content_range = stream.headers.get("Content-Range")
-                    accept_ranges = stream.headers.get("Accept-Ranges")
+                        content_length = stream.headers.get("Content-Length")
+                        content_range = stream.headers.get("Content-Range")
+                        accept_ranges = stream.headers.get("Accept-Ranges")
 
-                    if end is not None:
-                        range_bytes = end - start + 1
+                        if end is not None:
+                            range_bytes = end - start + 1
 
-                        if stream.status_code == HTTPStatus.OK:
-                            logger.warning(
-                                self.build_log_message(
-                                    "Ranged request returned HTTP 200; "
-                                    f"content-length={content_length} "
-                                    f"content-range={content_range} "
-                                    f"accept-ranges={accept_ranges}"
-                                )
-                            )
-                        elif stream.status_code == HTTPStatus.PARTIAL_CONTENT:
-                            expected_prefix = f"bytes {start}-"
-
-                            if not content_range:
+                            if stream.status_code == HTTPStatus.OK:
                                 logger.warning(
                                     self.build_log_message(
-                                        "HTTP 206 response missing Content-Range header"
+                                        "Ranged request returned HTTP 200; "
+                                        f"content-length={content_length} "
+                                        f"content-range={content_range} "
+                                        f"accept-ranges={accept_ranges}"
                                     )
                                 )
-                            elif not content_range.startswith(expected_prefix):
-                                logger.warning(
-                                    self.build_log_message(
-                                        f"HTTP 206 Content-Range mismatch; "
-                                        f"expected prefix '{expected_prefix}', got '{content_range}'"
-                                    )
-                                )
-                    else:
-                        range_bytes = self.file_metadata.file_size - start
+                            elif stream.status_code == HTTPStatus.PARTIAL_CONTENT:
+                                expected_prefix = f"bytes {start}-"
 
-                    if (
-                        stream.status_code == HTTPStatus.OK
-                        and content_length is not None
-                    ):
-                        try:
-                            parsed_content_length = int(content_length)
-                        except ValueError:
-                            logger.warning(
-                                self.build_log_message(
-                                    f"Invalid Content-Length header '{content_length}'"
-                                )
-                            )
+                                if not content_range:
+                                    logger.warning(
+                                        self.build_log_message(
+                                            "HTTP 206 response missing Content-Range header"
+                                        )
+                                    )
+                                elif not content_range.startswith(expected_prefix):
+                                    logger.warning(
+                                        self.build_log_message(
+                                            f"HTTP 206 Content-Range mismatch; "
+                                            f"expected prefix '{expected_prefix}', got '{content_range}'"
+                                        )
+                                    )
                         else:
-                            if parsed_content_length > range_bytes:
-                                # Server appears to be ignoring the range request and returning full content.
-                                # This is incompatible with our stream, as it will start at the incorrect position.
+                            range_bytes = self.file_metadata.file_size - start
+
+                        if (
+                            stream.status_code == HTTPStatus.OK
+                            and content_length is not None
+                        ):
+                            try:
+                                parsed_content_length = int(content_length)
+                            except ValueError:
                                 logger.warning(
                                     self.build_log_message(
-                                        "Server returned full content instead of range."
+                                        f"Invalid Content-Length header '{content_length}'"
                                     )
                                 )
+                            else:
+                                if parsed_content_length > range_bytes:
+                                    # Server appears to be ignoring the range request and returning full content.
+                                    # This is incompatible with our stream, as it will start at the incorrect position.
+                                    logger.warning(
+                                        self.build_log_message(
+                                            "Server returned full content instead of range."
+                                        )
+                                    )
 
-                                if await self._retry_with_backoff(
-                                    attempt,
-                                    max_attempts,
-                                    backoffs,
-                                ):
-                                    continue
+                                    if await self._retry_with_backoff(
+                                        attempt,
+                                        max_attempts,
+                                        backoffs,
+                                    ):
+                                        continue
 
-                                raise DebridServiceRefusedRangeRequestException(
-                                    provider=self.provider
-                                )
+                                    raise DebridServiceRefusedRangeRequestException(
+                                        provider=self.provider
+                                    )
 
-                    self.session_statistics.total_session_connections += 1
+                        self.session_statistics.total_session_connections += 1
 
-                    yield stream
+                        yield stream
 
-                    return
+                        return
             except httpx.HTTPStatusError as e:
                 status_code = e.response.status_code
 
@@ -1061,6 +1099,33 @@ class MediaStream:
                 raise DebridServiceUnableToConnectException(
                     provider=self.provider
                 ) from e
+            except httpx.PoolTimeout as e:
+                # Pool saturation: shed + recycle once, then fail-fast (no backoff storm).
+                pool_repr = ""
+                try:
+                    pool_repr = str(self._resolve_async_client()._transport._pool)  # type: ignore[attr-defined]
+                except Exception:
+                    pool_repr = ""
+
+                logger.warning(
+                    self.build_log_message(
+                        f"PoolTimeout error (attempt {attempt + 1}/{max_attempts}): {e}"
+                    ),
+                )
+
+                if pool_repr:
+                    logger.debug(
+                        self.build_log_message(f"All connections are in use: {pool_repr}")
+                    )
+
+                if attempt == 0:
+                    recycled = await heal_on_pool_timeout(pool_repr=pool_repr)
+                    if recycled:
+                        continue
+
+                raise DebridServiceClosedConnectionException(
+                    provider=self.provider
+                ) from e
             except (httpx.RemoteProtocolError, httpx.TimeoutException) as e:
                 # This can happen if the server closes the connection prematurely
                 logger.warning(
@@ -1068,14 +1133,6 @@ class MediaStream:
                         f"{e.__class__.__name__} error (attempt {attempt + 1}/{max_attempts}): {e}"
                     ),
                 )
-
-                if isinstance(e, httpx.PoolTimeout):
-                    # Pool timeout indicates all connections are in use
-                    logger.warning(
-                        self.build_log_message(
-                            f"All connections are in use: {self.async_client._transport._pool}"  # type: ignore
-                        )
-                    )
 
                 if await self._retry_with_backoff(
                     attempt,
