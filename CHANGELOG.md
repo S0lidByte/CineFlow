@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.1](https://github.com/S0lidByte/CineFlow/compare/v1.29.0...v1.29.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* **stream:** auto-heal saturated httpx pool without restart ([#201](https://github.com/S0lidByte/CineFlow/issues/201)) ([548fcee](https://github.com/S0lidByte/CineFlow/commit/548fcee8a4ba146b94e1a2e831bba3756d003c85))
+
 ## [1.29.0](https://github.com/S0lidByte/CineFlow/compare/v1.28.13...v1.29.0) (2026-07-30)
 
 
