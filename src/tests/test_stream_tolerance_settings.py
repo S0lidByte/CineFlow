@@ -13,6 +13,7 @@ def test_stream_model_tolerance_defaults_match_config() -> None:
     model = StreamModel()
     assert model.sequential_read_tolerance_blocks == 10
     assert model.scan_tolerance_blocks == 25
+    assert model.prefetch_chunks == 12
 
     config = Config(
         chunk_size=model.chunk_size_mb * 1024 * 1024,
@@ -21,9 +22,11 @@ def test_stream_model_tolerance_defaults_match_config() -> None:
         connect_timeout_seconds=model.connect_timeout_seconds,
         sequential_read_tolerance_blocks=model.sequential_read_tolerance_blocks,
         scan_tolerance_blocks=model.scan_tolerance_blocks,
+        prefetch_chunks=model.prefetch_chunks,
     )
     assert config.sequential_read_tolerance == 10 * 128 * 1024
     assert config.scan_tolerance == 25 * 128 * 1024
+    assert config.prefetch_chunks == 12
 
 
 def test_stream_model_accepts_legacy_payload_without_tolerance_keys() -> None:
@@ -39,6 +42,7 @@ def test_stream_model_accepts_legacy_payload_without_tolerance_keys() -> None:
     )
     assert model.sequential_read_tolerance_blocks == 10
     assert model.scan_tolerance_blocks == 25
+    assert model.prefetch_chunks == 12
 
 
 def test_stream_model_rejects_out_of_bounds_tolerances() -> None:

@@ -94,6 +94,37 @@ def test_disk_zero_free_caps_to_zero() -> None:
     assert result.effective_max_bytes == 0
 
 
+def test_tmpfs_respects_custom_hard_cap() -> None:
+    """Ops can raise tmpfs_cache_max_mb to authorize a ~10 GiB RAM hot cache."""
+
+    free = 20 * 1024 * 1024 * 1024
+    configured_mb = 10240
+    custom_cap = 10 * 1024 * 1024 * 1024
+    result = resolve_cache_max_bytes(
+        Path("/dev/shm/riven-cache"),
+        configured_mb,
+        free_bytes=free,
+        tmpfs=True,
+        tmpfs_hard_cap_bytes=custom_cap,
+    )
+    assert result.is_tmpfs is True
+    assert result.effective_max_bytes == custom_cap
+    assert result.clamped is False
+
+
+def test_tmpfs_custom_cap_still_half_free() -> None:
+    free = 4 * 1024 * 1024 * 1024  # 4 GiB free
+    custom_cap = 10 * 1024 * 1024 * 1024
+    result = resolve_cache_max_bytes(
+        Path("/dev/shm/riven-cache"),
+        10240,
+        free_bytes=free,
+        tmpfs=True,
+        tmpfs_hard_cap_bytes=custom_cap,
+    )
+    assert result.effective_max_bytes == int(free * 0.5)
+
+
 def test_is_tmpfs_path_detects_dev_shm_prefix() -> None:
     from program.services.streaming.cache_sizing import is_tmpfs_path
 

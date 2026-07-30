@@ -126,6 +126,7 @@ class MediaStream:
             connect_timeout_seconds=stream_settings.connect_timeout_seconds,
             sequential_read_tolerance_blocks=stream_settings.sequential_read_tolerance_blocks,
             scan_tolerance_blocks=stream_settings.scan_tolerance_blocks,
+            prefetch_chunks=stream_settings.prefetch_chunks,
         )
 
         self.session_statistics = SessionStatistics()
@@ -436,7 +437,8 @@ class MediaStream:
                                     read
                                 ) in self.recent_reads.current_read.eventual_values(
                                     lambda v: (
-                                        v is not None and v.read_type == "body_read"
+                                        v is not None
+                                        and v.read_type in ("body_read", "cache_hit")
                                     )
                                 ):
                                     if not read:
@@ -446,70 +448,108 @@ class MediaStream:
 
                                     uncached_chunks = read.chunk_range.uncached_chunks
 
-                                    if len(uncached_chunks) == 0:
-                                        continue
+                                    if len(uncached_chunks) > 0:
+                                        if self.enable_tracing:
+                                            logger.log(
+                                                "STREAM",
+                                                self.build_log_message(
+                                                    f"Received read event: {read} with uncached_chunks {uncached_chunks}"
+                                                ),
+                                            )
 
-                                    if self.enable_tracing:
-                                        logger.log(
-                                            "STREAM",
-                                            self.build_log_message(
-                                                f"Received read event: {read} with uncached_chunks {uncached_chunks}"
-                                            ),
+                                        request_start, _ = read.chunk_range.request_range
+
+                                        if (
+                                            self.config.header_size
+                                            < uncached_chunks[0].start
+                                            < connection.start_position
+                                        ):
+                                            # Backward seek detection:
+                                            #
+                                            # If the requested start is before the start of the stream, we will always need to seek.
+                                            # This is because streams can only read forwards, so a new connection must be made.
+
+                                            if self.enable_tracing:
+                                                logger.log(
+                                                    "STREAM",
+                                                    self.build_log_message(
+                                                        f"Requested start {request_start} "
+                                                        f"is before current read position {connection.current_read_position} "
+                                                        f"for {self.file_metadata.path}. "
+                                                        f"Seeking to new start position {uncached_chunks[0].start}/{self.file_metadata.file_size}."
+                                                    ),
+                                                )
+
+                                            connection.seek(chunk_range=read.chunk_range)
+
+                                            break
+
+                                        if (
+                                            connection.current_read_position
+                                            < uncached_chunks[0].start
+                                        ):
+                                            # Forward seek detection:
+                                            #
+                                            # If the requested start is after the current read position, we need to seek forward.
+                                            # This is because streams cannot skip chunks of data, so a new connection must be made,
+                                            # to avoid requesting data that will be discarded and using unnecessary bandwidth.
+
+                                            if self.enable_tracing:
+                                                logger.log(
+                                                    "STREAM",
+                                                    self.build_log_message(
+                                                        f"Request chunk start {uncached_chunks[0].start} "
+                                                        f"is after current read position {connection.current_read_position} "
+                                                        f"for {self.file_metadata.path}. "
+                                                        f"Seeking to new start position {uncached_chunks[0].start}/{self.file_metadata.file_size}."
+                                                    ),
+                                                )
+
+                                            connection.seek(chunk_range=read.chunk_range)
+
+                                            break
+
+                                        await _process_chunks(uncached_chunks)
+
+                                    # Sequential playhead prefetch: fill ahead without
+                                    # blocking the current VFS read (already returned /
+                                    # waiting independently via is_cached).
+                                    if (
+                                        self.config.prefetch_chunks > 0
+                                        and read.read_type
+                                        in ("body_read", "cache_hit")
+                                    ):
+                                        _, playhead_end = (
+                                            read.chunk_range.request_range
                                         )
-
-                                    request_start, _ = read.chunk_range.request_range
-
-                                    if (
-                                        self.config.header_size
-                                        < uncached_chunks[0].start
-                                        < connection.start_position
-                                    ):
-                                        # Backward seek detection:
-                                        #
-                                        # If the requested start is before the start of the stream, we will always need to seek.
-                                        # This is because streams can only read forwards, so a new connection must be made.
-
-                                        if self.enable_tracing:
-                                            logger.log(
-                                                "STREAM",
-                                                self.build_log_message(
-                                                    f"Requested start {request_start} "
-                                                    f"is before current read position {connection.current_read_position} "
-                                                    f"for {self.file_metadata.path}. "
-                                                    f"Seeking to new start position {uncached_chunks[0].start}/{self.file_metadata.file_size}."
-                                                ),
-                                            )
-
-                                        connection.seek(chunk_range=read.chunk_range)
-
-                                        break
-
-                                    if (
-                                        connection.current_read_position
-                                        < uncached_chunks[0].start
-                                    ):
-                                        # Forward seek detection:
-                                        #
-                                        # If the requested start is after the current read position, we need to seek forward.
-                                        # This is because streams cannot skip chunks of data, so a new connection must be made,
-                                        # to avoid requesting data that will be discarded and using unnecessary bandwidth.
-
-                                        if self.enable_tracing:
-                                            logger.log(
-                                                "STREAM",
-                                                self.build_log_message(
-                                                    f"Request chunk start {uncached_chunks[0].start} "
-                                                    f"is after current read position {connection.current_read_position} "
-                                                    f"for {self.file_metadata.path}. "
-                                                    f"Seeking to new start position {uncached_chunks[0].start}/{self.file_metadata.file_size}."
-                                                ),
-                                            )
-
-                                        connection.seek(chunk_range=read.chunk_range)
-
-                                        break
-
-                                    await _process_chunks(uncached_chunks)
+                                        ahead = self.chunker.get_prefetch_uncached(
+                                            after_end=playhead_end,
+                                            count=self.config.prefetch_chunks,
+                                        )
+                                        if ahead:
+                                            if self.enable_tracing:
+                                                logger.log(
+                                                    "STREAM",
+                                                    self.build_log_message(
+                                                        f"Prefetching {len(ahead)} chunk(s) "
+                                                        f"ahead of playhead@{playhead_end}"
+                                                    ),
+                                                )
+                                            # Prefer contiguous fetch from connection tip;
+                                            # seek if gap to first prefetch chunk.
+                                            first = ahead[0]
+                                            if (
+                                                connection.current_read_position
+                                                < first.start
+                                            ):
+                                                connection.seek(
+                                                    chunk_range=self.chunker.get_chunk_range(
+                                                        position=first.start,
+                                                        size=first.size,
+                                                    )
+                                                )
+                                                break
+                                            await _process_chunks(ahead)
 
                             position = connection.current_read_position
                             seek_range = connection.seek_range
@@ -695,7 +735,12 @@ class MediaStream:
             # Start the stream and wait for a connection before progressing with a body read.
             # This MUST be done before assigning a value to current_read,
             # or else the stream will not receive the value.
-            if read_type == "body_read" and not self.is_streaming.value:
+            # Also start on cache_hit when prefetch is enabled so ahead-chunks can fill.
+            if (
+                read_type in ("body_read", "cache_hit")
+                and not self.is_streaming.value
+                and (read_type == "body_read" or self.config.prefetch_chunks > 0)
+            ):
                 with trio.fail_after(self.config.connect_timeout_seconds):
                     await self.nursery.start(self.run, chunk_range.position)
 
