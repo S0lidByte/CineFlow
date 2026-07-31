@@ -658,7 +658,8 @@ def _accumulate_ranked_torrents(
 
         if isinstance(item, Show):
             # make sure the torrent has at least 2 episodes (should weed out most junk)
-            if not manual and torrent.data.episodes and len(torrent.data.episodes) <= 2:
+            # Use < 2 (not <= 2) so 2-episode seasons/shows are still accepted.
+            if not manual and torrent.data.episodes and len(torrent.data.episodes) < 2:
                 logger.trace(
                     f"Skipping torrent with too few episodes for {item.log_string}: {raw_title}"
                 )
@@ -708,7 +709,8 @@ def _accumulate_ranked_torrents(
                 continue
 
             # make sure the torrent has at least 2 episodes (should weed out most junk)
-            if not manual and torrent.data.episodes and len(torrent.data.episodes) <= 2:
+            # Use < 2 (not <= 2) so 2-episode seasons are still accepted.
+            if not manual and torrent.data.episodes and len(torrent.data.episodes) < 2:
                 logger.trace(
                     f"Skipping torrent with too few episodes for {item.log_string}: {raw_title}"
                 )
@@ -717,7 +719,10 @@ def _accumulate_ranked_torrents(
                 continue
 
             # disregard torrents with incorrect season number
-            if not manual and item.number not in torrent.data.seasons:
+            # Gate on torrent.data.seasons being non-empty: season-less releases (e.g.
+            # "Complete Series", anime without SXX tags) should not be rejected here.
+            # The earlier check at line 697-708 already handles explicit wrong seasons.
+            if not manual and torrent.data.seasons and item.number not in torrent.data.seasons:
                 logger.trace(
                     f"Skipping incorrect season torrent for {item.log_string}: {raw_title}"
                 )

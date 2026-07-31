@@ -716,12 +716,16 @@ class MediaStream:
             )
 
     async def scan(self, read_position: int, size: int) -> bytes:
-        """Fetch a one-off range of data for scanning purposes."""
+        """Fetch a one-off range of data for scanning purposes.
+
+        Results are cached so repeated Plex intro/credit probes for the same
+        byte range are served from /dev/shm instead of making a fresh debrid
+        HTTP request on every call.
+        """
 
         data = await self._fetch_discrete_byte_range(
             start=read_position,
             size=size,
-            should_cache=False,
         )
 
         return data[:size]
@@ -862,6 +866,7 @@ class MediaStream:
                             size=request_size,
                         )
                     case "body_read":
+                        self.session_statistics.body_read_count += 1
                         return await self.read_bytes(chunk_range=read_range)
                     case _:
                         # This should never happen due to prior validation
@@ -1334,7 +1339,7 @@ class MediaStream:
                         for chunk in chunk_range.chunks
                     ]
                 )
-        except* trio.TooSlowError:
+        except trio.TooSlowError:
             if len(chunk_range.uncached_chunks) > 0:
                 raise ChunksTooSlowException(
                     threshold=self.config.chunk_wait_timeout_seconds,
