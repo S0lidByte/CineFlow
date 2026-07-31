@@ -1007,7 +1007,22 @@ class RivenVFS(pyfuse3.Operations):
             if registered_count > 0:
                 session.commit()
 
-        logger.log("VFS", f"Full sync complete: re-registered {registered_count} items")
+        logger.log(
+            "VFS",
+            f"Full sync complete: re-registered {registered_count}/{len(item_ids)} items",
+        )
+
+        # If all add() calls failed (e.g. debrid URLs not yet refreshed after restart),
+        # reset the profile hash so the next sync() is not short-circuited by the
+        # "profiles unchanged" early-return. This ensures the VFS retries population
+        # rather than remaining empty for the entire session.
+        if registered_count == 0 and len(item_ids) > 0:
+            logger.warning(
+                f"Full sync: 0/{len(item_ids)} items registered — "
+                "likely a transient debrid URL issue. "
+                "Resetting profile hash to force retry on next sync."
+            )
+            self._last_profile_hash = None
 
         # Step 4: Ensure persistent library profile directories exist
         # This creates /movies, /shows, and /{profile}/movies, /{profile}/shows
@@ -1018,13 +1033,17 @@ class RivenVFS(pyfuse3.Operations):
         # This is critical: reduces syscalls from O(n) to O(1)
         self._flush_pending_invalidations()
 
-        # Invalidate root directory
-        if registered_count > 0:
-            try:
-                pyfuse3.invalidate_inode(pyfuse3.ROOT_INODE, attr_only=False)
-                logger.debug("Invalidated root directory cache after sync")
-            except Exception as e:
-                logger.trace(f"Could not invalidate root directory: {e}")
+        # Always invalidate root after a full sync — the tree was rebuilt from scratch
+        # regardless of registered_count. Skipping this when registered_count == 0
+        # leaves Plex holding a stale kernel dentry cache of an empty directory,
+        # so media appears missing until Plex's cache TTL expires (~minutes).
+        try:
+            pyfuse3.invalidate_inode(pyfuse3.ROOT_INODE, attr_only=False)
+            logger.debug(
+                f"Invalidated root directory cache after sync ({registered_count} items)"
+            )
+        except Exception as e:
+            logger.trace(f"Could not invalidate root directory: {e}")
 
     def _flush_pending_invalidations(self) -> None:
         """Flush collected parent inode invalidations to the FUSE kernel cache.
