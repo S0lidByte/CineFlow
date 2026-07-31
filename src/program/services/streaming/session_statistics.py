@@ -12,3 +12,6 @@ class SessionStatistics:
     # Used by has_active_streams() to distinguish genuine user playback from
     # Plex intro/credit detection which may do 1–2 non-sequential fetches.
     body_read_count: int = 0
+    # Monotonic timestamp of the last body_read. Used by has_active_streams()
+    # to filter out idle streams (e.g. completed Plex intro scans or paused players).
+    last_body_read_timestamp: float = 0.0

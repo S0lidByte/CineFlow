@@ -2568,32 +2568,26 @@ class RivenVFS(pyfuse3.Operations):
         return self._active_stream_count
 
     def has_active_streams(self) -> bool:
-        """True only when genuine sequential HTTP playback is in progress.
+        """True only when active sequential HTTP playback is in progress.
 
-        A stream is counted as 'active playback' only when its body_read_count
-        has reached 2 or more.  This filters out:
+        A stream is counted as 'active playback' only when:
+        1. Its body_read_count is 2 or more.
+        2. A body_read occurred within the last 10 seconds (time.monotonic).
 
-        - Pure cache-hit reads (body_read_count stays 0): these put no load on
-          the debrid HTTP pool so there is no reason to defer downloads.
-        - Plex intro/credit detection: scans do at most 1 body_read near a
-          file boundary, so body_read_count never reaches 2.
-        - Zero-byte HTTP connections (scan streams that connect then immediately
-          close): body_read_count remains 0.
-
-        Genuine sequential playback accumulates body_read_count rapidly
-        (one per chunk — typically every 30 s at 30 MB chunks).
+        This filters out:
+        - Pure cache-hit reads (body_read_count stays 0).
+        - Plex intro/credit detection: after a scan finishes its short burst of reads,
+          its last_body_read_timestamp quickly exceeds 10s so downloads resume.
+        - Paused or finished streams waiting for activity_timeout_seconds cleanup.
         """
-        # Snapshot to a list before iterating — _active_streams can be
-        # mutated by trio (pop/insert under _active_streams_lock) while this
-        # method is called from a non-trio worker thread (Downloader), which
-        # can raise RuntimeError if the dict changes size during iteration.
         try:
             streams = list(self._active_streams.values())
         except RuntimeError:
-            # Concurrent mutation during list() — conservative: report False
-            # so downloads are NOT deferred on ambiguous state.
             return False
+
+        now = time.monotonic()
         return any(
             s.session_statistics.body_read_count >= 2
+            and (now - s.session_statistics.last_body_read_timestamp <= 10.0)
             for s in streams
         )
