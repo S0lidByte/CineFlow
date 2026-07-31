@@ -2,6 +2,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from functools import cached_property
 from http import HTTPStatus
+from time import monotonic
 from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
@@ -872,6 +873,7 @@ class MediaStream:
                         )
                     case "body_read":
                         self.session_statistics.body_read_count += 1
+                        self.session_statistics.last_body_read_timestamp = monotonic()
                         return await self.read_bytes(chunk_range=read_range)
                     case _:
                         # This should never happen due to prior validation
