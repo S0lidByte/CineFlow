@@ -371,8 +371,20 @@ class RivenVFS(pyfuse3.Operations):
         async with self._active_streams_lock:
             for stream_key, stream in list(self._active_streams.items()):
                 is_streaming = cast(bool, stream.is_streaming.value)
+                # Give newly-started streams 5 s before considering them
+                # zero-progress: the very first body_read chunk (up to
+                # chunk_size_mb) takes several seconds to receive its first
+                # bytes, and premature shedding causes a reconnect storm that
+                # worsens the pool pressure we're trying to relieve.
+                stream_age = (
+                    trio.current_time() - stream._created_at
+                    if stream._created_at != 0.0
+                    else 0.0
+                )
                 zero_progress = (
-                    stream.session_statistics.bytes_transferred == 0 and is_streaming
+                    stream.session_statistics.bytes_transferred == 0
+                    and is_streaming
+                    and stream_age > 5.0
                 )
                 if stream.is_timed_out or zero_progress:
                     candidates[stream_key] = stream
@@ -2545,7 +2557,17 @@ class RivenVFS(pyfuse3.Operations):
         Genuine sequential playback accumulates body_read_count rapidly
         (one per chunk — typically every 30 s at 30 MB chunks).
         """
+        # Snapshot to a list before iterating — _active_streams can be
+        # mutated by trio (pop/insert under _active_streams_lock) while this
+        # method is called from a non-trio worker thread (Downloader), which
+        # can raise RuntimeError if the dict changes size during iteration.
+        try:
+            streams = list(self._active_streams.values())
+        except RuntimeError:
+            # Concurrent mutation during list() — conservative: report False
+            # so downloads are NOT deferred on ambiguous state.
+            return False
         return any(
             s.session_statistics.body_read_count >= 2
-            for s in self._active_streams.values()
+            for s in streams
         )

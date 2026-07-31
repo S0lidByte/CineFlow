@@ -497,13 +497,13 @@ class Cache:
             await self._evict_lru(0)
 
     async def _evict_lru(self, need_bytes: int = 0) -> None:
-        # Index updates under _index_lock (via locks()); disk unlink after release
-        # so concurrent cache.get() under Plex multi-open is not blocked on I/O.
-        # _thread_lock is NOT taken here: _evict_lru runs only from put() (which
-        # holds _shard_lock, preventing concurrent put() for the same key) or from
-        # trim()/maybe_log_stats() which run on the trio loop with no sync reader
-        # interleaving. The brief _thread_lock in put()'s write step covers any
-        # racing sync has() caller for that specific key.
+        # Index updates under both _index_lock (via locks()) AND _thread_lock
+        # so that sync callers (has(), sync_size_snapshot()) never observe an
+        # entry that is mid-eviction.  _thread_lock is held only around the
+        # brief in-memory mutations; no I/O takes place under it (disk unlink
+        # happens after both locks are released).
+        # This mirrors the pattern used by put() which also takes _thread_lock
+        # around _index writes to coordinate with has().
         to_unlink: list[str] = []
         tiers: dict[str, Literal["hot", "warm"]] = {}
         evicted = 0
@@ -512,36 +512,37 @@ class Cache:
             # Prefer evicting warm; only evict hot if single-tier or still over.
             target = max(0, self._total_bytes + need_bytes - self.cfg.max_size_bytes)
 
-            while target > 0 and self._index:
-                # Prefer warm LRU first when two-tier
-                victim_key = None
-                victim_entry = None
-                if self.cfg.two_tier:
-                    for k, entry in self._index.items():
-                        if entry.tier == "warm":
-                            victim_key, victim_entry = k, entry
-                            break
-                if victim_key is None:
-                    victim_key, victim_entry = next(iter(self._index.items()))
+            with self._thread_lock:
+                while target > 0 and self._index:
+                    # Prefer warm LRU first when two-tier
+                    victim_key = None
+                    victim_entry = None
+                    if self.cfg.two_tier:
+                        for k, entry in self._index.items():
+                            if entry.tier == "warm":
+                                victim_key, victim_entry = k, entry
+                                break
+                    if victim_key is None:
+                        victim_key, victim_entry = next(iter(self._index.items()))
 
-                assert victim_entry is not None
-                self._index.pop(victim_key)
+                    assert victim_entry is not None
+                    self._index.pop(victim_key)
 
-                lst = self._by_path.get(victim_entry.cache_key)
-                if lst:
-                    idx = bisect_right(lst, victim_entry.start) - 1
-                    if idx >= 0 and lst[idx] == victim_entry.start:
-                        del lst[idx]
-                    if not lst:
-                        self._by_path.pop(victim_entry.cache_key, None)
+                    lst = self._by_path.get(victim_entry.cache_key)
+                    if lst:
+                        idx = bisect_right(lst, victim_entry.start) - 1
+                        if idx >= 0 and lst[idx] == victim_entry.start:
+                            del lst[idx]
+                        if not lst:
+                            self._by_path.pop(victim_entry.cache_key, None)
 
-                to_unlink.append(victim_key)
-                tiers[victim_key] = victim_entry.tier
-                self._total_bytes -= victim_entry.size
-                if victim_entry.tier == "hot":
-                    self._hot_bytes -= victim_entry.size
-                target -= victim_entry.size
-                evicted += 1
+                    to_unlink.append(victim_key)
+                    tiers[victim_key] = victim_entry.tier
+                    self._total_bytes -= victim_entry.size
+                    if victim_entry.tier == "hot":
+                        self._hot_bytes -= victim_entry.size
+                    target -= victim_entry.size
+                    evicted += 1
 
         if to_unlink:
             await trio.to_thread.run_sync(
