@@ -862,6 +862,7 @@ class MediaStream:
                             size=request_size,
                         )
                     case "body_read":
+                        self.session_statistics.body_read_count += 1
                         return await self.read_bytes(chunk_range=read_range)
                     case _:
                         # This should never happen due to prior validation

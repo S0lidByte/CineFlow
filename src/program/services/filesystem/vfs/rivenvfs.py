@@ -2530,14 +2530,22 @@ class RivenVFS(pyfuse3.Operations):
         return self._active_stream_count
 
     def has_active_streams(self) -> bool:
-        """True only when at least one stream has transferred bytes over HTTP.
+        """True only when genuine sequential HTTP playback is in progress.
 
-        Plex intro/credit-detection opens files and reads small amounts from
-        the /dev/shm cache without ever making an HTTP request, so
-        bytes_transferred stays 0.  Counting those as 'playback active' would
-        defer ALL downloads permanently during library scans.
+        A stream is counted as 'active playback' only when its body_read_count
+        has reached 2 or more.  This filters out:
+
+        - Pure cache-hit reads (body_read_count stays 0): these put no load on
+          the debrid HTTP pool so there is no reason to defer downloads.
+        - Plex intro/credit detection: scans do at most 1 body_read near a
+          file boundary, so body_read_count never reaches 2.
+        - Zero-byte HTTP connections (scan streams that connect then immediately
+          close): body_read_count remains 0.
+
+        Genuine sequential playback accumulates body_read_count rapidly
+        (one per chunk — typically every 30 s at 30 MB chunks).
         """
         return any(
-            s.session_statistics.bytes_transferred > 0
+            s.session_statistics.body_read_count >= 2
             for s in self._active_streams.values()
         )
