@@ -19,7 +19,7 @@ class DownloaderBase(ABC):
     """The abstract base class for all Downloader implementations."""
 
     @property
-    def PROXY_URL(self) -> str:  # noqa: N802  (kept uppercase for API compatibility)
+    def PROXY_URL(self) -> str:
         """Read proxy URL dynamically so runtime settings changes are reflected."""
         return settings_manager.settings.downloaders.proxy_url
 
