@@ -261,6 +261,7 @@ class RivenVFS(pyfuse3.Operations):
         # Lock for managing active streams dict.
         # NOTE: This is (re-)initialized inside _fuse_runner before each trio.run() call
         # to avoid "AssertionError: task._runner is self" when the FUSE loop restarts.
+        # Initialize with a dummy lock so close() is safe before the thread starts.
         self._active_streams_lock: trio.Lock
 
         # Open file handles: fh -> handle info
@@ -276,6 +277,8 @@ class RivenVFS(pyfuse3.Operations):
         self._thread = None
         # NOTE: _unmount_requested is (re-)initialized inside _fuse_runner before each trio.run()
         # to avoid stale Trio primitives from a dead runner causing AssertionError on restart.
+        # We use a threading.Event as a pre-flight placeholder so close() is safe before thread start.
+        self._unmount_requested_preflight: threading.Event = threading.Event()
         self._unmount_requested: trio_util.AsyncBool
         self.stream_nursery: trio.Nursery
 
@@ -771,11 +774,19 @@ class RivenVFS(pyfuse3.Operations):
             self._unmount_requested.value = True
             await self._terminate_async()
 
+        # Signal the preflight event so close() is safe before the FUSE thread
+        # has a chance to initialize self._unmount_requested.
+        self._unmount_requested_preflight.set()
+
         trio_token = getattr(pyfuse3, "trio_token", None)
 
         if trio_token is not None:
             try:
-                trio.from_thread.run(_request_unmount, trio_token=trio_token)
+                # Only call if _unmount_requested has been initialized by _fuse_runner
+                if hasattr(self, "_unmount_requested") and isinstance(
+                    self._unmount_requested, trio_util.AsyncBool
+                ):
+                    trio.from_thread.run(_request_unmount, trio_token=trio_token)
             except Exception:
                 logger.exception("Failed to request graceful FUSE unmount")
         else:
@@ -984,9 +995,17 @@ class RivenVFS(pyfuse3.Operations):
             new_inode_map: dict[int, VFSNode] = {pyfuse3.ROOT_INODE: self._root}
 
             # Re-insert pinned nodes so in-progress reads keep working.
+            # Also pin their parent directories so getattr(parent) doesn't ENOENT
+            # while a file is still streaming.
             for inode_int, node in self._inode_to_node.items():
                 if inode_int in pinned_inodes:
                     new_inode_map[inode_int] = node
+                    # Walk up and preserve all ancestor inodes
+                    ancestor = node.parent
+                    while ancestor is not None and ancestor != self._root:
+                        if ancestor.inode:
+                            new_inode_map[int(ancestor.inode)] = ancestor
+                        ancestor = ancestor.parent
 
             self._inode_to_node = new_inode_map
 
@@ -2130,6 +2149,8 @@ class RivenVFS(pyfuse3.Operations):
                 self._next_fh = pyfuse3.FileHandleT(self._next_fh + 1)
                 self._file_handles[fh] = {
                     "inode": inode,  # Store inode to resolve node/metadata later
+                    "path": path,    # Store path so release() can close the stream
+                                     # even if the VFS node has been deleted (sync/remove).
                     "last_read_end": 0,
                     "subtitle_content": None,
                 }
@@ -2235,12 +2256,10 @@ class RivenVFS(pyfuse3.Operations):
                     # while streaming, the stream will serve stale content until the file handle closes.
                     handle_info["subtitle_content"] = subtitle_content
 
-                # Slice subtitle content in thread (could be large)
-                def slice_subtitle():
-                    end_offset = min(off + size, len(subtitle_content))
-                    return subtitle_content[off:end_offset]
-
-                return await trio.to_thread.run_sync(slice_subtitle)
+                # Slice subtitle content inline — Python bytes slicing is GIL-held
+                # pure Python; spawning a thread just adds overhead with no benefit.
+                end_offset = min(off + size, len(subtitle_content))
+                return subtitle_content[off:end_offset]
 
             # For media entries, continue with normal HTTP streaming logic
 
@@ -2368,19 +2387,27 @@ class RivenVFS(pyfuse3.Operations):
         """Release/close a file handle."""
 
         try:
-            handle_info = self._file_handles.pop(fh, None)
+            with self._tree_lock:
+                handle_info = self._file_handles.pop(fh, None)
+
             path = None
 
             if handle_info:
-                # Resolve path from inode
-                inode = handle_info.get("inode")
+                # Prefer the path stored at open() time — this survives VFS node
+                # deletion (sync/remove) so the stream is always closed correctly,
+                # preventing permanent MediaStream leaks in _active_streams.
+                path = handle_info.get("path")
 
-                if inode:
-                    with self._tree_lock:
-                        node = self._inode_to_node.get(inode)
+                if not path:
+                    # Fallback: resolve path from inode (older handles before this fix)
+                    inode = handle_info.get("inode")
 
-                        if node:
-                            path = node.path
+                    if inode:
+                        with self._tree_lock:
+                            node = self._inode_to_node.get(inode)
+
+                            if node:
+                                path = node.path
 
                 if path:
                     stream_key = self._stream_key(path, fh)

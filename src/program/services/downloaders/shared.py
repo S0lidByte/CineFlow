@@ -18,7 +18,10 @@ from program.settings import settings_manager
 class DownloaderBase(ABC):
     """The abstract base class for all Downloader implementations."""
 
-    PROXY_URL: str = settings_manager.settings.downloaders.proxy_url
+    @property
+    def PROXY_URL(self) -> str:  # noqa: N802  (kept uppercase for API compatibility)
+        """Read proxy URL dynamically so runtime settings changes are reflected."""
+        return settings_manager.settings.downloaders.proxy_url
 
     initialized: bool
     key: str
@@ -128,7 +131,12 @@ def premium_days_left(expiration: datetime) -> str:
     """Convert an expiration date into a message showing days remaining on the user's premium account"""
 
     now = datetime.now(tz=timezone.utc)
-    expiration = expiration.replace(tzinfo=timezone.utc)
+    # Use astimezone (not replace) so timezone-aware datetimes with non-UTC
+    # offsets are correctly converted rather than silently clobbered.
+    if expiration.tzinfo is None:
+        expiration = expiration.replace(tzinfo=timezone.utc)
+    else:
+        expiration = expiration.astimezone(timezone.utc)
 
     time_left = expiration - now
     days_left = time_left.days
