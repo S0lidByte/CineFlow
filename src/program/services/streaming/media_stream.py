@@ -136,6 +136,15 @@ class MediaStream:
         )
 
         self.session_statistics = SessionStatistics()
+        # Monotonic creation time used by is_timed_out to expire scan-only
+        # streams (no HTTP transfer) without waiting activity_timeout_seconds.
+        # Set inside trio context so trio.current_time() is valid.
+        try:
+            self._created_at: float = trio.current_time()
+        except RuntimeError:
+            # Not inside a trio event loop (e.g. tests); use 0 so the property
+            # falls back to the activity-based timeout path.
+            self._created_at = 0.0
 
         self.file_metadata = FileMetadata(
             file_size=file_size,
@@ -263,8 +272,14 @@ class MediaStream:
     @property
     def is_timed_out(self) -> bool:
         if not self.recent_reads.current_read.value:
-            return False
-
+            # Stream was opened but never triggered an HTTP fetch — it is a
+            # Plex scan / intro-detection read that was served entirely from
+            # the /dev/shm cache.  Time it out quickly so it does not hold
+            # an _active_streams slot and falsely block the Downloader.
+            if self._created_at == 0.0:
+                return False  # Safety: no trio context at construction.
+            scan_timeout = min(30.0, float(self.config.activity_timeout_seconds))
+            return trio.current_time() - self._created_at > scan_timeout
         return (
             trio.current_time() - self.recent_reads.current_read.value.timestamp
             > self.config.activity_timeout_seconds
