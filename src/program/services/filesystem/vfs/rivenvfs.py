@@ -96,6 +96,7 @@ if TYPE_CHECKING:
 
 class FileHandle(TypedDict):
     inode: pyfuse3.InodeT
+    path: str | None
     last_read_end: int
     subtitle_content: bytes | None
 
@@ -380,8 +381,8 @@ class RivenVFS(pyfuse3.Operations):
                 # bytes, and premature shedding causes a reconnect storm that
                 # worsens the pool pressure we're trying to relieve.
                 stream_age = (
-                    trio.current_time() - stream._created_at
-                    if stream._created_at != 0.0
+                    trio.current_time() - stream.created_at
+                    if stream.created_at != 0.0
                     else 0.0
                 )
                 zero_progress = (
@@ -783,9 +784,7 @@ class RivenVFS(pyfuse3.Operations):
         if trio_token is not None:
             try:
                 # Only call if _unmount_requested has been initialized by _fuse_runner
-                if hasattr(self, "_unmount_requested") and isinstance(
-                    self._unmount_requested, trio_util.AsyncBool
-                ):
+                if getattr(self, "_unmount_requested", None) is not None:
                     trio.from_thread.run(_request_unmount, trio_token=trio_token)
             except Exception:
                 logger.exception("Failed to request graceful FUSE unmount")

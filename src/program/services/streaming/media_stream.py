@@ -285,6 +285,11 @@ class MediaStream:
             > self.config.activity_timeout_seconds
         )
 
+    @property
+    def created_at(self) -> float:
+        """Monotonic creation timestamp in trio time (or 0.0 if construct-time capture failed)."""
+        return self._created_at
+
     @asynccontextmanager
     async def stream_lifecycle(self) -> AsyncGenerator[None]:
         """Context manager for managing stream lifecycle."""
