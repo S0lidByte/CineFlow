@@ -2092,6 +2092,8 @@ class RivenVFS(pyfuse3.Operations):
             # H-2: Assign the file handle number under _tree_lock so concurrent
             # open() coroutines cannot read the same counter value and produce
             # duplicate file handles that clobber each other's _file_handles entry.
+            # SAFETY: No await inside this block — _tree_lock is a threading.RLock
+            # which must not be held across a trio checkpoint.
             with self._tree_lock:
                 fh = self._next_fh
                 self._next_fh = pyfuse3.FileHandleT(self._next_fh + 1)
@@ -2231,7 +2233,6 @@ class RivenVFS(pyfuse3.Operations):
                 file_size=file_size,
                 original_filename=original_filename,
             )
-
 
             try:
                 return await stream.read(

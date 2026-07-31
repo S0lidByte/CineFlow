@@ -182,12 +182,11 @@ class Cache:
 
     @asynccontextmanager
     async def locks(self) -> AsyncGenerator[None, None]:
-        """Brief global index lock for async LRU mutations. Never hold across disk I/O.
+        """Async index lock for LRU mutations. Never hold across disk I/O.
 
-        Priority 3: _thread_lock is now decoupled from _index_lock so that sync
-        callers (has(), sync_size_snapshot()) can read the index without blocking
-        on the async trio lock — and vice versa. Index *writes* still acquire
-        _thread_lock directly in put() after the file I/O completes.
+        _thread_lock is decoupled: sync callers (has, sync_size_snapshot) use it
+        directly without blocking on this trio lock. Index writes (put, _initial_scan)
+        acquire _thread_lock explicitly inside this context.
         """
 
         async with self._index_lock:
@@ -498,8 +497,13 @@ class Cache:
             await self._evict_lru(0)
 
     async def _evict_lru(self, need_bytes: int = 0) -> None:
-        # Index updates under lock; disk unlink after release so concurrent
-        # cache.get() under Plex multi-open is not blocked on unlink I/O.
+        # Index updates under _index_lock (via locks()); disk unlink after release
+        # so concurrent cache.get() under Plex multi-open is not blocked on I/O.
+        # _thread_lock is NOT taken here: _evict_lru runs only from put() (which
+        # holds _shard_lock, preventing concurrent put() for the same key) or from
+        # trim()/maybe_log_stats() which run on the trio loop with no sync reader
+        # interleaving. The brief _thread_lock in put()'s write step covers any
+        # racing sync has() caller for that specific key.
         to_unlink: list[str] = []
         tiers: dict[str, Literal["hot", "warm"]] = {}
         evicted = 0
@@ -690,7 +694,8 @@ class Cache:
                             f"Slow cache.get(): {total_time * 1000:.0f}ms for "
                             f"{needed_len / (1024 * 1024):.2f}MB "
                             f"(read: {read_time * 1000:.0f}ms, "
-                            f"lock_wait: {lock_wait_s * 1000:.0f}ms)"
+                            f"lock_wait: {lock_wait_s * 1000:.0f}ms "
+                            f"[sampled ~10%])"
                         )
 
                     return result
