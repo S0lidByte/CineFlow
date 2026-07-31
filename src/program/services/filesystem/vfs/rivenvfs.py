@@ -439,9 +439,9 @@ class RivenVFS(pyfuse3.Operations):
                 else:
                     logger.trace("All streams appear to be active")
 
-            logger.trace("Stream timeout check complete, sleeping for 60 seconds")
+            logger.trace("Stream timeout check complete, sleeping for 15 seconds")
 
-            await trio.sleep(60)
+            await trio.sleep(15)
 
     def _stream_key(self, path: str, fh: int) -> str:
         """Generate unique key for stream tracking."""
@@ -2530,5 +2530,14 @@ class RivenVFS(pyfuse3.Operations):
         return self._active_stream_count
 
     def has_active_streams(self) -> bool:
-        """True when any VFS media stream is open (playback in progress)."""
-        return self._active_stream_count > 0
+        """True only when at least one stream has transferred bytes over HTTP.
+
+        Plex intro/credit-detection opens files and reads small amounts from
+        the /dev/shm cache without ever making an HTTP request, so
+        bytes_transferred stays 0.  Counting those as 'playback active' would
+        defer ALL downloads permanently during library scans.
+        """
+        return any(
+            s.session_statistics.bytes_transferred > 0
+            for s in self._active_streams.values()
+        )
