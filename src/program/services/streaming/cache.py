@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import random
 import threading
 import time
 from bisect import bisect_right, insort
@@ -181,11 +182,16 @@ class Cache:
 
     @asynccontextmanager
     async def locks(self) -> AsyncGenerator[None, None]:
-        """Brief global index lock. Never hold across disk I/O."""
+        """Brief global index lock for async LRU mutations. Never hold across disk I/O.
+
+        Priority 3: _thread_lock is now decoupled from _index_lock so that sync
+        callers (has(), sync_size_snapshot()) can read the index without blocking
+        on the async trio lock — and vice versa. Index *writes* still acquire
+        _thread_lock directly in put() after the file I/O completes.
+        """
 
         async with self._index_lock:
-            with self._thread_lock:
-                yield
+            yield
 
     @staticmethod
     def _read_file_slice(path: Path, offset: int, size: int) -> bytes:
@@ -301,29 +307,30 @@ class Cache:
             entries.sort(key=lambda t: t.mtime)  # by mtime asc
 
             async with self.locks():
-                self._index.clear()
-                self._by_path.clear()
-                self._total_bytes = 0
-                self._hot_bytes = 0
+                with self._thread_lock:
+                    self._index.clear()
+                    self._by_path.clear()
+                    self._total_bytes = 0
+                    self._hot_bytes = 0
 
-                for cache_entry in entries:
-                    # Prefer hot if the same key appears in both (shouldn't normally)
-                    existing = self._index.get(cache_entry.key)
-                    if existing and existing.tier == "hot" and cache_entry.tier == "warm":
-                        continue
-                    if existing:
-                        self._total_bytes -= existing.size
-                        if existing.tier == "hot":
-                            self._hot_bytes -= existing.size
+                    for cache_entry in entries:
+                        # Prefer hot if the same key appears in both (shouldn't normally)
+                        existing = self._index.get(cache_entry.key)
+                        if existing and existing.tier == "hot" and cache_entry.tier == "warm":
+                            continue
+                        if existing:
+                            self._total_bytes -= existing.size
+                            if existing.tier == "hot":
+                                self._hot_bytes -= existing.size
 
-                    self._index[cache_entry.key] = cache_entry
-                    self._total_bytes += cache_entry.size
-                    if cache_entry.tier == "hot":
-                        self._hot_bytes += cache_entry.size
+                        self._index[cache_entry.key] = cache_entry
+                        self._total_bytes += cache_entry.size
+                        if cache_entry.tier == "hot":
+                            self._hot_bytes += cache_entry.size
 
-                    lst = self._by_path.setdefault(cache_entry.cache_key, [])
-                    if cache_entry.start not in lst:
-                        insort(lst, cache_entry.start)
+                        lst = self._by_path.setdefault(cache_entry.cache_key, [])
+                        if cache_entry.start not in lst:
+                            insort(lst, cache_entry.start)
 
             try:
                 await self.trim()
@@ -647,28 +654,32 @@ class Cache:
                     )
 
                 if len(result) == needed_len:
-                    # Update LRU (move to end) but only update timestamp periodically
-                    # to reduce lock contention and index modifications
-                    lock_acquire = time.time()
-                    async with self.locks():
-                        lock_wait_s += time.time() - lock_acquire
-                        if chunk_key in self._index:
-                            cache_entry = self._index[chunk_key]
-                            self._index.move_to_end(chunk_key, last=True)
+                    # Priority 2: Probabilistic LRU update.
+                    # Acquiring the global index lock on *every* cache hit serialises
+                    # all concurrent stream reads. Under 6+ simultaneous titles this
+                    # causes 100–500ms lock_wait even for /dev/shm reads.
+                    # We skip the LRU bookkeeping 90% of the time — LRU ordering
+                    # degrades gracefully and the 10s mtime gate already limits
+                    # write pressure. Hot entries remain hot; cold entries still
+                    # age out on the LRU pass.
+                    if random.random() < 0.1:
+                        lock_acquire = time.time()
+                        async with self.locks():
+                            lock_wait_s += time.time() - lock_acquire
+                            if chunk_key in self._index:
+                                cache_entry = self._index[chunk_key]
+                                self._index.move_to_end(chunk_key, last=True)
 
-                            # Only update timestamp if it's been more than 10 seconds
-                            # This reduces write pressure on the index
-                            now = time.time()
-
-                            if now - cache_entry.mtime > 10.0:
-                                self._index[chunk_key] = CacheEntry(
-                                    key=cache_entry.key,
-                                    cache_key=cache_entry.cache_key,
-                                    mtime=now,
-                                    start=cache_entry.start,
-                                    size=cache_entry.size,
-                                    tier=cache_entry.tier,
-                                )
+                                now = time.time()
+                                if now - cache_entry.mtime > 10.0:
+                                    self._index[chunk_key] = CacheEntry(
+                                        key=cache_entry.key,
+                                        cache_key=cache_entry.cache_key,
+                                        mtime=now,
+                                        start=cache_entry.start,
+                                        size=cache_entry.size,
+                                        tier=cache_entry.tier,
+                                    )
 
                     self._metrics.record_hit(needed_len)
 
@@ -764,25 +775,25 @@ class Cache:
             else:
                 # All chunks read successfully (no break occurred)
                 if len(result_data) == needed_len:
-                    # Update LRU and timestamps while holding the lock
-                    async with self.locks():
-                        now = time.time()
+                    # Probabilistic LRU: same 10% policy as fast path.
+                    if random.random() < 0.1:
+                        async with self.locks():
+                            now = time.time()
 
-                        for chunk_key, chunk_ts in chunks_used:
-                            if chunk_key in self._index:  # Verify chunk still exists
-                                self._index.move_to_end(chunk_key, last=True)
+                            for chunk_key, chunk_ts in chunks_used:
+                                if chunk_key in self._index:
+                                    self._index.move_to_end(chunk_key, last=True)
 
-                                # Only update timestamp if it's been more than 10 seconds
-                                if now - chunk_ts > 10.0:
-                                    cache_entry = self._index[chunk_key]
-                                    self._index[chunk_key] = CacheEntry(
-                                        key=cache_entry.key,
-                                        mtime=now,
-                                        cache_key=cache_entry.cache_key,
-                                        start=cache_entry.start,
-                                        size=cache_entry.size,
-                                        tier=cache_entry.tier,
-                                    )
+                                    if now - chunk_ts > 10.0:
+                                        cache_entry = self._index[chunk_key]
+                                        self._index[chunk_key] = CacheEntry(
+                                            key=cache_entry.key,
+                                            mtime=now,
+                                            cache_key=cache_entry.cache_key,
+                                            start=cache_entry.start,
+                                            size=cache_entry.size,
+                                            tier=cache_entry.tier,
+                                        )
 
                     self._metrics.record_hit(needed_len)
 
@@ -874,38 +885,42 @@ class Cache:
                 logger.warning(f"Disk cache write failed: {e}")
                 return
 
+            # Priority 3: _thread_lock guards _index writes so sync readers
+            # (has(), sync_size_snapshot()) see a consistent snapshot without
+            # having to wait on the async _index_lock.
             async with self.locks():
-                prev = self._index.pop(k, None)
+                with self._thread_lock:
+                    prev = self._index.pop(k, None)
 
-                if prev:
-                    self._total_bytes -= prev.size
-                    if prev.tier == "hot":
-                        self._hot_bytes -= prev.size
-                    lst_prev = self._by_path.get(cache_key)
+                    if prev:
+                        self._total_bytes -= prev.size
+                        if prev.tier == "hot":
+                            self._hot_bytes -= prev.size
+                        lst_prev = self._by_path.get(cache_key)
 
-                    if lst_prev:
-                        idx_prev = bisect_right(lst_prev, start) - 1
+                        if lst_prev:
+                            idx_prev = bisect_right(lst_prev, start) - 1
 
-                        if idx_prev >= 0 and lst_prev[idx_prev] == start:
-                            del lst_prev[idx_prev]
+                            if idx_prev >= 0 and lst_prev[idx_prev] == start:
+                                del lst_prev[idx_prev]
 
-                        if not lst_prev:
-                            self._by_path.pop(cache_key, None)
+                            if not lst_prev:
+                                self._by_path.pop(cache_key, None)
 
-                self._index[k] = CacheEntry(
-                    key=k,
-                    cache_key=cache_key,
-                    start=start,
-                    size=need,
-                    mtime=time.time(),
-                    tier=write_tier,
-                )
-                lst = self._by_path.setdefault(cache_key, [])
-                insort(lst, start)
-                self._total_bytes += need
-                if write_tier == "hot":
-                    self._hot_bytes += need
-                self._metrics.record_bytes_written(need)
+                    self._index[k] = CacheEntry(
+                        key=k,
+                        cache_key=cache_key,
+                        start=start,
+                        size=need,
+                        mtime=time.time(),
+                        tier=write_tier,
+                    )
+                    lst = self._by_path.setdefault(cache_key, [])
+                    insort(lst, start)
+                    self._total_bytes += need
+                    if write_tier == "hot":
+                        self._hot_bytes += need
+                    self._metrics.record_bytes_written(need)
 
     def has(self, cache_key: str, start: int, end: int) -> bool:
         """
