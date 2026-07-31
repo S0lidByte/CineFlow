@@ -96,6 +96,7 @@ if TYPE_CHECKING:
 
 class FileHandle(TypedDict):
     inode: pyfuse3.InodeT
+    path: str | None
     last_read_end: int
     subtitle_content: bytes | None
 
