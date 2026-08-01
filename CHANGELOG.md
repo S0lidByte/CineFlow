@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.3](https://github.com/S0lidByte/CineFlow/compare/v1.29.2...v1.29.3) (2026-08-01)
+
+
+### Bug Fixes
+
+* **vfs:** comprehensive VFS audit hardening, stream leak fix, and intro scan classification ([#213](https://github.com/S0lidByte/CineFlow/issues/213)) ([257ccc2](https://github.com/S0lidByte/CineFlow/commit/257ccc2a0af843dff5d94715f03219e00a907195))
+
 ## [1.29.2](https://github.com/S0lidByte/CineFlow/compare/v1.29.1...v1.29.2) (2026-07-30)
 
 
