@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.29.12](https://github.com/S0lidByte/CineFlow/compare/v1.29.11...v1.29.12) (2026-08-01)
+
+
+### Bug Fixes
+
+* **media-analysis:** add fallback wildcard case to match stream statement for Pyright exhaustiveness ([b11c3be](https://github.com/S0lidByte/CineFlow/commit/b11c3be15be9d2d71df02901cb09a3ccb9d7cd1b))
+* **media-analysis:** clean up FFProbeResponse streams type annotation for 100% Pyright CI compliance ([3e82f7f](https://github.com/S0lidByte/CineFlow/commit/3e82f7f0f0aef6bfbf878c4dce42bd465c24eed9))
+* **media-analysis:** eliminate Pyright type warnings and resolve ffprobe stream discriminator validation ([dccb3ff](https://github.com/S0lidByte/CineFlow/commit/dccb3ff4ef3e21ce7340e20af1d3a28198535707))
+* **media-analysis:** pass discriminator directly to Field() to fix Pyright reportUnknownVariableType CI error ([078c021](https://github.com/S0lidByte/CineFlow/commit/078c0217587422f31b7f48ac358e1ef256b8a091))
+* **media-analysis:** remove discriminator from Field() on list type to fix Pydantic schema generation ([5b5b79c](https://github.com/S0lidByte/CineFlow/commit/5b5b79c6c8b4886fe3e8712ca0e8f488f8c40f33))
+* **media-analysis:** resolve FFProbeResponse Pydantic validation errors for missing tags and stream union discriminator ([86babe6](https://github.com/S0lidByte/CineFlow/commit/86babe6874c7ceb7cb8bc1e510f7555960ad2dfa))
+* **media-analysis:** resolve FFProbeResponse Pydantic validation errors for missing tags and stream union discriminator ([7b1fa83](https://github.com/S0lidByte/CineFlow/commit/7b1fa83585684146ee768cc4d498ea7387a4d233))
+* **media-analysis:** resolve Pyright type annotation and ffprobe stream Field discriminator ([88d9fda](https://github.com/S0lidByte/CineFlow/commit/88d9fda9b6922528cffd91b2c03ffcda4b323f4e))
+* **media-analysis:** resolve Pyright type annotation and ffprobe stream Union discriminator ([e722890](https://github.com/S0lidByte/CineFlow/commit/e722890358eb0d0ad7f2db708a6ea833d587f7eb))
+* **media-analysis:** type streams as list[Any] in FFProbeResponse for clean Pyright evaluation ([ee069fc](https://github.com/S0lidByte/CineFlow/commit/ee069fcb0d4dfef347966c22f2867905e54b28c8))
+* **media-analysis:** use default=[] on streams Field to eliminate Pyright list[Unknown] CI warning ([28c31ca](https://github.com/S0lidByte/CineFlow/commit/28c31ca11f5833be84c2df4bd7975239f180c475))
+* resolve PyFuse3 kernel inode lifecycle, read event drop, and cache demotion race conditions ([c791f7a](https://github.com/S0lidByte/CineFlow/commit/c791f7ab3e14c0db5a425efe06922a761bfa5ee3))
+* restore ffprobe discriminated union streams, remove db.py dead comment, clean subdl unused params ([ca7f1a1](https://github.com/S0lidByte/CineFlow/commit/ca7f1a1ce234cdbe3d0ec2b3adbadf08c98503c6))
+
 ## [1.29.11](https://github.com/S0lidByte/CineFlow/compare/v1.29.10...v1.29.11) (2026-08-01)
 
 
