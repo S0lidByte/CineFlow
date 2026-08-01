@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.29.13](https://github.com/S0lidByte/CineFlow/compare/v1.29.12...v1.29.13) (2026-08-01)
+
+
+### Bug Fixes
+
+* **ffprobe:** annotate dict_data as dict[str, Any] in _normalize_stream_codec_types for Pyright compliance ([1ead91c](https://github.com/S0lidByte/CineFlow/commit/1ead91c6a01c23c127adb325597f2d3f58de7797))
+* **ffprobe:** full audit fixes — discriminator fallback, return type, exception chain, default_factory, sample_rate, fps guard, filename preference ([ad24852](https://github.com/S0lidByte/CineFlow/commit/ad248522abea41f971a47bf84e7c8675c3bc1bf2))
+* **ffprobe:** resolve 5 Pyright type errors by using default=[] and explicit list type guards ([e76870a](https://github.com/S0lidByte/CineFlow/commit/e76870a4320f27cacc407585de9350f5dc9ef471))
+* **ffprobe:** return dict_data in _normalize_stream_codec_types for 100% Pyright compliance ([46af85e](https://github.com/S0lidByte/CineFlow/commit/46af85e711026e5cd83cc97678a4d491dccd53f1))
+* **ffprobe:** use typing.cast in _normalize_stream_codec_types for 100% Pyright type safety ([3ae9211](https://github.com/S0lidByte/CineFlow/commit/3ae921124420f716907de772000dc00e160153f1))
+
 ## [1.29.12](https://github.com/S0lidByte/CineFlow/compare/v1.29.11...v1.29.12) (2026-08-01)
 
 
