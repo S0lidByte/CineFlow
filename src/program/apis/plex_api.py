@@ -7,7 +7,7 @@ from plexapi.media import Guid
 from plexapi.myplex import MyPlexAccount
 from plexapi.server import PlexServer
 from plexapi.video import Movie, Show
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 
 from program.settings import settings_manager
 from program.utils.request import SmartSession

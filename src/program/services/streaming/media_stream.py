@@ -6,7 +6,6 @@ from time import monotonic
 from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
-import sniffio
 import trio
 import trio_util
 from kink import di
