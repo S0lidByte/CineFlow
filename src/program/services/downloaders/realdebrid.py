@@ -561,7 +561,7 @@ class RealDebridDownloader(DownloaderBase):
             logger.debug(
                 f"Failed to get torrent info for {torrent_id}: {self._handle_error(response)}"
             )
-            raise RealDebridError(response.data)
+            raise RealDebridError(self._handle_error(response))
 
         torrent_info = RealDebridTorrentInfo.model_validate(response.json())
 

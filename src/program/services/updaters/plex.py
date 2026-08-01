@@ -71,7 +71,8 @@ class PlexUpdater(BaseUpdater):
 
         for section, section_paths in self.sections.items():
             for section_path in section_paths:
-                if path.startswith(section_path):
+                sp_dir = section_path.rstrip("/") + "/"
+                if path == section_path or path.startswith(sp_dir):
                     return self.api.update_section(section, path)
 
         return False

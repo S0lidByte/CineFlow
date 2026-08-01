@@ -20,20 +20,6 @@ TVDBID_REGEX = regex.compile(r"tvdb://(\d+)")
 class GuidModel(BaseModel):
     id: str
 
-    @field_validator("id")
-    @classmethod
-    def validate_id(cls, v: str) -> str:
-        if not any(
-            [
-                v.startswith("imdb://"),
-                v.startswith("tmdb://"),
-                v.startswith("tvdb://"),
-            ]
-        ):
-            raise ValueError(f"Invalid GUID format: {v}")
-
-        return v
-
 
 class PlexAPIError(Exception):
     """Base exception for PlexApi related errors"""
