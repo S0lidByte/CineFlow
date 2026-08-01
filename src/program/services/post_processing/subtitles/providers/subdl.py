@@ -95,7 +95,7 @@ class SubDLProvider(SubtitleProvider):
         language: str = "en",
         tmdb_id: str | None = None,
     ) -> list[SubtitleItem]:
-        del video_hash, file_size, filename, search_tags  # unused by SubDL
+
 
         if not tmdb_id and not imdb_id:
             logger.debug("SubDL search skipped: no TMDB or IMDB ID")

@@ -16,13 +16,6 @@ from program.utils import root_dir
 
 from . import db, db_host, engine_options
 
-# Prom: This is a good place to set the statement timeout for the database when debugging.
-# @event.listens_for(Engine, "connect")
-# def set_statement_timeout(dbapi_connection, connection_record):
-#     cursor = dbapi_connection.cursor()
-#     cursor.execute("SET statement_timeout = 300000")
-#     cursor.close()
-
 # Postgres / network states that usually clear if we wait (crash recovery, boot, brief outages).
 _TRANSIENT_DB_ERROR_MARKERS = (
     "in recovery mode",
