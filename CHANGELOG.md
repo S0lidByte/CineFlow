@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.29.8](https://github.com/S0lidByte/CineFlow/compare/v1.29.7...v1.29.8) (2026-08-01)
+
+
+### Bug Fixes
+
+* resolve 33 backend security, concurrency, and stream deadlock bugs ([a59bae8](https://github.com/S0lidByte/CineFlow/commit/a59bae891367b4963a4ed4433475d97ba1cc7b69))
+* resolve 33 security, stream deadlock, auth, and concurrency bugs ([f816aba](https://github.com/S0lidByte/CineFlow/commit/f816abadc8231bc7b0538eaae2ba7c8684fd3d66))
+
 ## [1.29.7](https://github.com/S0lidByte/CineFlow/compare/v1.29.6...v1.29.7) (2026-08-01)
 
 
