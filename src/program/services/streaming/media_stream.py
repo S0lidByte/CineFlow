@@ -889,11 +889,6 @@ class MediaStream:
 
         await self._wait_until_chunks_ready(chunk_range=chunk_range)
 
-        self._trace_stream(
-            f"Found cache, attempting to read {start}-{end}",
-            hot=True,
-        )
-
         cached_data = await self._read_cache(
             start=start,
             end=end,
@@ -907,7 +902,18 @@ class MediaStream:
 
             return cached_data
 
-        raise CacheDataNotFoundException(range=chunk_range.request_range)
+        # Fallback: if cache read returns empty (e.g. transient cache write delay or eviction),
+        # fetch the requested range directly from the provider HTTP endpoint rather than failing the VFS read.
+        logger.warning(
+            self.build_log_message(
+                f"Cache miss for {start}-{end} after chunk ready; fetching fallback from HTTP"
+            )
+        )
+        return await self._fetch_discrete_byte_range(
+            start=start,
+            size=end - start + 1,
+            should_cache=True,
+        )
 
     @asynccontextmanager
     async def establish_connection(
