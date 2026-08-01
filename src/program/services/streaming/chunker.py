@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass, field
 from functools import cached_property
 
@@ -217,6 +218,9 @@ class ChunkRange:
                 self.footer_chunk.start - 1,
             )
 
+            if chunk_end < chunk_start:
+                continue
+
             chunks.add(
                 Chunk(
                     cache_key=self.cache_key,
@@ -284,9 +288,9 @@ class Chunker:
         self.file_size = file_size
         self.footer_size = footer_size
         self.footer_start = max(0, file_size - footer_size)
-        self.total_chunks_excluding_header_footer = max(
-            0,
-            (self.file_size - self.footer_size - self.header_size) // self.chunk_size,
+        body_bytes = max(0, self.file_size - self.footer_size - self.header_size)
+        self.total_chunks_excluding_header_footer = math.ceil(
+            body_bytes / self.chunk_size
         )
 
     @cached_property

@@ -671,20 +671,21 @@ class Cache:
                         lock_acquire = time.time()
                         async with self.locks():
                             lock_wait_s += time.time() - lock_acquire
-                            if chunk_key in self._index:
-                                cache_entry = self._index[chunk_key]
-                                self._index.move_to_end(chunk_key, last=True)
+                            with self._thread_lock:
+                                if chunk_key in self._index:
+                                    cache_entry = self._index[chunk_key]
+                                    self._index.move_to_end(chunk_key, last=True)
 
-                                now = time.time()
-                                if now - cache_entry.mtime > 10.0:
-                                    self._index[chunk_key] = CacheEntry(
-                                        key=cache_entry.key,
-                                        cache_key=cache_entry.cache_key,
-                                        mtime=now,
-                                        start=cache_entry.start,
-                                        size=cache_entry.size,
-                                        tier=cache_entry.tier,
-                                    )
+                                    now = time.time()
+                                    if now - cache_entry.mtime > 10.0:
+                                        self._index[chunk_key] = CacheEntry(
+                                            key=cache_entry.key,
+                                            cache_key=cache_entry.cache_key,
+                                            mtime=now,
+                                            start=cache_entry.start,
+                                            size=cache_entry.size,
+                                            tier=cache_entry.tier,
+                                        )
 
                     self._metrics.record_hit(needed_len)
 
@@ -784,22 +785,23 @@ class Cache:
                     # Probabilistic LRU: same 10% policy as fast path.
                     if random.random() < 0.1:
                         async with self.locks():
-                            now = time.time()
+                            with self._thread_lock:
+                                now = time.time()
 
-                            for chunk_key, chunk_ts in chunks_used:
-                                if chunk_key in self._index:
-                                    self._index.move_to_end(chunk_key, last=True)
+                                for chunk_key, chunk_ts in chunks_used:
+                                    if chunk_key in self._index:
+                                        self._index.move_to_end(chunk_key, last=True)
 
-                                    if now - chunk_ts > 10.0:
-                                        cache_entry = self._index[chunk_key]
-                                        self._index[chunk_key] = CacheEntry(
-                                            key=cache_entry.key,
-                                            mtime=now,
-                                            cache_key=cache_entry.cache_key,
-                                            start=cache_entry.start,
-                                            size=cache_entry.size,
-                                            tier=cache_entry.tier,
-                                        )
+                                        if now - chunk_ts > 10.0:
+                                            cache_entry = self._index[chunk_key]
+                                            self._index[chunk_key] = CacheEntry(
+                                                key=cache_entry.key,
+                                                mtime=now,
+                                                cache_key=cache_entry.cache_key,
+                                                start=cache_entry.start,
+                                                size=cache_entry.size,
+                                                tier=cache_entry.tier,
+                                            )
 
                     self._metrics.record_hit(needed_len)
 

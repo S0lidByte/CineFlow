@@ -215,15 +215,12 @@ class MediaStream:
         if connection is None:
             return
 
-        token = sniffio.current_async_library_cvar.set("asyncio")
         try:
             await connection.response.aclose()
         except Exception:
             logger.debug(
                 self.build_log_message("Failed to aclose active stream response")
             )
-        finally:
-            sniffio.current_async_library_cvar.reset(token)
 
     def _trace_stream(self, message: str, *, hot: bool = False) -> None:
         """Emit a STREAM log line, optionally sampling high-frequency events."""
@@ -323,6 +320,8 @@ class MediaStream:
             DebridServiceRefusedRangeRequestException,
             DebridServiceClosedConnectionException,
             httpx.ReadError,
+            httpx.TimeoutException,
+            httpx.RemoteProtocolError,
         ) as e:
             logger.exception(
                 self.build_log_message(
