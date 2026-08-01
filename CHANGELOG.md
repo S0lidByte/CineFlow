@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.29.5](https://github.com/S0lidByte/CineFlow/compare/v1.29.4...v1.29.5) (2026-08-01)
+
+
+### Documentation
+
+* fix stream chunk env keys in .env.example ([#218](https://github.com/S0lidByte/CineFlow/issues/218)) ([f4f6aa9](https://github.com/S0lidByte/CineFlow/commit/f4f6aa92fa755f8a7a4097024c94667ed32b9bc2))
+
+## [1.29.4](https://github.com/S0lidByte/CineFlow/compare/v1.29.3...v1.29.4) (2026-08-01)
+
+
+### Bug Fixes
+
+* remove unused CacheDataNotFoundException import ([#216](https://github.com/S0lidByte/CineFlow/issues/216)) ([6f44802](https://github.com/S0lidByte/CineFlow/commit/6f44802b9cb73ae34cb0c4792e72cc0cf6807f2e))
+
+## [1.29.3](https://github.com/S0lidByte/CineFlow/compare/v1.29.2...v1.29.3) (2026-08-01)
+
+
+### Bug Fixes
+
+* **vfs:** comprehensive VFS audit hardening, stream leak fix, and intro scan classification ([#213](https://github.com/S0lidByte/CineFlow/issues/213)) ([257ccc2](https://github.com/S0lidByte/CineFlow/commit/257ccc2a0af843dff5d94715f03219e00a907195))
+
 ## [1.29.2](https://github.com/S0lidByte/CineFlow/compare/v1.29.1...v1.29.2) (2026-07-30)
 
 

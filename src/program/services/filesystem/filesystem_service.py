@@ -128,7 +128,11 @@ class FilesystemService(Runner[FilesystemModel]):
         return True
 
     def has_active_streams(self) -> bool:
-        """True when VFS has open playback streams (Downloader should back off)."""
+        """True when VFS has open sequential playback streams.
+
+        Kept for observability / pool-shed callers. Downloader does not defer
+        on this signal — RD API work does not contend with FUSE/VFS I/O.
+        """
         vfs = self.riven_vfs
         if vfs is None:
             return False
