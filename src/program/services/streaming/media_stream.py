@@ -493,7 +493,7 @@ class MediaStream:
                                 ) in self.recent_reads.current_read.eventual_values(
                                     lambda v: (
                                         v is not None
-                                        and v.read_type in ("body_read", "cache_hit", "general_scan")
+                                        and v.read_type in ("body_read", "cache_hit")
                                     )
                                 ):
                                     if not read:
@@ -572,7 +572,7 @@ class MediaStream:
                                     if (
                                         self.config.prefetch_chunks > 0
                                         and read.read_type
-                                        in ("body_read", "cache_hit", "general_scan")
+                                        in ("body_read", "cache_hit")
                                     ):
                                         _, playhead_end = (
                                             read.chunk_range.request_range
@@ -822,10 +822,10 @@ class MediaStream:
             # or else the stream will not receive the value.
             # Also start on cache_hit when prefetch is enabled so ahead-chunks can fill.
             if (
-                read_type in ("body_read", "cache_hit", "general_scan")
+                read_type in ("body_read", "cache_hit")
                 and not self.is_streaming.value
                 and (
-                    read_type in ("body_read", "general_scan")
+                    read_type == "body_read"
                     or self.config.prefetch_chunks > 0
                 )
             ):
