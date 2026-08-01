@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.4](https://github.com/S0lidByte/CineFlow/compare/v1.29.3...v1.29.4) (2026-08-01)
+
+
+### Bug Fixes
+
+* remove unused CacheDataNotFoundException import ([#216](https://github.com/S0lidByte/CineFlow/issues/216)) ([6f44802](https://github.com/S0lidByte/CineFlow/commit/6f44802b9cb73ae34cb0c4792e72cc0cf6807f2e))
+
 ## [1.29.3](https://github.com/S0lidByte/CineFlow/compare/v1.29.2...v1.29.3) (2026-08-01)
 
 
