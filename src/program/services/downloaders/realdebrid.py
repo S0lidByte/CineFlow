@@ -768,45 +768,42 @@ class RealDebridDownloader(DownloaderBase):
                 timeout=10,
             )
 
-            self._maybe_backoff(response)
-
             if not response.ok:
                 # FIX-10: Cloudflare/gateway HTML error bodies cause JSONDecodeError,
                 # crashing the entire unrestrict_link flow. Gracefully handle non-JSON responses.
+                data = None
                 try:
                     data = RealDebridErrorResponse.model_validate(response.json())
-                except Exception:
+                    if data.error_code == RealDebridErrorCode.FAIR_USAGE_LIMIT:
+                        self._fair_usage_until = time.time() + 300
+                        self._fair_usage_warned = False
+                        self._raise_fair_usage(from_api=True)
+                except (DebridServiceFairUsageLimitException, Exception) as e:
+                    if isinstance(e, DebridServiceFairUsageLimitException):
+                        raise
                     logger.warning(
                         f"Non-JSON error response from RealDebrid unrestrict: "
                         f"HTTP {response.status_code} — treating as transient failure"
                     )
                     return None
 
-                if data.error_code == RealDebridErrorCode.FAIR_USAGE_LIMIT:
-                    # Cache the fair usage limit for 5 minutes (300 seconds)
-                    self._fair_usage_until = time.time() + 300
-                    self._fair_usage_warned = False
+                self._maybe_backoff(response)
 
-                    self._raise_fair_usage(from_api=True)
-                if data.error_code in _PERMANENT_LINK_UNAVAILABLE_CODES:
+                if data:
+                    if data.error_code in _PERMANENT_LINK_UNAVAILABLE_CODES:
+                        logger.warning(
+                            f"Link unavailable: {data.error} [error_code: {data.error_code}]"
+                        )
+                        raise DebridServiceLinkUnavailable(provider=self.key, link=link)
+                    if data.error_code in _TRANSIENT_UNRESTRICT_CODES:
+                        logger.warning(
+                            f"Link temporarily unavailable: {data.error} "
+                            f"[error_code: {data.error_code}]; keeping VFS entry"
+                        )
+                        return None
                     logger.warning(
-                        f"Link unavailable: {data.error} [error_code: {data.error_code}]"
+                        f"Direct unrestrict failed with status {response.status_code}: {data.error} [{data.error_code}]"
                     )
-
-                    raise DebridServiceLinkUnavailable(provider=self.key, link=link)
-                if data.error_code in _TRANSIENT_UNRESTRICT_CODES:
-                    # Do NOT raise LinkUnavailable — that schedules blacklist +
-                    # VFS remove via schedule_dead_link_rescrape. Transient hoster
-                    # / service codes should only fail this open attempt.
-                    logger.warning(
-                        f"Link temporarily unavailable: {data.error} "
-                        f"[error_code: {data.error_code}]; keeping VFS entry"
-                    )
-                    return None
-                logger.warning(
-                    f"Direct unrestrict failed with status {response.status_code}: {data.error} [{data.error_code}]"
-                )
-
                 return None
 
             return UnrestrictedLink.model_validate(response.json())

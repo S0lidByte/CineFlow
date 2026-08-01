@@ -230,10 +230,11 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
                 logger.error(f"Error running {svc.key}: {e}")
                 results_queue.put((svc.key, {}))
 
-        with ThreadPoolExecutor(
+        executor = ThreadPoolExecutor(
             thread_name_prefix="ScraperServiceStreaming_",
             max_workers=max(1, len(self.initialized_services)),
-        ) as executor:
+        )
+        try:
             futures = {
                 executor.submit(run_service_streaming, service, item): service.key
                 for service in self.initialized_services
@@ -280,15 +281,13 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
                         yield (service_name, {})
 
                 except Empty:
-                    # FIX-09: On timeout, cancel all pending futures and shut down
-                    # the executor without blocking. The default context manager
-                    # __exit__ calls shutdown(wait=True), hanging indefinitely if
-                    # a scraper thread is stuck on a network call.
                     logger.warning("Timeout waiting for scraper results — cancelling remaining futures")
                     for future in futures:
                         future.cancel()
-                    executor.shutdown(wait=False, cancel_futures=True)
-                    return
+                    break
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
 
     @staticmethod
     def scrape_cooldown_seconds(scraped_times: int) -> float:

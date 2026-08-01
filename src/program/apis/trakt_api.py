@@ -3,7 +3,7 @@ import re
 import threading
 import time
 from collections.abc import Callable
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, TypeVar, cast
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -174,8 +174,11 @@ class TraktAPI:
             )
 
             if response.ok:
-                raw_json = response.json()
-                data = raw_json if isinstance(raw_json, list) else [raw_json]
+                raw_json: Any = response.json()
+                raw_items = cast(
+                    list[Any],
+                    raw_json if isinstance(raw_json, list) else [raw_json],
+                )
 
                 pagination_page_header = response.headers.get("X-Pagination-Page")
                 pagination_page_count_header = response.headers.get(
@@ -190,11 +193,12 @@ class TraktAPI:
 
                 has_next_page = pagination_page < pagination_page_count
 
-                validated_data = [
-                    validated_item
-                    for item in data
-                    if (validated_item := model_validator(item))
-                ]
+                validated_data: list[DataModel] = []
+                for item in raw_items:
+                    if isinstance(item, dict):
+                        validated_item = model_validator(cast(dict[str, Any], item))
+                        if validated_item is not None:
+                            validated_data.append(validated_item)
 
                 return PaginatedResponse(
                     data=validated_data,
@@ -235,10 +239,13 @@ class TraktAPI:
 
                 if not page_response.has_next_page:
                     break
+
+                page += 1
             except Exception as e:
                 logger.error(f"Error fetching data: {str(e)}")
 
                 break
+
 
         return all_data
 

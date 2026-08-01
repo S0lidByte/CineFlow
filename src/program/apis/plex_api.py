@@ -9,7 +9,6 @@ from plexapi.server import PlexServer
 from plexapi.video import Movie, Show
 from pydantic import BaseModel
 
-from program.settings import settings_manager
 from program.utils.request import SmartSession
 from program.utils.url_sanitizer import sanitize_url_for_logs
 
@@ -76,13 +75,13 @@ class PlexAPI:
     def ratingkey_to_imdbid(self, ratingKey: str) -> str | None:
         """Convert Plex rating key to IMDb ID"""
 
-        token = settings_manager.settings.updaters.plex.token
         filter_params = (
             "includeGuids=1&includeFields=guid,title,year&includeElements=Guid"
         )
-        url = f"https://metadata.provider.plex.tv/library/metadata/{ratingKey}?X-Plex-Token={token}&{filter_params}"
+        url = f"{self.BASE_URL}/library/metadata/{ratingKey}?X-Plex-Token={self.token}&{filter_params}"
 
         response = self.session.get(url, headers={"Accept": "application/json"})
+
 
         class ResponseData(BaseModel):
             class MediaContainerModel(BaseModel):

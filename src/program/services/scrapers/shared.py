@@ -685,18 +685,27 @@ def _accumulate_ranked_torrents(
                 not manual
                 and torrent.data.episodes
                 and not torrent.data.seasons
-                and len(item.seasons) == 1
-                and not all(
-                    episode.number in torrent.data.episodes
-                    for episode in item.seasons[0].episodes
-                )
             ):
-                logger.trace(
-                    f"Skipping torrent with incorrect number of episodes for {item.log_string}: {raw_title}"
-                )
-                if funnel is not None:
-                    funnel.record_content_filter()
-                continue
+                if len(item.seasons) == 1:
+                    if not all(
+                        episode.number in torrent.data.episodes
+                        for episode in item.seasons[0].episodes
+                    ):
+                        logger.trace(
+                            f"Skipping torrent with incorrect number of episodes for {item.log_string}: {raw_title}"
+                        )
+                        if funnel is not None:
+                            funnel.record_content_filter()
+                        continue
+                else:
+                    # Multi-season show: a seasonless episode pack cannot cover all seasons
+                    logger.trace(
+                        f"Skipping seasonless episode pack for multi-season show {item.log_string}: {raw_title}"
+                    )
+                    if funnel is not None:
+                        funnel.record_content_filter()
+                    continue
+
 
         if isinstance(item, Season):
             if (

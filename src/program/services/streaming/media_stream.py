@@ -17,7 +17,7 @@ from program.utils import benchmark
 from program.utils.async_client import AsyncClient
 from program.utils.proxy_client import ProxyClient
 
-from .chunker import Chunk, ChunkCacheNotifier, Chunker, ChunkRange
+from .chunker import Chunk, Chunker, ChunkRange
 from .config import Config
 from .exceptions import (
     ByteLengthMismatchException,
