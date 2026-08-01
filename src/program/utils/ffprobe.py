@@ -50,15 +50,15 @@ class FFProbeMediaMetadata(BaseModel):
         default=0.0,
         description="Duration of the video in seconds",
     )
-    format: list[str] = Field(default_factory=list, description="Format of the video")
+    format: list[str] = Field(default=[], description="Format of the video")
     bitrate: int = Field(
         default=0, description="Bitrate of the video in bits per second"
     )
     audio: list[FFProbeAudioTrack] = Field(
-        default_factory=list, description="Audio tracks in the video"
+        default=[], description="Audio tracks in the video"
     )
     subtitles: list[FFProbeSubtitleTrack] = Field(
-        default_factory=list, description="Subtitles in the video"
+        default=[], description="Subtitles in the video"
     )
 
     @property
@@ -138,7 +138,6 @@ class FFProbeOtherStream(FFProbeBaseStream):
     codec_type: Literal["other"] = "other"
 
 
-
 class FFProbeFormat(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -182,7 +181,7 @@ class FFProbeResponse(BaseModel):
         | FFProbeDataStream
         | FFProbeAttachmentStream
         | FFProbeOtherStream
-    ] = Field(default_factory=list)
+    ] = Field(default=[])
 
     format: FFProbeFormat
 
@@ -196,8 +195,9 @@ class FFProbeResponse(BaseModel):
         the entire response when any single stream has an unrecognised type.
         """
         _known = frozenset({"video", "audio", "subtitle", "data", "attachment"})
-        if isinstance(data, dict) and "streams" in data:
-            for stream in data["streams"]:
+        if isinstance(data, dict) and "streams" in data and isinstance(data["streams"], list):
+            raw_streams: list[Any] = data["streams"]
+            for stream in raw_streams:
                 if isinstance(stream, dict) and stream.get("codec_type") not in _known:
                     stream["codec_type"] = "other"
         return data
