@@ -3,7 +3,7 @@ from fractions import Fraction
 from typing import Any, ClassVar, Literal
 
 import orjson
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class FFProbeVideoTrack(BaseModel):
@@ -50,15 +50,15 @@ class FFProbeMediaMetadata(BaseModel):
         default=0.0,
         description="Duration of the video in seconds",
     )
-    format: list[str] = Field(default=[], description="Format of the video")
+    format: list[str] = Field(default_factory=list, description="Format of the video")
     bitrate: int = Field(
         default=0, description="Bitrate of the video in bits per second"
     )
     audio: list[FFProbeAudioTrack] = Field(
-        default=[], description="Audio tracks in the video"
+        default_factory=list, description="Audio tracks in the video"
     )
     subtitles: list[FFProbeSubtitleTrack] = Field(
-        default=[], description="Subtitles in the video"
+        default_factory=list, description="Subtitles in the video"
     )
 
     @property
@@ -87,7 +87,7 @@ class FFProbeBaseStream(BaseModel):
 
     index: int = 0
     codec_name: str | None = ""
-    r_frame_rate: str | None = "0/0"
+    r_frame_rate: str | None = "0/1"
 
     @property
     def fps(self) -> float:
@@ -96,7 +96,7 @@ class FFProbeBaseStream(BaseModel):
             return 0.0
         try:
             return float(Fraction(self.r_frame_rate))
-        except (ZeroDivisionError, ValueError, Exception):
+        except (ZeroDivisionError, ValueError):
             return 0.0
 
 
@@ -113,7 +113,7 @@ class FFProbeVideoStream(FFProbeBaseStream):
 class FFProbeAudioStream(FFProbeBaseStream, FFProbeTagsMixin):
     codec_type: Literal["audio"] = "audio"
     channels: int = 0
-    sample_rate: int | str = 0
+    sample_rate: int = 0
 
     @field_validator("sample_rate", mode="before")
     @classmethod
@@ -182,9 +182,25 @@ class FFProbeResponse(BaseModel):
         | FFProbeDataStream
         | FFProbeAttachmentStream
         | FFProbeOtherStream
-    ] = Field(default=[])
+    ] = Field(default_factory=list)
 
     format: FFProbeFormat
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_stream_codec_types(cls, data: Any) -> Any:
+        """Remap unknown codec_type values to 'other' so all union arms resolve.
+
+        ffprobe may emit non-standard codec_type strings (e.g. 'timedtext',
+        'mjpeg_thumbnail').  Without this, Pydantic raises ValidationError for
+        the entire response when any single stream has an unrecognised type.
+        """
+        _known = frozenset({"video", "audio", "subtitle", "data", "attachment"})
+        if isinstance(data, dict) and "streams" in data:
+            for stream in data["streams"]:
+                if isinstance(stream, dict) and stream.get("codec_type") not in _known:
+                    stream["codec_type"] = "other"
+        return data
 
 
 def extract_filename_from_url(download_url: str) -> str:
@@ -206,7 +222,7 @@ def extract_filename_from_url(download_url: str) -> str:
     return unquote(raw_name, encoding="utf-8", errors="replace")
 
 
-def parse_media_url(url: str) -> FFProbeMediaMetadata | None:
+def parse_media_url(url: str) -> FFProbeMediaMetadata:
     """
     Parse a media file using ffprobe and return its metadata.
 
@@ -214,12 +230,13 @@ def parse_media_url(url: str) -> FFProbeMediaMetadata | None:
         url: URL of the media file
 
     Returns:
-        MediaMetadata object
+        FFProbeMediaMetadata populated with video, audio, subtitle tracks and
+        format info extracted from the probed URL.
 
     Raises:
-        FileNotFoundError: If the file doesn't exist
-        subprocess.CalledProcessError: If ffprobe returns an error
-        ValueError: If an unexpected error occurs while parsing the file
+        RuntimeError: If ffprobe exits with a non-zero status.
+        ValueError: If the URL is empty, JSON parsing fails, or stream
+            processing encounters an unexpected error.
     """
 
     if not url:
@@ -272,13 +289,15 @@ def parse_media_url(url: str) -> FFProbeMediaMetadata | None:
                 f"Failed to parse ffprobe JSON output for {url}: {exc}"
             ) from exc
 
-        if not probe_data:
-            raise ValueError(f"ffprobe returned no data for {url}")
+        # probe_data is always a valid FFProbeResponse here (Pydantic raises
+        # on bad JSON, never returns a falsy model instance).
 
         format_info = probe_data.format
 
         metadata = FFProbeMediaMetadata(
-            filename=extract_filename_from_url(url),
+            # Prefer the filename ffprobe resolved from the stream; fall back
+            # to the URL path segment when the CDN URL is opaque.
+            filename=format_info.filename or extract_filename_from_url(url),
             file_size=int(format_info.size),
             duration=round(float(format_info.duration), 2),
             format=(
@@ -306,9 +325,7 @@ def parse_media_url(url: str) -> FFProbeMediaMetadata | None:
                         FFProbeAudioTrack(
                             codec=stream.codec_name or "",
                             channels=stream.channels,
-                            sample_rate=int(stream.sample_rate)
-                            if isinstance(stream.sample_rate, (int, float))
-                            else 0,
+                            sample_rate=stream.sample_rate,
                             language=stream.tags.language
                             if stream.tags and stream.tags.language
                             else "",
@@ -327,9 +344,7 @@ def parse_media_url(url: str) -> FFProbeMediaMetadata | None:
                     pass
 
         return metadata
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"ffprobe error: {e}")
     except Exception as e:
-        raise ValueError(f"Unexpected error during ffprobe of {url}: {e}")
+        raise ValueError(f"Unexpected error during ffprobe of {url}: {e}") from e
 
 

@@ -114,8 +114,8 @@ class MediaAnalysisService(AnalysisService):
         Analyze media file with ffprobe and update MediaMetadata.
 
         Args:
-            file_path: Full path to the media file
-            item: MediaItem being analyzed
+            playback_url: Validated CDN URL to probe with ffprobe.
+            item: MediaItem being analyzed.
 
         Returns:
             True if metadata was updated, False otherwise
@@ -128,39 +128,39 @@ class MediaAnalysisService(AnalysisService):
                 )
                 return False
 
-            if ffprobe_metadata := parse_media_url(playback_url):
-                media_entry = item.media_entry
+            ffprobe_metadata = parse_media_url(playback_url)
+            media_entry = item.media_entry
 
-                assert media_entry
+            if not media_entry:
+                logger.warning(
+                    f"Media entry unavailable for {item.log_string} after ffprobe"
+                )
+                return False
 
-                # Get or create MediaMetadata
-                if media_entry.media_metadata:
-                    # Update existing metadata with probed data
-                    metadata = media_entry.media_metadata
-                    metadata.update_from_probed_data(ffprobe_metadata)
-                else:
-                    # Create new metadata from probed data only
-                    # This shouldn't happen since downloader creates it, but handle it anyway
-                    logger.warning(
-                        f"No existing metadata for {item.log_string}, creating from probed data only"
-                    )
+            # Get or create MediaMetadata
+            if media_entry.media_metadata:
+                # Update existing metadata with probed data
+                metadata = media_entry.media_metadata
+                metadata.update_from_probed_data(ffprobe_metadata)
+            else:
+                # Create new metadata from probed data only
+                # This shouldn't happen since downloader creates it, but handle it anyway
+                logger.warning(
+                    f"No existing metadata for {item.log_string}, creating from probed data only"
+                )
 
-                    metadata = MediaMetadata(
-                        filename=ffprobe_metadata.filename,
-                        data_source=DataSource.PROBED,
-                    )
-                    metadata.update_from_probed_data(ffprobe_metadata)
+                metadata = MediaMetadata(
+                    filename=ffprobe_metadata.filename,
+                    data_source=DataSource.PROBED,
+                )
+                metadata.update_from_probed_data(ffprobe_metadata)
 
-                # Store updated metadata
-                media_entry.media_metadata = metadata
+            # Store updated metadata
+            media_entry.media_metadata = metadata
 
-                logger.debug(f"ffprobe analysis successful for {item.log_string}")
+            logger.debug(f"ffprobe analysis successful for {item.log_string}")
 
-                return True
-
-            logger.warning(f"ffprobe returned no data for {item.log_string}")
-
-            return False
+            return True
         except Exception:
             logger.error(
                 f"FFprobe analysis failed for {item.log_string}: {traceback.format_exc()}"
