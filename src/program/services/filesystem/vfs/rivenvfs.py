@@ -928,14 +928,10 @@ class RivenVFS(pyfuse3.Operations):
         except Exception:
             current_profile_hash = None
 
-        # Skip re-matching if profiles haven't changed
-        if (
+        skip_rematch = (
             current_profile_hash is not None
             and current_profile_hash == self._last_profile_hash
-        ):
-            logger.debug("Library profiles unchanged, skipping re-matching")
-            return
-
+        )
         self._last_profile_hash = current_profile_hash
 
         matcher = LibraryProfileMatcher()
@@ -959,22 +955,25 @@ class RivenVFS(pyfuse3.Operations):
                     )
                     continue
 
-                # Re-match library profiles based on current settings
-                new_profiles = matcher.get_matching_profiles(item)
-                old_profiles = entry.library_profiles or []
+                if not skip_rematch:
+                    # Re-match library profiles based on current settings
+                    new_profiles = matcher.get_matching_profiles(item)
+                    old_profiles = entry.library_profiles or []
 
-                # Update if profiles changed
-                if set(new_profiles) != set(old_profiles):
-                    entry.library_profiles = new_profiles
-                    rematched_count += 1
+                    # Update if profiles changed
+                    if set(new_profiles) != set(old_profiles):
+                        entry.library_profiles = new_profiles
+                        rematched_count += 1
 
                 # Store item ID for later registration (avoid duplicates)
                 if item.id not in item_ids:
                     item_ids.append(item.id)
 
-            session.commit()
+            if rematched_count > 0:
+                session.commit()
 
             logger.debug(f"Re-matched {rematched_count} entries with updated profiles")
+
 
         # Step 2: Clear VFS tree and rebuild from scratch.
         # M-4: Preserve inodes currently held by open file handles so in-progress

@@ -137,14 +137,13 @@ def test_validate_identical_refresh_after_connect_error_raises_link_unavailable(
             cdn.validate()
 
 
-def test_refresh_identical_host_schedules_rescrape():
-    """Same NXDOMAIN host with a new path must mark dead + re-scrape, not loop."""
+def test_refresh_identical_url_schedules_rescrape():
+    """Identical URL returned from refresh must mark link dead + schedule re-scrape."""
     dead = "https://109-4.download.real-debrid.com/d/DEAD/file.mkv"
-    same_host = "https://109-4.download.real-debrid.com/d/NEWTOKEN/file.mkv"
     cdn = _cdn_with_url(dead)
 
     vfs_db = MagicMock()
-    vfs_db.refresh_unrestricted_url.return_value = same_host
+    vfs_db.refresh_unrestricted_url.return_value = dead
     vfs_db.schedule_dead_link_rescrape.return_value = True
 
     session = MagicMock()
@@ -165,6 +164,32 @@ def test_refresh_identical_host_schedules_rescrape():
         entry=cdn.entry,
         session=session,
     )
+
+
+def test_refresh_same_host_new_token_returns_new_url():
+    """Fresh URL on the same CDN host is valid and must be returned."""
+    dead = "https://109-4.download.real-debrid.com/d/DEAD/file.mkv"
+    same_host = "https://109-4.download.real-debrid.com/d/NEWTOKEN/file.mkv"
+    cdn = _cdn_with_url(dead)
+
+    vfs_db = MagicMock()
+    vfs_db.refresh_unrestricted_url.return_value = same_host
+
+    session = MagicMock()
+    session.merge.return_value = cdn.entry
+    session_cm = MagicMock()
+    session_cm.__enter__.return_value = session
+    session_cm.__exit__.return_value = None
+
+    with (
+        patch("program.utils.debrid_cdn_url.db_session", return_value=session_cm),
+        patch("program.utils.debrid_cdn_url.di") as mock_di,
+    ):
+        mock_di.__getitem__.return_value = vfs_db
+        result = cdn._refresh()
+        assert result == same_host
+        assert cdn.url == same_host
+
 
 
 def test_refresh_different_host_returns_new_url():

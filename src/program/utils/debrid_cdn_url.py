@@ -423,7 +423,7 @@ class DebridCDNUrl:
 
                 return None
 
-            if self._cdn_hosts_equivalent(url, self.url):
+            if url == self.url:
                 logger.warning(
                     f"CDN refresh returned identical/dead host for {self.filename}; "
                     f"marking link dead and scheduling re-scrape"
@@ -433,6 +433,7 @@ class DebridCDNUrl:
                     session=session,
                 )
                 raise RefreshedURLIdenticalException
+
 
             self.url = url
 
