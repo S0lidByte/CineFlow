@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.6](https://github.com/S0lidByte/CineFlow/compare/v1.29.5...v1.29.6) (2026-08-01)
+
+
+### Bug Fixes
+
+* **downloaders:** stop deferring RD downloads on VFS playback ([#220](https://github.com/S0lidByte/CineFlow/issues/220)) ([8068dd8](https://github.com/S0lidByte/CineFlow/commit/8068dd896616789b0de88901cfeaf73dd854436a))
+
 ## [1.29.5](https://github.com/S0lidByte/CineFlow/compare/v1.29.4...v1.29.5) (2026-08-01)
 
 
