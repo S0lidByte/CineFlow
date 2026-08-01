@@ -493,7 +493,7 @@ class MediaStream:
                                 ) in self.recent_reads.current_read.eventual_values(
                                     lambda v: (
                                         v is not None
-                                        and v.read_type in ("body_read", "cache_hit")
+                                        and v.read_type in ("body_read", "cache_hit", "general_scan")
                                     )
                                 ):
                                     if not read:
@@ -572,7 +572,7 @@ class MediaStream:
                                     if (
                                         self.config.prefetch_chunks > 0
                                         and read.read_type
-                                        in ("body_read", "cache_hit")
+                                        in ("body_read", "cache_hit", "general_scan")
                                     ):
                                         _, playhead_end = (
                                             read.chunk_range.request_range
