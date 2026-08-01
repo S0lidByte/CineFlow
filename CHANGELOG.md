@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.29.7](https://github.com/S0lidByte/CineFlow/compare/v1.29.6...v1.29.7) (2026-08-01)
+
+
+### Bug Fixes
+
+* **core:** resolve GuidModel validation crash, response.data AttributeError, and Plex section path matching ([81d7d68](https://github.com/S0lidByte/CineFlow/commit/81d7d6855b94206285f9b25cfc89f7e69026bfc1))
+* **lint:** remove unused field_validator and sniffio imports caught by pyright CI ([90a056c](https://github.com/S0lidByte/CineFlow/commit/90a056cf8bbd7174b3c5bf857ae396ecf68bf4eb))
+* **plex:** check validate_account return value and probe /account endpoint for accurate token verification ([ccc137f](https://github.com/S0lidByte/CineFlow/commit/ccc137fcfb395e7038bb30cc7fccd548b00a08ab))
+
 ## [1.29.6](https://github.com/S0lidByte/CineFlow/compare/v1.29.5...v1.29.6) (2026-08-01)
 
 
