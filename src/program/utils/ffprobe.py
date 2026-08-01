@@ -175,9 +175,7 @@ class FFProbeResponse(BaseModel):
     OtherStream: ClassVar[Any] = FFProbeOtherStream
     Format: ClassVar[Any] = FFProbeFormat
 
-    streams: list[Any] = Field(
-        default_factory=list, discriminator="codec_type"
-    )
+    streams: list[Any] = Field(default_factory=list)
 
     format: FFProbeFormat
 
