@@ -82,7 +82,7 @@ class PlexAPI:
         )
         url = f"https://metadata.provider.plex.tv/library/metadata/{ratingKey}?X-Plex-Token={token}&{filter_params}"
 
-        response = self.session.get(url)
+        response = self.session.get(url, headers={"Accept": "application/json"})
 
         class ResponseData(BaseModel):
             class MediaContainerModel(BaseModel):
@@ -94,7 +94,11 @@ class PlexAPI:
             MediaContainer: MediaContainerModel
 
         if response.ok:
-            data = ResponseData.model_validate(response.json())
+            try:
+                data = ResponseData.model_validate(response.json())
+            except (ValueError, Exception) as e:
+                logger.warning(f"Failed to parse JSON response for rating key {ratingKey}: {e}")
+                return None
 
             if not data.MediaContainer.Metadata:
                 logger.debug(f"No metadata found for rating key: {ratingKey}")

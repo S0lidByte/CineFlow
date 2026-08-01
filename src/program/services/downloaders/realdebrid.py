@@ -771,7 +771,16 @@ class RealDebridDownloader(DownloaderBase):
             self._maybe_backoff(response)
 
             if not response.ok:
-                data = RealDebridErrorResponse.model_validate(response.json())
+                # FIX-10: Cloudflare/gateway HTML error bodies cause JSONDecodeError,
+                # crashing the entire unrestrict_link flow. Gracefully handle non-JSON responses.
+                try:
+                    data = RealDebridErrorResponse.model_validate(response.json())
+                except Exception:
+                    logger.warning(
+                        f"Non-JSON error response from RealDebrid unrestrict: "
+                        f"HTTP {response.status_code} — treating as transient failure"
+                    )
+                    return None
 
                 if data.error_code == RealDebridErrorCode.FAIR_USAGE_LIMIT:
                     # Cache the fair usage limit for 5 minutes (300 seconds)

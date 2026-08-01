@@ -275,7 +275,7 @@ class ProgramScheduler:
                 return
 
             if task.task_type in ("reindex_show", "reindex", "reindex_movie"):
-                self._run_reindex_for_item(session, item)
+                self._run_reindex_for_item(item)
             else:
                 self._enqueue_item_if_needed(session, item)
 
@@ -307,24 +307,19 @@ class ProgramScheduler:
 
         return session.merge(item)
 
-    def _run_reindex_for_item(self, session: Session, item: MediaItem) -> None:
-        """Run indexer service for an item if available and persist updates."""
+    def _run_reindex_for_item(self, item: MediaItem) -> None:
+        """Enqueue a reindex event for item via the EventManager.
+
+        FIX-08: The previous implementation ran indexer_service.run() synchronously
+        inside the scheduler's active DB session, which caused nested commits,
+        detached instances, and SQLAlchemyError corruptions. Enqueuing via the
+        EventManager ensures the indexer runs in its own isolated session managed
+        by the standard pipeline.
+        """
 
         assert self.program.services, "Services not initialized in Program"
-
-        indexer_service = self.program.services.indexer
-
-        updated = next(indexer_service.run(item, log_msg=False), None)
-
-        if updated:
-            # Indexed Show graphs include detached Season/Episode children.
-            # Suppress autoflush during merge to avoid SAWarnings and skipped
-            # relationship adds (same pattern as IndexerService.reindex_ongoing).
-            with session.no_autoflush:
-                session.merge(updated.media_items[0])
-            session.commit()
-
-            logger.info(f"Reindexed {item.log_string} from scheduler")
+        self.program.em.add_event(Event(emitted_by="Scheduler", item_id=item.id))
+        logger.info(f"Enqueued reindex for {item.log_string} from scheduler")
 
     def _enqueue_item_if_needed(self, session: Session, item: MediaItem) -> None:
         """Refresh state and enqueue item to the event manager if not completed."""
@@ -381,7 +376,13 @@ class ProgramScheduler:
         task_type: str,
         now: datetime,
     ) -> bool:
-        """Return True if a pending future task of this type already exists for item."""
+        """Return True if a pending task of this type already exists for item.
+
+        FIX-07: Removed the `scheduled_for >= now` predicate. Negative offsets
+        (pre-pull scheduling) produce a run_at in the past, which incorrectly
+        caused the guard to return False and duplicate tasks to be scheduled
+        every monitoring cycle. Checking Pending status alone is sufficient.
+        """
 
         existing = (
             session.execute(
@@ -389,7 +390,6 @@ class ProgramScheduler:
                 .where(ScheduledTask.item_id == item_id)
                 .where(ScheduledTask.task_type == task_type)
                 .where(ScheduledTask.status == ScheduledStatus.Pending)
-                .where(ScheduledTask.scheduled_for >= now)
                 .limit(1)
             )
             .scalars()

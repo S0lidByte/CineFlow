@@ -146,7 +146,7 @@ def create_database_if_not_exists():
 
         with temp_db.engine.connect() as connection:
             connection.execution_options(isolation_level="AUTOCOMMIT").execute(
-                text(f"CREATE DATABASE {db_name}")
+                text(f'CREATE DATABASE "{db_name}"')
             )
 
         return True

@@ -509,12 +509,15 @@ class Program(threading.Thread):
         if not self.initialized:
             return
 
+        self.initialized = False
         self.scheduler_manager.stop()
 
         if self.services:
             self.services.filesystem.close()
 
+        self.em.shutdown(wait=False)
         logger.log("PROGRAM", "Riven has been stopped.")
+
 
 
 riven = Program()

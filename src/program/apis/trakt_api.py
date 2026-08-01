@@ -174,11 +174,8 @@ class TraktAPI:
             )
 
             if response.ok:
-                data = (
-                    response.json()
-                    if isinstance(response.json(), list)
-                    else [response.json()]
-                )
+                raw_json = response.json()
+                data = raw_json if isinstance(raw_json, list) else [raw_json]
 
                 pagination_page_header = response.headers.get("X-Pagination-Page")
                 pagination_page_count_header = response.headers.get(

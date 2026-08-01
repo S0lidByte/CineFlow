@@ -280,8 +280,15 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
                         yield (service_name, {})
 
                 except Empty:
-                    logger.warning("Timeout waiting for scraper results")
-                    break
+                    # FIX-09: On timeout, cancel all pending futures and shut down
+                    # the executor without blocking. The default context manager
+                    # __exit__ calls shutdown(wait=True), hanging indefinitely if
+                    # a scraper thread is stuck on a network call.
+                    logger.warning("Timeout waiting for scraper results — cancelling remaining futures")
+                    for future in futures:
+                        future.cancel()
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    return
 
     @staticmethod
     def scrape_cooldown_seconds(scraped_times: int) -> float:

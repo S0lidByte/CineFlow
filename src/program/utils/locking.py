@@ -56,3 +56,6 @@ class ItemLock:
             lock = cls._locks[item_id]
             if lock.locked():
                 lock.release()
+            # FIX-23: Remove lock from memory if no longer locked to avoid dictionary growth leak
+            if not lock.locked():
+                cls._locks.pop(item_id, None)

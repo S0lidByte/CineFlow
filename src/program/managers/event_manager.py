@@ -112,6 +112,15 @@ class EventManager:
 
         return _executor
 
+    def shutdown(self, wait: bool = False) -> None:
+        """Shut down all service thread pool executors cleanly."""
+        with self.mutex:
+            for service_executor in self._executors:
+                logger.debug(f"Shutting down executor for {service_executor.service_name}")
+                service_executor.executor.shutdown(wait=wait, cancel_futures=True)
+            self._executors.clear()
+
+
     def _process_future(self, future_with_event: FutureWithEvent, service: Service):
         """
         Processes the result of a future once it is completed.
@@ -333,7 +342,11 @@ class EventManager:
             item (MediaItem): The event item to remove from the queue.
         """
 
-        for event in self._queued_events:
+        # Iterate over a shallow copy to avoid RuntimeError when remove_event_from_queue
+        # mutates the list during iteration (FIX-02).
+        with self.mutex:
+            snapshot = list(self._queued_events)
+        for event in snapshot:
             if event.item_id == item_id:
                 self.remove_event_from_queue(event)
 
@@ -357,7 +370,11 @@ class EventManager:
             item (MediaItem): The event item to remove from the running events.
         """
 
-        for event in self._running_events:
+        # Iterate over a shallow copy to avoid RuntimeError when remove_event_from_running
+        # mutates the list during iteration (FIX-02).
+        with self.mutex:
+            snapshot = list(self._running_events)
+        for event in snapshot:
             if event.item_id == item_id:
                 self.remove_event_from_running(event)
 
@@ -565,7 +582,9 @@ class EventManager:
             bool: True if the item is in the queue, False otherwise.
         """
 
-        return any(event.item_id == _id for event in self._queued_events)
+        # Guard with mutex to prevent RuntimeError from concurrent modifications (FIX-01).
+        with self.mutex:
+            return any(event.item_id == _id for event in self._queued_events)
 
     def queue_depth(self) -> int:
         """Return the number of events waiting in the queue."""
@@ -594,7 +613,9 @@ class EventManager:
             bool: True if the item is in the running events, False otherwise.
         """
 
-        return any(event.item_id == _id for event in self._running_events)
+        # Guard with mutex to prevent RuntimeError from concurrent modifications (FIX-01).
+        with self.mutex:
+            return any(event.item_id == _id for event in self._running_events)
 
     def add_event(self, event: Event) -> bool:
         """
@@ -618,13 +639,26 @@ class EventManager:
                 item_id, related_ids = db_functions.get_item_ids(session, event.item_id)
 
         if item_id:
-            if self._id_in_queue(item_id):
-                logger.debug(f"Item ID {item_id} is already in the queue, skipping.")
-                return False
+            # FIX-18: If item is already queued, check if the new event has an earlier run_at
+            # (e.g., forced immediate run vs backoff). Update the existing event's run_at instead of dropping.
+            with self.mutex:
+                for queued_event in self._queued_events:
+                    if queued_event.item_id == item_id:
+                        if event.run_at < queued_event.run_at:
+                            logger.debug(
+                                f"Item ID {item_id} is already queued; updating run_at from {queued_event.run_at} to {event.run_at}"
+                            )
+                            queued_event.run_at = event.run_at
+                            if event.overrides:
+                                queued_event.overrides = event.overrides
+                        else:
+                            logger.debug(f"Item ID {item_id} is already in the queue, skipping.")
+                        return False
 
             if self._id_in_running_events(item_id):
                 logger.debug(f"Item ID {item_id} is already running, skipping.")
                 return False
+
 
             for related_id in related_ids:
                 if self._id_in_queue(related_id) or self._id_in_running_events(
@@ -696,7 +730,9 @@ class EventManager:
             dict[str, list[int]]: A dictionary with the event types as keys and a list of item IDs as values.
         """
 
-        events = [future.event for future in self._futures if future.event]
+        # Snapshot under mutex to avoid RuntimeError if _futures is modified concurrently (FIX-01).
+        with self.mutex:
+            events = [future.event for future in self._futures if future.event]
         event_types = [
             "Scraping",
             "Downloader",
@@ -744,7 +780,11 @@ class EventManager:
         if not (item_id or tmdb_id or tvdb_id or imdb_id):
             return False
 
-        for ev in queue:
+        # Snapshot under mutex so iteration is safe from concurrent appends/removes (FIX-01).
+        with self.mutex:
+            snapshot = list(queue)
+
+        for ev in snapshot:
             if item_id and ev.item_id == item_id:
                 return True
 

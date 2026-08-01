@@ -1124,6 +1124,18 @@ class RivenVFS(pyfuse3.Operations):
 
         logger.debug(f"Individual sync: re-registering item {item.id}")
 
+        # FIX-21: Preserve inodes currently pinned by open file handles so active
+        # media streams do not receive ENOENT if individual sync runs during playback.
+        with self._tree_lock:
+            pinned_inodes = {
+                int(h["inode"]) for h in self._file_handles.values() if h.get("inode")
+            }
+            pinned_nodes = {
+                inode: node
+                for inode, node in self._inode_to_node.items()
+                if inode in pinned_inodes
+            }
+
         # Check if item is already in a session
         existing_session = object_session(item)
 
@@ -1157,10 +1169,17 @@ class RivenVFS(pyfuse3.Operations):
                 self.add(fresh_item)
                 session.commit()
 
+        # Re-insert pinned nodes if they were removed during step 1
+        with self._tree_lock:
+            for inode, node in pinned_nodes.items():
+                if inode not in self._inode_to_node:
+                    self._inode_to_node[inode] = node
+
         # Flush parent invalidations collected during re-add (same path as full sync).
         self._flush_pending_invalidations()
 
         logger.debug(f"Individual sync complete for item {item.id}")
+
 
     def _ensure_library_profile_directories(self) -> None:
         """
