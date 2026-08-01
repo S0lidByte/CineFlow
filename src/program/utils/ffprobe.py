@@ -195,11 +195,13 @@ class FFProbeResponse(BaseModel):
         the entire response when any single stream has an unrecognised type.
         """
         _known = frozenset({"video", "audio", "subtitle", "data", "attachment"})
-        if isinstance(data, dict) and "streams" in data and isinstance(data["streams"], list):
-            raw_streams: list[Any] = data["streams"]
-            for stream in raw_streams:
-                if isinstance(stream, dict) and stream.get("codec_type") not in _known:
-                    stream["codec_type"] = "other"
+        if isinstance(data, dict):
+            dict_data: dict[str, Any] = data
+            streams = dict_data.get("streams")
+            if isinstance(streams, list):
+                for stream in streams:
+                    if isinstance(stream, dict) and stream.get("codec_type") not in _known:
+                        stream["codec_type"] = "other"
         return data
 
 
