@@ -438,10 +438,13 @@ class Cache:
         try:
             os.replace(src, dst)
         except OSError:
-            # Cross-device (tmpfs → disk): copy then unlink.
-            with src.open("rb") as rf, dst.open("wb") as wf:
+            # Cross-device (tmpfs → disk): copy to .tmp then replace atomically
+            tmp_dst = dst.with_suffix(dst.suffix + ".tmp")
+            with src.open("rb") as rf, tmp_dst.open("wb") as wf:
                 wf.write(rf.read())
+            os.replace(tmp_dst, dst)
             src.unlink(missing_ok=True)
+
 
     def _demote_files_to_warm(self, key: str) -> None:
         """Move payload + metadata from hot to warm on disk."""
