@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.14](https://github.com/S0lidByte/CineFlow/compare/v1.29.13...v1.29.14) (2026-08-01)
+
+
+### Bug Fixes
+
+* **media-stream:** remove general_scan from starting self.run to eliminate duplicate HTTP connections during discrete scans ([4f100b4](https://github.com/S0lidByte/CineFlow/commit/4f100b48390c61bd672de7a01474ac8b0bc0ce62))
+
 ## [1.29.13](https://github.com/S0lidByte/CineFlow/compare/v1.29.12...v1.29.13) (2026-08-01)
 
 
