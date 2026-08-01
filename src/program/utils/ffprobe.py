@@ -1,6 +1,6 @@
 import subprocess
 from fractions import Fraction
-from typing import Any, ClassVar, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
 import orjson
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -135,7 +135,8 @@ class FFProbeAttachmentStream(FFProbeBaseStream, FFProbeTagsMixin):
 
 
 class FFProbeOtherStream(FFProbeBaseStream):
-    codec_type: str = ""
+    codec_type: Literal["other"] = "other"
+
 
 
 class FFProbeFormat(BaseModel):
