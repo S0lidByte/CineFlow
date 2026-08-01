@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.29.9](https://github.com/S0lidByte/CineFlow/compare/v1.29.8...v1.29.9) (2026-08-01)
+
+
+### Bug Fixes
+
+* **event-manager:** safely access mutex for uninitialized EventManager instances ([1dd9213](https://github.com/S0lidByte/CineFlow/commit/1dd9213a269c466394ad680e994e2da86fd47634))
+* resolve Trakt infinite pagination, Plex local ratingKey URL, scrapers ThreadPoolExecutor hang, RealDebrid fair usage intercept, ItemLock release, and cache demotion race ([5e5a2b0](https://github.com/S0lidByte/CineFlow/commit/5e5a2b09e31f9557a8f00a8b227228e07e661e8a))
+
 ## [1.29.8](https://github.com/S0lidByte/CineFlow/compare/v1.29.7...v1.29.8) (2026-08-01)
 
 
