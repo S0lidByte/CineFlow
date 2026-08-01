@@ -196,8 +196,8 @@ class FFProbeResponse(BaseModel):
         """
         _known = frozenset({"video", "audio", "subtitle", "data", "attachment"})
         if isinstance(data, dict):
-            data_dict = cast(dict[str, Any], data)
-            streams = data_dict.get("streams")
+            dict_data = cast(dict[str, Any], data)
+            streams = dict_data.get("streams")
             if isinstance(streams, list):
                 raw_streams = cast(list[Any], streams)
                 for stream in raw_streams:
@@ -205,6 +205,7 @@ class FFProbeResponse(BaseModel):
                         stream_dict = cast(dict[str, Any], stream)
                         if stream_dict.get("codec_type") not in _known:
                             stream_dict["codec_type"] = "other"
+            return dict_data
         return data
 
 
