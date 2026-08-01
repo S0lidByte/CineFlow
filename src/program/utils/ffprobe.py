@@ -1,6 +1,6 @@
 import subprocess
 from fractions import Fraction
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, cast
 
 import orjson
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -196,12 +196,15 @@ class FFProbeResponse(BaseModel):
         """
         _known = frozenset({"video", "audio", "subtitle", "data", "attachment"})
         if isinstance(data, dict):
-            dict_data: dict[str, Any] = data
-            streams = dict_data.get("streams")
+            data_dict = cast(dict[str, Any], data)
+            streams = data_dict.get("streams")
             if isinstance(streams, list):
-                for stream in streams:
-                    if isinstance(stream, dict) and stream.get("codec_type") not in _known:
-                        stream["codec_type"] = "other"
+                raw_streams = cast(list[Any], streams)
+                for stream in raw_streams:
+                    if isinstance(stream, dict):
+                        stream_dict = cast(dict[str, Any], stream)
+                        if stream_dict.get("codec_type") not in _known:
+                            stream_dict["codec_type"] = "other"
         return data
 
 
