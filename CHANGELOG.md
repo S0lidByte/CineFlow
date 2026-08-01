@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.10](https://github.com/S0lidByte/CineFlow/compare/v1.29.9...v1.29.10) (2026-08-01)
+
+
+### Bug Fixes
+
+* **streaming:** include general_scan in event_values filter to fix Android ExoPlayer stream hang ([533f1d6](https://github.com/S0lidByte/CineFlow/commit/533f1d62db0efdc77d02e10867f3f1db36db385d))
+
 ## [1.29.9](https://github.com/S0lidByte/CineFlow/compare/v1.29.8...v1.29.9) (2026-08-01)
 
 
