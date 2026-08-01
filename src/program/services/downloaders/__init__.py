@@ -1,7 +1,5 @@
 from datetime import datetime, timedelta
-from time import monotonic
 
-from kink import di
 from loguru import logger
 from RTN import ParsedData
 
@@ -38,12 +36,6 @@ from program.utils.request import CircuitBreakerOpen
 from .alldebrid import AllDebridDownloader
 from .debridlink import DebridLinkDownloader
 from .realdebrid import RealDebridDownloader
-
-# When VFS playback is active, defer bulk Downloader work so RD API + disk
-# cache bandwidth stay available for concurrent multi-title streams.
-_PLAYBACK_BACKPRESSURE_SECONDS = 45
-_PLAYBACK_DEFER_LOG_COOLDOWN_S = 30.0
-_last_playback_defer_log_mono = 0.0
 
 
 class Downloader(Runner[None, DownloaderBase]):
@@ -88,44 +80,11 @@ class Downloader(Runner[None, DownloaderBase]):
 
         return True
 
-    @staticmethod
-    def _playback_active() -> bool:
-        """True when RivenVFS has open MediaStream sessions."""
-        try:
-            from program.program import Program
-
-            program = di[Program]
-            filesystem = getattr(program.services, "filesystem", None)
-            if filesystem is None:
-                return False
-            return bool(filesystem.has_active_streams())
-        except Exception:
-            return False
-
     def run(
         self,
         item: MediaItem,
     ) -> MediaItemGenerator:
         logger.debug(f"Starting download process for {item.log_string} ({item.id})")
-
-        if self._playback_active():
-            next_attempt = datetime.now() + timedelta(
-                seconds=_PLAYBACK_BACKPRESSURE_SECONDS
-            )
-            global _last_playback_defer_log_mono
-            now_mono = monotonic()
-            msg = (
-                f"Deferring Downloader for {item.log_string} ({item.id}): "
-                f"VFS playback active; retry at "
-                f"{next_attempt.strftime('%m/%d/%y %H:%M:%S')}"
-            )
-            if now_mono - _last_playback_defer_log_mono >= _PLAYBACK_DEFER_LOG_COOLDOWN_S:
-                _last_playback_defer_log_mono = now_mono
-                logger.info(msg)
-            else:
-                logger.debug(msg)
-            yield RunnerResult(media_items=[item], run_at=next_attempt)
-            return
 
         # Check if all services are in cooldown due to circuit breaker
         now = datetime.now()

@@ -77,17 +77,29 @@ def test_all_services_in_cooldown_reschedules(downloader, mock_item):
     downloader.service.get_instant_availability.assert_not_called()
 
 
-def test_playback_active_defers_downloader(downloader, mock_item):
-    """Bulk Downloader must yield when VFS playback streams are open."""
-    with patch.object(Downloader, "_playback_active", return_value=True):
+def test_playback_active_does_not_defer_downloader(downloader, mock_item):
+    """RD downloads must not wait on VFS playback (API path ≠ FUSE I/O)."""
+    # Guarding against regression: Downloader must not expose a playback gate.
+    assert not hasattr(Downloader, "_playback_active")
+
+    mock_container = Mock()
+    mock_container.files = [Mock()]
+    mock_download = Mock()
+
+    with (
+        patch.object(
+            downloader, "validate_stream_on_service", return_value=mock_container
+        ) as validate,
+        patch.object(
+            downloader, "download_cached_stream_on_service", return_value=mock_download
+        ),
+        patch.object(downloader, "update_item_attributes", return_value=True),
+    ):
         results = list(downloader.run(mock_item))
 
     assert len(results) == 1
-    result = results[0]
-    assert mock_item in result.media_items
-    assert result.run_at is not None
-    assert result.run_at > datetime.now() - timedelta(seconds=5)
-    downloader.service.get_instant_availability.assert_not_called()
+    assert results[0].run_at is None
+    validate.assert_called()
 
 
 def test_circuit_breaker_sets_cooldown_and_reschedules(downloader, mock_item):
