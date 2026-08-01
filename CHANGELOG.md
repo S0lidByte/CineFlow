@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.11](https://github.com/S0lidByte/CineFlow/compare/v1.29.10...v1.29.11) (2026-08-01)
+
+
+### Bug Fixes
+
+* resolve VFS media disappearance on restart by fixing false dead-link triggers during URL refresh and ensuring VFS tree populates on sync ([2313bff](https://github.com/S0lidByte/CineFlow/commit/2313bff8a23da58c2d92af80afb74dd0b20f51e0))
+
 ## [1.29.10](https://github.com/S0lidByte/CineFlow/compare/v1.29.9...v1.29.10) (2026-08-01)
 
 
