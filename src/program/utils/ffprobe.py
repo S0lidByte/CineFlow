@@ -320,6 +320,8 @@ def parse_media_url(url: str) -> FFProbeMediaMetadata | None:
                     )
                 case FFProbeDataStream() | FFProbeAttachmentStream() | FFProbeOtherStream():
                     pass
+                case _:
+                    pass
 
         return metadata
     except subprocess.CalledProcessError as e:
