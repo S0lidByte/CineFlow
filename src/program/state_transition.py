@@ -125,6 +125,19 @@ def process_event(
         else:
             return no_further_processing
 
+    elif existing_item and existing_item.last_state == States.Unreleased:
+        # FIX-16: Unreleased items previously fell through all elif branches and
+        # were silently dropped (returned no_further_processing). Route them to the
+        # indexer so forced refresh events and scheduled re-checks are honoured.
+        logger.debug(
+            f"State transition: {existing_item.log_string} is Unreleased — routing to IndexerService for refresh"
+        )
+        return ProcessedEvent(
+            service=services.indexer,
+            related_media_items=[existing_item],
+            overrides=overrides,
+        )
+
     if items_to_submit:
         service_name = (
             next_service.__class__.__name__ if next_service else "StateTransition"

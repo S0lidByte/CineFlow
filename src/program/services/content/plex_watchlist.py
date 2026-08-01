@@ -105,11 +105,11 @@ class PlexWatchlist(Runner[PlexWatchlistModel]):
             for d in watchlist_items:
                 if d["tvdb_id"] and not d["tmdb_id"]:  # show
                     items_to_yield.append(
-                        MediaItem({"tvdb_id": d["tvdb_id"], "requested_by": self.key})
+                        MediaItem(tvdb_id=d["tvdb_id"], requested_by=self.key)
                     )
                 elif d["tmdb_id"] and not d["tvdb_id"]:  # movie
                     items_to_yield.append(
-                        MediaItem({"tmdb_id": d["tmdb_id"], "requested_by": self.key})
+                        MediaItem(tmdb_id=d["tmdb_id"], requested_by=self.key)
                     )
 
         if rss_items:
@@ -117,11 +117,11 @@ class PlexWatchlist(Runner[PlexWatchlistModel]):
                 _type, _id = r
                 if _type == "show":
                     items_to_yield.append(
-                        MediaItem({"tvdb_id": _id, "requested_by": self.key})
+                        MediaItem(tvdb_id=_id, requested_by=self.key)
                     )
                 elif _type == "movie":
                     items_to_yield.append(
-                        MediaItem({"tmdb_id": _id, "requested_by": self.key})
+                        MediaItem(tmdb_id=_id, requested_by=self.key)
                     )
 
         if items_to_yield:

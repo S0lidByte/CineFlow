@@ -667,8 +667,11 @@ def _accumulate_ranked_torrents(
                     funnel.record_content_filter()
                 continue
 
-            # make sure all of the item seasons are present in the torrent
-            if not manual and not all(
+            # make sure all of the item seasons are present in the torrent.
+            # FIX-11: Only enforce this check when torrent.data.seasons is populated.
+            # "Complete Series" releases often carry no season tags, so
+            # `season.number in []` always returns False and valid packs get rejected.
+            if not manual and torrent.data.seasons and not all(
                 season.number in torrent.data.seasons for season in item.seasons
             ):
                 logger.trace(

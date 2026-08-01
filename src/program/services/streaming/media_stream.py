@@ -627,6 +627,12 @@ class MediaStream:
                             continue
                         self._stream_error.value = e.original_exception
 
+                        # FIX-03: Signal readiness before breaking so Trio's nursery.start()
+                        # does not raise RuntimeError("task exited without calling task_status.started()").
+                        if not has_started:
+                            task_status.started()
+                            has_started = True
+
                         break
                     except FatalMediaStreamException as e:
                         logger.exception(
@@ -637,6 +643,11 @@ class MediaStream:
 
                         self._stream_error.value = e.original_exception
 
+                        # FIX-03: Signal readiness so the caller is not left hanging.
+                        if not has_started:
+                            task_status.started()
+                            has_started = True
+
                         break
                     except Exception as e:
                         # Safely catch any other unexpected exceptions to avoid crashing the FUSE mount
@@ -645,6 +656,11 @@ class MediaStream:
                         )
 
                         self._stream_error.value = e
+
+                        # FIX-03: Signal readiness so the caller is not left hanging.
+                        if not has_started:
+                            task_status.started()
+                            has_started = True
 
                         break
 
@@ -689,11 +705,13 @@ class MediaStream:
 
         # First wait for the stream to stop, then close the client
         if self.is_streaming.value:
-            # If the file was streaming,
-            # clear all chunk cache emitters to free up memory.
-            di[ChunkCacheNotifier].clear_emitters(
-                cache_key=self.file_metadata.original_filename
-            )
+            # FIX-04: Do NOT call clear_emitters() here.
+            # Unconditionally clearing emitters when one stream closes wipes the chunk
+            # AsyncBool notifiers that a concurrently-running stream for the same file
+            # is waiting on, causing its downloader to signal the old emitter while the
+            # surviving reader is permanently hung on a new one → ChunksTooSlowException.
+            # The ChunkCacheNotifier uses an LRU (maxsize=4096) for automatic memory
+            # management — manual eviction on close is unnecessary and dangerous.
 
             # Wait for the stream loop to close
             try:
@@ -804,12 +822,16 @@ class MediaStream:
             # or else the stream will not receive the value.
             # Also start on cache_hit when prefetch is enabled so ahead-chunks can fill.
             if (
-                read_type in ("body_read", "cache_hit")
+                read_type in ("body_read", "cache_hit", "general_scan")
                 and not self.is_streaming.value
-                and (read_type == "body_read" or self.config.prefetch_chunks > 0)
+                and (
+                    read_type in ("body_read", "general_scan")
+                    or self.config.prefetch_chunks > 0
+                )
             ):
                 with trio.fail_after(self.config.connect_timeout_seconds):
                     await self.nursery.start(self.run, chunk_range.position)
+
 
             self.recent_reads.current_read.value = Read(
                 chunk_range=chunk_range,
@@ -1255,10 +1277,12 @@ class MediaStream:
         ):
             return "general_scan"
 
+
         if start < self.file_metadata.file_size - self.footer_size:
             return "body_read"
 
         return "footer_read"
+
 
     async def _fetch_discrete_byte_range(
         self,

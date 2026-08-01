@@ -305,18 +305,18 @@ def create_calendar(
     - WARNING-level logging for malformed release_data dates
     """
 
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     from program.media.item import Episode, MediaItem, Season, Show
 
     start = start_date if start_date else datetime.now() - timedelta(days=30)
     end = end_date if end_date else datetime.now() + timedelta(days=30)
 
-    # Ensure start and end are offset-naive for safe comparison against DB naive dates
+    # Ensure start and end are converted to UTC then offset-naive for safe comparison against DB naive dates (FIX-22)
     if start.tzinfo is not None:
-        start = start.replace(tzinfo=None)
+        start = start.astimezone(timezone.utc).replace(tzinfo=None)
     if end.tzinfo is not None:
-        end = end.replace(tzinfo=None)
+        end = end.astimezone(timezone.utc).replace(tzinfo=None)
 
     with _maybe_session(session) as (s, _owns):
         # Query 1: All MediaItems with aired_at in the bounded window

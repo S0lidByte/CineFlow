@@ -141,6 +141,24 @@ class DownloadersModel(Observable):
         description="AllDebrid downloader configuration",
     )
 
+    @model_validator(mode="after")
+    def validate_filesize_limits(self) -> "DownloadersModel":
+        if (
+            self.movie_filesize_mb_max != -1
+            and self.movie_filesize_mb_max < self.movie_filesize_mb_min
+        ):
+            raise ValueError(
+                f"movie_filesize_mb_max ({self.movie_filesize_mb_max}) cannot be smaller than movie_filesize_mb_min ({self.movie_filesize_mb_min})"
+            )
+        if (
+            self.episode_filesize_mb_max != -1
+            and self.episode_filesize_mb_max < self.episode_filesize_mb_min
+        ):
+            raise ValueError(
+                f"episode_filesize_mb_max ({self.episode_filesize_mb_max}) cannot be smaller than episode_filesize_mb_min ({self.episode_filesize_mb_min})"
+            )
+        return self
+
 
 # Filesystem Service
 

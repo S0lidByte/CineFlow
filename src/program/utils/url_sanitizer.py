@@ -19,15 +19,27 @@ SENSITIVE_URL_QUERY_PARAMS: frozenset[str] = frozenset(
 
 def sanitize_url_for_logs(url: str) -> str:
     """
-    Return a URL safe for logs by redacting sensitive query values.
+    Return a URL safe for logs by redacting sensitive query values and
+    any user:password credentials embedded in the URL authority.
 
     Args:
-        url: URL string possibly containing sensitive query parameters.
+        url: URL string possibly containing sensitive query parameters or
+             basic-auth credentials in the form user:password@host.
     """
     try:
         parsed = urlsplit(url)
+
+        # Redact password embedded in netloc authority (FIX-06).
+        netloc = parsed.netloc
+        if parsed.password:
+            netloc = netloc.replace(f":{parsed.password}@", ":[redacted]@")
+
         if not parsed.query:
-            return url
+            if netloc == parsed.netloc:
+                return url
+            return urlunsplit(
+                (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)
+            )
 
         query = parse_qsl(parsed.query, keep_blank_values=True)
         sanitized = [
@@ -38,7 +50,7 @@ def sanitize_url_for_logs(url: str) -> str:
         return urlunsplit(
             (
                 parsed.scheme,
-                parsed.netloc,
+                netloc,
                 parsed.path,
                 urlencode(sanitized, doseq=True),
                 parsed.fragment,
