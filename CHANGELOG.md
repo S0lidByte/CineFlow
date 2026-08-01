@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.15](https://github.com/S0lidByte/CineFlow/compare/v1.29.14...v1.29.15) (2026-08-01)
+
+
+### Bug Fixes
+
+* **media-stream:** accumulate partial raw socket reads up to chunk size to prevent stream corruption ([d32ca25](https://github.com/S0lidByte/CineFlow/commit/d32ca2594441515792ea3c2fe0a6dfae044293cc))
+
 ## [1.29.14](https://github.com/S0lidByte/CineFlow/compare/v1.29.13...v1.29.14) (2026-08-01)
 
 
