@@ -1235,14 +1235,14 @@ class MediaStream:
             # generally observed when the player is reading the footer
             # for cues or metadata after initial playback start.
             #
-            # Scans typically read less than a single block.
+            # Scans typically read a single block (128 KB) or two blocks.
             self.recent_reads.last_read_end is not None
             and (
                 abs(self.recent_reads.last_read_end - start)
                 > self.config.scan_tolerance
             )
             and start != self.config.header_size
-            and size < self.config.block_size
+            and size <= self.config.block_size * 2
         ) or (
             # This behaviour is seen when seeking.
             # Playback has already begun, so the header has been served
