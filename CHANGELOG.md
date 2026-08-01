@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.5](https://github.com/S0lidByte/CineFlow/compare/v1.29.4...v1.29.5) (2026-08-01)
+
+
+### Documentation
+
+* fix stream chunk env keys in .env.example ([#218](https://github.com/S0lidByte/CineFlow/issues/218)) ([f4f6aa9](https://github.com/S0lidByte/CineFlow/commit/f4f6aa92fa755f8a7a4097024c94667ed32b9bc2))
+
 ## [1.29.4](https://github.com/S0lidByte/CineFlow/compare/v1.29.3...v1.29.4) (2026-08-01)
 
 
