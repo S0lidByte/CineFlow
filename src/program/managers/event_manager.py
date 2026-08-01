@@ -781,7 +781,11 @@ class EventManager:
             return False
 
         # Snapshot under mutex so iteration is safe from concurrent appends/removes (FIX-01).
-        with self.mutex:
+        mutex = getattr(self, "mutex", None)
+        if mutex is not None:
+            with mutex:
+                snapshot = list(queue)
+        else:
             snapshot = list(queue)
 
         for ev in snapshot:
