@@ -1,6 +1,6 @@
 import subprocess
 from fractions import Fraction
-from typing import Annotated, Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 import orjson
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -176,16 +176,13 @@ class FFProbeResponse(BaseModel):
     Format: ClassVar[Any] = FFProbeFormat
 
     streams: list[
-        Annotated[
-            FFProbeVideoStream
-            | FFProbeAudioStream
-            | FFProbeSubtitleStream
-            | FFProbeDataStream
-            | FFProbeAttachmentStream
-            | FFProbeOtherStream,
-            Field(discriminator="codec_type"),
-        ]
-    ] = Field(default_factory=list)
+        FFProbeVideoStream
+        | FFProbeAudioStream
+        | FFProbeSubtitleStream
+        | FFProbeDataStream
+        | FFProbeAttachmentStream
+        | FFProbeOtherStream
+    ] = Field(default_factory=list, discriminator="codec_type")
 
     format: FFProbeFormat
 
