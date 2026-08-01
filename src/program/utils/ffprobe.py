@@ -1,9 +1,9 @@
 import subprocess
 from fractions import Fraction
-from typing import Literal
+from typing import Annotated, Any, Literal
 
 import orjson
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class FFProbeVideoTrack(BaseModel):
@@ -44,7 +44,7 @@ class FFProbeMediaMetadata(BaseModel):
     filename: str = Field(default="", description="Name of the media file")
     file_size: int = Field(default=0, description="Size of the media file in bytes")
     video: FFProbeVideoTrack = Field(
-        default=FFProbeVideoTrack(), description="Video track metadata"
+        default_factory=FFProbeVideoTrack, description="Video track metadata"
     )
     duration: float = Field(
         default=0.0,
@@ -75,24 +75,32 @@ class FFProbeMediaMetadata(BaseModel):
 class FFProbeResponse(BaseModel):
     """Model representing the ffprobe response"""
 
+    model_config = ConfigDict(extra="ignore")
+
     class TagsMixin(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+
         class Tags(BaseModel):
+            model_config = ConfigDict(extra="ignore")
             language: str | None = None
 
-        tags: Tags
+        tags: Tags | None = Field(default=None)
 
     class BaseStream(BaseModel):
-        index: int
-        codec_name: str
-        r_frame_rate: str
+        model_config = ConfigDict(extra="ignore")
+
+        index: int = 0
+        codec_name: str | None = ""
+        r_frame_rate: str | None = "0/0"
 
         @property
         def fps(self) -> float:
             """Calculate frames per second from `r_frame_rate`"""
-
+            if not self.r_frame_rate:
+                return 0.0
             try:
                 return float(Fraction(self.r_frame_rate))
-            except (ZeroDivisionError, ValueError):
+            except (ZeroDivisionError, ValueError, Exception):
                 return 0.0
 
     class DataStream(BaseStream, TagsMixin):
@@ -100,25 +108,63 @@ class FFProbeResponse(BaseModel):
 
     class VideoStream(BaseStream):
         codec_type: Literal["video"]
-        width: int
-        height: int
+        width: int = 0
+        height: int = 0
 
     class AudioStream(BaseStream, TagsMixin):
         codec_type: Literal["audio"]
-        channels: int
-        sample_rate: int
+        channels: int = 0
+        sample_rate: int | str = 0
+
+        @field_validator("sample_rate", mode="before")
+        @classmethod
+        def _parse_sample_rate(cls, v: Any) -> int:
+            if v is None:
+                return 0
+            try:
+                return int(float(v))
+            except (ValueError, TypeError):
+                return 0
 
     class SubtitleStream(BaseStream, TagsMixin):
         codec_type: Literal["subtitle"]
 
-    class Format(BaseModel):
-        filename: str
-        format_name: str
-        duration: float
-        size: int
-        bit_rate: int
+    class AttachmentStream(BaseStream, TagsMixin):
+        codec_type: Literal["attachment"]
 
-    streams: list[VideoStream | AudioStream | SubtitleStream | DataStream]
+    class OtherStream(BaseStream):
+        codec_type: str = ""
+
+    class Format(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+
+        filename: str = ""
+        format_name: str | None = ""
+        duration: float | str = 0.0
+        size: int | str = 0
+        bit_rate: int | str = 0
+
+        @field_validator("duration", "size", "bit_rate", mode="before")
+        @classmethod
+        def _parse_numeric(cls, v: Any) -> float | int:
+            if v is None:
+                return 0
+            try:
+                return float(v) if isinstance(v, (str, float)) else int(v)
+            except (ValueError, TypeError):
+                return 0
+
+    streams: list[
+        Annotated[
+            VideoStream
+            | AudioStream
+            | SubtitleStream
+            | DataStream
+            | AttachmentStream
+            | OtherStream,
+            Field(discriminator="codec_type"),
+        ]
+    ] = Field(default_factory=list)
     format: Format
 
 
@@ -215,13 +261,13 @@ def parse_media_url(url: str) -> FFProbeMediaMetadata | None:
         metadata = FFProbeMediaMetadata(
             filename=extract_filename_from_url(url),
             file_size=int(format_info.size),
-            duration=round(format_info.duration, 2),
+            duration=round(float(format_info.duration), 2),
             format=(
                 (format_info.format_name or "unknown").split(",")
                 if format_info.format_name
                 else []
             ),
-            bitrate=format_info.bit_rate,
+            bitrate=int(format_info.bit_rate),
         )
 
         for stream in probe_data.streams:
@@ -231,7 +277,7 @@ def parse_media_url(url: str) -> FFProbeMediaMetadata | None:
                         # Apparently there's multiple video codecs..
                         # the first one should always be correct though.
                         metadata.video = FFProbeVideoTrack(
-                            codec=stream.codec_name,
+                            codec=stream.codec_name or "",
                             width=stream.width,
                             height=stream.height,
                             frame_rate=round(stream.fps, 2),
@@ -239,20 +285,26 @@ def parse_media_url(url: str) -> FFProbeMediaMetadata | None:
                 case FFProbeResponse.AudioStream():
                     metadata.audio.append(
                         FFProbeAudioTrack(
-                            codec=stream.codec_name,
+                            codec=stream.codec_name or "",
                             channels=stream.channels,
-                            sample_rate=stream.sample_rate,
-                            language=stream.tags.language,
+                            sample_rate=int(stream.sample_rate)
+                            if isinstance(stream.sample_rate, (int, float))
+                            else 0,
+                            language=stream.tags.language
+                            if stream.tags and stream.tags.language
+                            else "",
                         )
                     )
                 case FFProbeResponse.SubtitleStream():
                     metadata.subtitles.append(
                         FFProbeSubtitleTrack(
-                            codec=stream.codec_name,
-                            language=stream.tags.language,
+                            codec=stream.codec_name or "",
+                            language=stream.tags.language
+                            if stream.tags and stream.tags.language
+                            else "",
                         )
                     )
-                case FFProbeResponse.DataStream():
+                case FFProbeResponse.DataStream() | FFProbeResponse.AttachmentStream() | FFProbeResponse.OtherStream():
                     pass
 
         return metadata
@@ -260,3 +312,4 @@ def parse_media_url(url: str) -> FFProbeMediaMetadata | None:
         raise RuntimeError(f"ffprobe error: {e}")
     except Exception as e:
         raise ValueError(f"Unexpected error during ffprobe of {url}: {e}")
+
