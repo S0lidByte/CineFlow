@@ -182,7 +182,7 @@ class FFProbeResponse(BaseModel):
         | FFProbeDataStream
         | FFProbeAttachmentStream
         | FFProbeOtherStream
-    ] = Field(default_factory=list)
+    ] = Field(default=[])
 
     format: FFProbeFormat
 
@@ -324,8 +324,6 @@ def parse_media_url(url: str) -> FFProbeMediaMetadata | None:
                         )
                     )
                 case FFProbeDataStream() | FFProbeAttachmentStream() | FFProbeOtherStream():
-                    pass
-                case _:
                     pass
 
         return metadata
