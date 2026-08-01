@@ -146,7 +146,7 @@ def test_plex_ok(mock_settings):
     assert "Plex" in result.message
     assert "plex-token" not in result.message
     url = fake_client.get.call_args.args[0]
-    assert url.endswith("/identity")
+    assert url.endswith("/account")
     assert "token" not in url.lower()
 
 

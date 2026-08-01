@@ -47,7 +47,9 @@ class PlexWatchlist(Runner[PlexWatchlistModel]):
             return False
 
         try:
-            self.api.validate_account()
+            if not self.api.validate_account():
+                logger.error("Unable to authenticate Plex account")
+                return False
         except Exception as e:
             logger.error(f"Unable to authenticate Plex account: {e}")
             return False

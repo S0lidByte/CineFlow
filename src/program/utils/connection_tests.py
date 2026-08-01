@@ -184,7 +184,7 @@ def _probe_plex() -> ConnectionTestResponse:
     try:
         with httpx.Client(timeout=_httpx_timeout(), follow_redirects=True) as client:
             response = client.get(
-                f"{url}/identity",
+                f"{url}/account",
                 headers={"X-Plex-Token": token, "Accept": "application/json"},
             )
     except httpx.TimeoutException:
