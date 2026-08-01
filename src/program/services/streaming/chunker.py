@@ -10,7 +10,7 @@ from ordered_set import OrderedSet
 class ChunkCacheNotifier:
     """Manages chunk cache emitters for notifying when chunks have been cached."""
 
-    emitters = cachetools.LRUCache["Chunk", trio_util.AsyncBool](maxsize=1024)
+    emitters = cachetools.LRUCache[tuple[str, int], trio_util.AsyncBool](maxsize=4096)
 
     def get_emitter(
         self,
@@ -26,7 +26,8 @@ class ChunkCacheNotifier:
             trio_util.AsyncBool: The emitter for the chunk.
         """
 
-        if chunk not in self.emitters:
+        key = (chunk.cache_key, chunk.index)
+        if key not in self.emitters:
             from .cache import Cache
 
             is_cached = di[Cache].has(
@@ -35,22 +36,23 @@ class ChunkCacheNotifier:
                 end=chunk.end,
             )
 
-            self.emitters[chunk] = trio_util.AsyncBool(is_cached)
+            self.emitters[key] = trio_util.AsyncBool(is_cached)
 
-        return self.emitters[chunk]
+        return self.emitters[key]
 
     def clear_emitter(self, *, chunk: "Chunk") -> None:
         """Clear the emitter for a specific chunk."""
 
-        if chunk in self.emitters:
-            del self.emitters[chunk]
+        key = (chunk.cache_key, chunk.index)
+        if key in self.emitters:
+            del self.emitters[key]
 
     def clear_emitters(self, *, cache_key: str) -> None:
         """Clear all emitters for a specific cache key."""
 
-        for chunk in list(self.emitters.keys()):
-            if chunk.cache_key == cache_key:
-                del self.emitters[chunk]
+        for key in list(self.emitters.keys()):
+            if key[0] == cache_key:
+                del self.emitters[key]
 
 
 @dataclass(frozen=True, unsafe_hash=True)
