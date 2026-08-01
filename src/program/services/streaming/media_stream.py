@@ -22,7 +22,6 @@ from .chunker import Chunk, ChunkCacheNotifier, Chunker, ChunkRange
 from .config import Config
 from .exceptions import (
     ByteLengthMismatchException,
-    CacheDataNotFoundException,
     ChunksTooSlowException,
     DebridServiceClosedConnectionException,
     DebridServiceException,
