@@ -446,9 +446,18 @@ class MediaStream:
                                                     else None
                                                 )
                                             ):
-                                                data = await anext(connection.reader)
+                                                chunk_buffer = bytearray()
+                                                while len(chunk_buffer) < chunk.size:
+                                                    try:
+                                                        raw_part = await anext(connection.reader)
+                                                    except StopAsyncIteration:
+                                                        break
+                                                    if not raw_part:
+                                                        break
+                                                    chunk_buffer.extend(raw_part)
+                                                data = bytes(chunk_buffer)
 
-                                            if data == b"":
+                                            if not data:
                                                 raise EmptyDataException(
                                                     range=(chunk.start, chunk.end)
                                                 )
