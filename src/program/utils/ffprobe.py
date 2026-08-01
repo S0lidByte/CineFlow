@@ -1,6 +1,6 @@
 import subprocess
 from fractions import Fraction
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 import orjson
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -138,17 +138,14 @@ class FFProbeOtherStream(FFProbeBaseStream):
     codec_type: str = ""
 
 
-FFProbeStream = Annotated[
-    Union[
-        FFProbeVideoStream,
-        FFProbeAudioStream,
-        FFProbeSubtitleStream,
-        FFProbeDataStream,
-        FFProbeAttachmentStream,
-        FFProbeOtherStream,
-    ],
-    Field(discriminator="codec_type"),
-]
+FFProbeStream = (
+    FFProbeVideoStream
+    | FFProbeAudioStream
+    | FFProbeSubtitleStream
+    | FFProbeDataStream
+    | FFProbeAttachmentStream
+    | FFProbeOtherStream
+)
 
 
 class FFProbeFormat(BaseModel):
@@ -177,17 +174,20 @@ class FFProbeResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     # Retain nested aliases for backward compatibility with external references
-    TagsMixin = FFProbeTagsMixin
-    BaseStream = FFProbeBaseStream
-    DataStream = FFProbeDataStream
-    VideoStream = FFProbeVideoStream
-    AudioStream = FFProbeAudioStream
-    SubtitleStream = FFProbeSubtitleStream
-    AttachmentStream = FFProbeAttachmentStream
-    OtherStream = FFProbeOtherStream
-    Format = FFProbeFormat
+    TagsMixin: ClassVar[Any] = FFProbeTagsMixin
+    BaseStream: ClassVar[Any] = FFProbeBaseStream
+    DataStream: ClassVar[Any] = FFProbeDataStream
+    VideoStream: ClassVar[Any] = FFProbeVideoStream
+    AudioStream: ClassVar[Any] = FFProbeAudioStream
+    SubtitleStream: ClassVar[Any] = FFProbeSubtitleStream
+    AttachmentStream: ClassVar[Any] = FFProbeAttachmentStream
+    OtherStream: ClassVar[Any] = FFProbeOtherStream
+    Format: ClassVar[Any] = FFProbeFormat
 
-    streams: list[FFProbeStream] = Field(default_factory=list)
+
+    streams: list[FFProbeStream] = Field(
+        default_factory=list, discriminator="codec_type"
+    )
     format: FFProbeFormat
 
 
