@@ -872,28 +872,13 @@ class MediaStream:
             # Start the stream and wait for a connection before progressing with a body read.
             # This MUST be done before assigning a value to current_read,
             # or else the stream will not receive the value.
-            # Also start on cache_hit when prefetch is enabled so ahead-chunks can fill.
-            if (
-                read_type in ("body_read", "cache_hit")
-                and not self.is_streaming.value
-                and (
-                    read_type == "body_read"
-                    or self.config.prefetch_chunks > 0
-                )
-            ):
+            # Start the stream and wait for a connection before progressing with an uncached body read.
+            # This MUST be done before assigning a value to current_read,
+            # or else the stream will not receive the value.
+            if read_type == "body_read" and not self.is_streaming.value:
                 async with self._start_lock:
                     if not self.is_streaming.value:
                         start_pos: int | None = chunk_range.position
-                        if read_type == "cache_hit":
-                            _, playhead_end = chunk_range.request_range
-                            ahead = self.chunker.get_prefetch_uncached(
-                                after_end=playhead_end,
-                                count=self.config.prefetch_chunks,
-                            )
-                            if ahead:
-                                start_pos = ahead[0].start
-                            else:
-                                start_pos = None
 
                         if start_pos is not None:
                             with trio.fail_after(self.config.connect_timeout_seconds):
