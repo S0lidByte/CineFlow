@@ -83,6 +83,89 @@ def test_initialize_services_skips_vfs_close_for_content_only_changes():
     assert program.services.downloader is previous_downloader
 
 
+def test_initialize_services_preserves_graph_for_stream_only_changes():
+    program = Program()
+    previous_services = MagicMock()
+    program.services = previous_services
+    settings_manager.last_changed_top_keys = frozenset({"stream"})
+
+    program.initialize_services()
+
+    assert program.services is previous_services
+    previous_services.filesystem.close.assert_not_called()
+
+
+def test_initialize_services_preserves_graph_for_noop_update():
+    program = Program()
+    previous_services = MagicMock()
+    program.services = previous_services
+    settings_manager.last_changed_top_keys = frozenset()
+
+    program.initialize_services()
+
+    assert program.services is previous_services
+    previous_services.filesystem.close.assert_not_called()
+
+
+def test_initialize_services_reconfigures_logging_without_rebuilding_services():
+    program = Program()
+    previous_services = MagicMock()
+    program.services = previous_services
+    settings_manager.last_changed_top_keys = frozenset({"logging", "log_level"})
+
+    with patch("program.program.setup_logger") as setup_logger:
+        program.initialize_services()
+
+    setup_logger.assert_called_once_with(settings_manager.settings.log_level)
+    assert program.services is previous_services
+    previous_services.filesystem.close.assert_not_called()
+
+
+def test_initialize_services_reconfigures_logging_during_mixed_update():
+    program = Program()
+    previous_filesystem = MagicMock()
+    previous_downloader = MagicMock()
+    program.services = MagicMock(
+        filesystem=previous_filesystem,
+        downloader=previous_downloader,
+    )
+    settings_manager.last_changed_top_keys = frozenset({"content", "log_level"})
+
+    with patch("program.program.setup_logger") as setup_logger:
+        _run_initialize(
+            program=program,
+            downloader=_mock_service(),
+            filesystem=_mock_service(),
+        )
+
+    setup_logger.assert_called_once_with(settings_manager.settings.log_level)
+    previous_filesystem.close.assert_not_called()
+    assert program.services.filesystem is previous_filesystem
+    assert program.services.downloader is previous_downloader
+
+
+def test_initialize_apis_skips_rebuild_for_stream_only_changes():
+    program = Program()
+    program.initialized = True
+    settings_manager.last_changed_top_keys = frozenset({"stream"})
+
+    with patch("program.program.bootstrap_apis") as bootstrap:
+        program.initialize_apis()
+
+    bootstrap.assert_not_called()
+
+
+def test_initialize_apis_rebuilds_for_content_changes():
+    program = Program()
+    program.initialized = True
+    settings_manager.last_changed_top_keys = frozenset({"content"})
+
+    with patch("program.program.bootstrap_apis") as bootstrap:
+        program.initialize_apis()
+
+    bootstrap.assert_called_once_with()
+
+
 def test_initialize_services_remounts_vfs_when_filesystem_changes():
     program = Program()
     previous_filesystem = MagicMock()

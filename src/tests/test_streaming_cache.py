@@ -79,6 +79,47 @@ def test_cache_cross_chunk_stitch(tmp_path: Path) -> None:
     trio.run(_run)
 
 
+def test_cache_overlapping_fallback_does_not_shadow_covering_chunk(
+    tmp_path: Path,
+) -> None:
+    """A small fallback slice must not hide an older full media chunk."""
+    cache = _make_cache(tmp_path)
+    full_chunk = bytes(range(128))
+    fallback = b"Z" * 16
+    next_chunk = b"N" * 32
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, full_chunk)
+        await cache.put("movie.mkv", 32, fallback)
+        await cache.put("movie.mkv", 128, next_chunk)
+
+        assert cache.has("movie.mkv", 0, 79) is True
+        assert await cache.get("movie.mkv", 64, 79) == full_chunk[64:80]
+        assert await cache.get("movie.mkv", 24, 79) == full_chunk[24:80]
+        assert await cache.get("movie.mkv", 32, 159) == full_chunk[32:] + next_chunk
+
+    trio.run(_run)
+
+
+def test_cache_shorter_same_start_does_not_replace_full_chunk(
+    tmp_path: Path,
+) -> None:
+    cache = _make_cache(tmp_path)
+    full_chunk = bytes(range(128))
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, full_chunk)
+        await cache.put("movie.mkv", 0, full_chunk[:16])
+
+        assert cache.has("movie.mkv", 0, 127) is True
+        assert await cache.get("movie.mkv", 64, 127) == full_chunk[64:128]
+        stats = await cache.stats()
+        assert stats["entries"] == 1
+        assert stats["bytes_written"] == len(full_chunk)
+
+    trio.run(_run)
+
+
 def test_cache_miss_returns_empty(tmp_path: Path) -> None:
     cache = _make_cache(tmp_path)
 
@@ -100,6 +141,20 @@ def test_cache_has_reports_coverage(tmp_path: Path) -> None:
         assert cache.has("movie.mkv", 0, 9) is True
         assert cache.has("movie.mkv", 0, 10) is False
         assert cache.has("other.mkv", 0, 9) is False
+
+    trio.run(_run)
+
+
+def test_cache_has_rejects_truncated_payload(tmp_path: Path) -> None:
+    cache = _make_cache(tmp_path)
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, b"0123456789")
+        key = cache._key("movie.mkv", 0)
+        cache._file_for(key).write_bytes(b"0123")
+
+        assert cache.has("movie.mkv", 0, 9) is False
+        assert await cache.get("movie.mkv", 0, 9) == b""
 
     trio.run(_run)
 

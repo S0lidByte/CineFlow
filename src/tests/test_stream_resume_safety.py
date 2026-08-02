@@ -84,7 +84,7 @@ def test_cache_hit_miss_falls_back_instead_of_returning_zero_bytes() -> None:
     stream._fetch_discrete_byte_range.assert_awaited_once_with(
         start=100,
         size=11,
-        should_cache=True,
+        should_cache=False,
     )
 
 

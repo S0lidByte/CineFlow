@@ -162,6 +162,8 @@ class MediaStream:
 
         self._trace_stream(
             f"Initialized stream with chunk size {self.config.chunk_size / (1024 * 1024):.2f} MB. "
+            f"prefetch_chunks={self.config.prefetch_chunks}, "
+            f"read_ahead={self.config.prefetch_chunks * self.config.chunk_size / (1024 * 1024):.0f} MB, "
             f"file_size={self.file_metadata.file_size} bytes",
         )
 
@@ -472,6 +474,31 @@ class MediaStream:
                                         )
                                     ):
                                         for chunk in chunks:
+                                            if (
+                                                connection.current_read_position
+                                                != chunk.start
+                                            ):
+                                                # ``get_prefetch_uncached`` may skip a
+                                                # chunk that another handle already
+                                                # cached. A streaming HTTP response
+                                                # cannot jump across that hole: reading
+                                                # on would store the skipped bytes under
+                                                # the next chunk's key. Reconnect at the
+                                                # exact uncached boundary instead.
+                                                self._trace_stream(
+                                                    "Repositioning stream across cached "
+                                                    f"prefetch gap from "
+                                                    f"{connection.current_read_position} "
+                                                    f"to {chunk.start}"
+                                                )
+                                                connection.seek(
+                                                    chunk_range=self.chunker.get_chunk_range(
+                                                        position=chunk.start,
+                                                        size=chunk.size,
+                                                    )
+                                                )
+                                                return
+
                                             chunk_label = f"[{chunk.start}-{chunk.end}]"
 
                                             with benchmark(
@@ -937,10 +964,23 @@ class MediaStream:
             # Start the stream and wait for a connection before progressing with an uncached body read.
             # This MUST be done before assigning a value to current_read,
             # or else the stream will not receive the value.
-            if read_type == "body_read" and not self.is_streaming.value:
+            start_pos: int | None = None
+            if read_type == "body_read":
+                start_pos = chunk_range.position
+            elif read_type == "cache_hit" and self._is_sequential_cache_playback(
+                chunk_range
+            ):
+                _, playhead_end = chunk_range.request_range
+                ahead = self.chunker.get_prefetch_uncached(
+                    after_end=playhead_end,
+                    count=self.config.prefetch_chunks,
+                )
+                if ahead:
+                    start_pos = ahead[0].start
+
+            if start_pos is not None and not self.is_streaming.value:
                 async with self._start_lock:
                     if not self.is_streaming.value:
-                        start_pos = chunk_range.position
                         with trio.fail_after(self.config.connect_timeout_seconds):
                             await self.nursery.start(self.run, start_pos)
 
@@ -952,6 +992,25 @@ class MediaStream:
             yield read_type
         finally:
             self.recent_reads.previous_read.value = self.recent_reads.current_read.value
+
+    def _is_sequential_cache_playback(self, chunk_range: ChunkRange) -> bool:
+        """Distinguish sustained playback from isolated cached metadata probes."""
+        if self.config.prefetch_chunks <= 0:
+            return False
+
+        start, end = chunk_range.request_range
+        if start < self.config.header_size or start >= self.chunker.footer_start:
+            return False
+
+        previous = self.recent_reads.previous_read.value
+        if previous is None or previous.read_type not in _HOT_STREAM_READ_TYPES:
+            return False
+
+        _, previous_end = previous.chunk_range.request_range
+        return (
+            previous_end < end
+            and start <= previous_end + 1 + self.config.sequential_read_tolerance
+        )
 
     async def read(
         self,
@@ -1046,7 +1105,10 @@ class MediaStream:
         return await self._fetch_discrete_byte_range(
             start=start,
             size=end - start + 1,
-            should_cache=True,
+            # This is an emergency correctness path after a chunk signalled
+            # ready. Caching its small VFS slice creates overlapping entries
+            # that can shadow the complete media chunk during resume.
+            should_cache=False,
         )
 
     @asynccontextmanager

@@ -65,12 +65,18 @@ def _make_stream(
     return stream
 
 
-def _set_previous_read(stream: MediaStream, *, position: int, size: int) -> None:
+def _set_previous_read(
+    stream: MediaStream,
+    *,
+    position: int,
+    size: int,
+    read_type: str = "body_read",
+) -> None:
     chunk_range = stream.chunker.get_chunk_range(position=position, size=size)
     # Explicit timestamp avoids trio.current_time() outside an async context.
     stream.recent_reads.previous_read.value = Read(
         chunk_range=chunk_range,
-        read_type="body_read",
+        read_type=read_type,  # type: ignore[arg-type]
         timestamp=0.0,
     )
 
@@ -152,7 +158,9 @@ def test_detect_footer_scan() -> None:
     footer_pos = stream.file_metadata.file_size - stream.footer_size + 1024
 
     async def _run() -> None:
-        chunk_range = stream.chunker.get_chunk_range(position=footer_pos, size=64 * 1024)
+        chunk_range = stream.chunker.get_chunk_range(
+            position=footer_pos, size=64 * 1024
+        )
         assert await stream._detect_read_type(chunk_range=chunk_range) == "footer_scan"
 
     trio.run(_run)
@@ -206,6 +214,72 @@ def test_read_lifecycle_cache_hit_does_not_start_worker() -> None:
     trio.run(_run)
 
 
+def test_read_lifecycle_sequential_cache_hit_starts_prefetch_worker() -> None:
+    import trio_util
+
+    stream = _make_stream(cache_hit=True)
+    stream.is_streaming = trio_util.AsyncBool(False)
+    stream._start_lock = trio.Lock()
+
+    mock_nursery = MagicMock()
+
+    async def mock_start(fn, pos):
+        pass
+
+    mock_nursery.start = MagicMock(side_effect=mock_start)
+    stream.nursery = mock_nursery
+
+    position = stream.config.header_size + 2 * stream.config.chunk_size
+    _set_previous_read(
+        stream,
+        position=position,
+        size=128 * 1024,
+        read_type="cache_hit",
+    )
+    next_position = position + 128 * 1024
+    chunk_range = stream.chunker.get_chunk_range(
+        position=next_position,
+        size=128 * 1024,
+    )
+    expected_start = stream.chunker.get_prefetch_uncached(
+        after_end=chunk_range.request_range[1],
+        count=stream.config.prefetch_chunks,
+    )[0].start
+
+    async def _run() -> None:
+        async with stream.read_lifecycle(chunk_range=chunk_range) as read_type:
+            assert read_type == "cache_hit"
+        mock_nursery.start.assert_called_once_with(stream.run, expected_start)
+
+    trio.run(_run)
+
+
+def test_read_lifecycle_header_cache_hits_remain_passive() -> None:
+    import trio_util
+
+    stream = _make_stream(cache_hit=True)
+    stream.is_streaming = trio_util.AsyncBool(False)
+    stream._start_lock = trio.Lock()
+    stream.nursery = MagicMock()
+    _set_previous_read(
+        stream,
+        position=0,
+        size=64 * 1024,
+        read_type="cache_hit",
+    )
+    chunk_range = stream.chunker.get_chunk_range(
+        position=64 * 1024,
+        size=64 * 1024,
+    )
+
+    async def _run() -> None:
+        async with stream.read_lifecycle(chunk_range=chunk_range) as read_type:
+            assert read_type == "cache_hit"
+        stream.nursery.start.assert_not_called()
+
+    trio.run(_run)
+
+
 def test_read_lifecycle_body_read_starts_worker() -> None:
     import trio_util
 
@@ -231,4 +305,3 @@ def test_read_lifecycle_body_read_starts_worker() -> None:
         mock_nursery.start.assert_called_once_with(stream.run, next_pos)
 
     trio.run(_run)
-

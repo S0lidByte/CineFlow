@@ -6,6 +6,7 @@ import os
 import random
 import threading
 import time
+import uuid
 from bisect import bisect_right, insort
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
@@ -215,10 +216,22 @@ class Cache:
             return None
 
     @staticmethod
+    def _file_has_size(path: Path, expected_size: int) -> bool:
+        try:
+            return path.stat().st_size >= expected_size
+        except OSError:
+            return False
+
+    @staticmethod
     def _write_file_bytes(path: Path, data: bytes) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("wb") as f:
-            f.write(data)
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with temporary.open("wb") as f:
+                f.write(data)
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     @staticmethod
     def _is_cache_payload_file(root: Path, path: Path) -> bool:
@@ -724,10 +737,16 @@ class Cache:
                 idx = bisect_right(s_list, start) - 1
 
                 if idx >= 0:
-                    chunk_start = s_list[idx]
-                    cache_entry = self._index.get(self._key(cache_key, chunk_start))
-
-                    if cache_entry:
+                    # Overlapping discrete fallback ranges may start after a
+                    # larger media chunk without covering this request. Walk
+                    # backwards until an entry that actually covers the full
+                    # request is found instead of letting the newest short
+                    # range shadow an older complete chunk.
+                    for candidate_idx in range(idx, -1, -1):
+                        chunk_start = s_list[candidate_idx]
+                        cache_entry = self._index.get(self._key(cache_key, chunk_start))
+                        if not cache_entry:
+                            continue
                         chunk_end = chunk_start + cache_entry.size - 1
 
                         # Check if this single chunk covers the entire request
@@ -737,6 +756,7 @@ class Cache:
                             chunk_tier = cache_entry.tier
                             chunk_start_offset = chunk_start
                             # Don't update timestamps yet - do it after successful read
+                            break
 
         # Fast path: read single chunk outside the index lock (off trio thread)
         if chunk_key:
@@ -828,18 +848,28 @@ class Cache:
                     if idx < 0:
                         break  # No chunk starts at or before current_pos
 
-                    chunk_start = s_list[idx]
-                    chunk_key = self._key(cache_key, chunk_start)
-                    cache_entry = self._index.get(chunk_key)
+                    covering: tuple[int, str, CacheEntry, int] | None = None
+                    for candidate_idx in range(idx, -1, -1):
+                        chunk_start = s_list[candidate_idx]
+                        chunk_key = self._key(cache_key, chunk_start)
+                        cache_entry = self._index.get(chunk_key)
+                        if not cache_entry:
+                            continue
+                        chunk_end = chunk_start + cache_entry.size - 1
+                        if chunk_start <= current_pos <= chunk_end and (
+                            covering is None or chunk_end > covering[3]
+                        ):
+                            covering = (
+                                chunk_start,
+                                chunk_key,
+                                cache_entry,
+                                chunk_end,
+                            )
 
-                    if not cache_entry:
-                        break  # Chunk not in index
-
-                    chunk_end = chunk_start + cache_entry.size - 1
-
-                    # Check if this chunk covers current_pos
-                    if current_pos < chunk_start or current_pos > chunk_end:
+                    if covering is None:
                         break  # Gap in coverage
+
+                    chunk_start, chunk_key, cache_entry, chunk_end = covering
 
                     # Calculate what portion of this chunk we need
                     copy_start = max(current_pos, chunk_start) - chunk_start
@@ -975,6 +1005,28 @@ class Cache:
 
         # Shard serializes writers for the same title; index lock stays brief.
         async with self._shard(cache_key):
+            # A discrete scan/fallback can begin at the same offset as a full
+            # media chunk. Never replace a complete payload with a shorter
+            # overlapping payload: that would turn a ready chunk into a miss.
+            with self._thread_lock:
+                existing = self._index.get(k)
+                existing_size = existing.size if existing else 0
+                existing_tier = existing.tier if existing else write_tier
+
+            existing_is_complete = False
+            if existing_size >= need:
+                for probe_tier in self._tier_probe_order(existing_tier):
+                    if await trio.to_thread.run_sync(
+                        self._file_has_size,
+                        self._file_for(k, tier=probe_tier),
+                        existing_size,
+                    ):
+                        existing_is_complete = True
+                        break
+
+            if existing_is_complete:
+                return
+
             hot_reservation = 0
             if write_tier == "hot":
                 if await self._reserve_hot_capacity(need):
@@ -1066,9 +1118,11 @@ class Cache:
 
             tier = cache_entry.tier
 
-        # Check file existence outside the lock
+        # Check complete payload visibility outside the lock. Existence alone
+        # is insufficient while recovering old non-atomic writes or external
+        # cache damage; readers must never classify a truncated chunk as ready.
         return any(
-            self._file_for(k, tier=probe_tier).exists()
+            self._file_has_size(self._file_for(k, tier=probe_tier), cache_entry.size)
             for probe_tier in self._tier_probe_order(tier)
         )
 

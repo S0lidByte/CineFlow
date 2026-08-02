@@ -38,7 +38,7 @@ from program.services.updaters import Updater
 from program.settings import settings_manager
 from program.settings.models import get_version
 from program.utils import data_dir_path
-from program.utils.logging import logger
+from program.utils.logging import logger, setup_logger
 
 from .services.filesystem import FilesystemService
 from .state_transition import process_event
@@ -113,11 +113,36 @@ class Program(threading.Thread):
             self.last_snapshot: Snapshot | None = None
 
     def initialize_apis(self):
+        changed = settings_manager.last_changed_top_keys
+        if (
+            self.initialized
+            and changed is not None
+            and changed.isdisjoint({"content", "updaters"})
+        ):
+            logger.debug(
+                "Skipping API client rebuild; changed settings do not affect "
+                f"content/updaters: {sorted(changed)}"
+            )
+            return
+
         bootstrap_apis()
 
     # Top-level settings keys that require closing and remounting RivenVFS.
     # Content / ranking / scraping / notifications / etc. only rebuild services.
     _VFS_REINIT_TOP_KEYS = frozenset({"filesystem", "downloaders"})
+    # These values are read dynamically or snapshotted by each new MediaStream.
+    # Rebuilding every service for them blocks the settings request and can stall
+    # active FUSE reads even though the mount itself remains open.
+    _RUNTIME_ONLY_TOP_KEYS = frozenset(
+        {
+            "stream",
+            "logging",
+            "log_level",
+            "enable_network_tracing",
+            "enable_stream_tracing",
+            "stream_tracing_sample_every",
+        }
+    )
 
     def initialize_services(self):
         """Initialize all services.
@@ -128,11 +153,25 @@ class Program(threading.Thread):
         """
 
         changed = settings_manager.last_changed_top_keys
+        previous = self.services
+
+        if previous is not None and changed and changed & {"logging", "log_level"}:
+            setup_logger(settings_manager.settings.log_level)
+
+        if (
+            previous is not None
+            and changed is not None
+            and changed.issubset(self._RUNTIME_ONLY_TOP_KEYS)
+        ):
+            logger.debug(
+                "No service rebuild required for settings keys: " f"{sorted(changed)}"
+            )
+            return
+
         remount_filesystem = changed is None or bool(
             changed & self._VFS_REINIT_TOP_KEYS
         )
 
-        previous = self.services
         if previous and remount_filesystem:
             try:
                 previous.filesystem.close()
@@ -517,7 +556,6 @@ class Program(threading.Thread):
 
         self.em.shutdown(wait=False)
         logger.log("PROGRAM", "Riven has been stopped.")
-
 
 
 riven = Program()
