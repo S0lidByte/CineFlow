@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.18](https://github.com/S0lidByte/CineFlow/compare/v1.29.17...v1.29.18) (2026-08-02)
+
+
+### Bug Fixes
+
+* **stream:** treat prefetch EmptyDataException as non-fatal; fix retry counter reset ([d0b52fc](https://github.com/S0lidByte/CineFlow/commit/d0b52fcc60d02dd61cc3806864bdb9b98db8d7fb))
+
 ## [1.29.17](https://github.com/S0lidByte/CineFlow/compare/v1.29.16...v1.29.17) (2026-08-02)
 
 
