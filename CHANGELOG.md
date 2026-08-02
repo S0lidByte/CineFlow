@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.24](https://github.com/S0lidByte/CineFlow/compare/v1.29.23...v1.29.24) (2026-08-02)
+
+
+### Bug Fixes
+
+* **streaming:** restore reliable resume and prefetch ([84062f5](https://github.com/S0lidByte/CineFlow/commit/84062f515e0d1caebb1a90ed5769cdfda195ced4))
+
 ## [1.29.23](https://github.com/S0lidByte/CineFlow/compare/v1.29.22...v1.29.23) (2026-08-02)
 
 
