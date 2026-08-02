@@ -372,9 +372,6 @@ class MediaStream:
                                 task_status.started()
                                 has_started = True
 
-                            # Reset attempt count on successful connection
-                            attempt_count = 0
-
                             async with trio_util.move_on_when(
                                 lambda connection=connection: trio_util.wait_any(
                                     # Reconnect the stream if a seek is requested
@@ -630,9 +627,18 @@ class MediaStream:
                                                         )
                                                     )
                                                     if gap_range.uncached_chunks:
-                                                        await _process_chunks(
-                                                            gap_range.uncached_chunks
-                                                        )
+                                                        try:
+                                                            await _process_chunks(
+                                                                gap_range.uncached_chunks
+                                                            )
+                                                        except EmptyDataException:
+                                                            # Gap-fill prefetch failed (stale
+                                                            # connection / partial torrent);
+                                                            # skip and wait for next VFS event.
+                                                            self._trace_stream(
+                                                                "Prefetch gap-fill returned empty data; skipping prefetch cycle"
+                                                            )
+                                                            continue
                                                 else:
                                                     connection.seek(
                                                         chunk_range=self.chunker.get_chunk_range(
@@ -641,7 +647,17 @@ class MediaStream:
                                                         )
                                                     )
                                                     break
-                                            await _process_chunks(ahead)
+                                            try:
+                                                await _process_chunks(ahead)
+                                            except EmptyDataException:
+                                                # Prefetch is opportunistic — an empty response
+                                                # (stale connection, partial torrent, CDN gap)
+                                                # is not fatal. Skip this prefetch cycle and
+                                                # continue the VFS event loop; the actual read
+                                                # path has its own retry/fallback logic.
+                                                self._trace_stream(
+                                                    "Prefetch returned empty data; skipping prefetch cycle"
+                                                )
 
                             position = connection.current_read_position
                             seek_range = connection.seek_range
@@ -673,6 +689,10 @@ class MediaStream:
                             needs_url_refresh = False
 
                             continue
+
+                        # All retries exhausted — reset attempt count so the next
+                        # connection attempt (after break/restart) starts fresh.
+                        attempt_count = 0
                         self._stream_error.value = e.original_exception
 
                         # FIX-03: Signal readiness before breaking so Trio's nursery.start()
