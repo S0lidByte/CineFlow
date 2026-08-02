@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.21](https://github.com/S0lidByte/CineFlow/compare/v1.29.20...v1.29.21) (2026-08-02)
+
+
+### Bug Fixes
+
+* **db:** add Postgres startup recovery error markers to transient error classification ([86cfabf](https://github.com/S0lidByte/CineFlow/commit/86cfabfd7a5ab879a4aead6795e47b8bd71e2f59))
+
 ## [1.29.20](https://github.com/S0lidByte/CineFlow/compare/v1.29.19...v1.29.20) (2026-08-02)
 
 
