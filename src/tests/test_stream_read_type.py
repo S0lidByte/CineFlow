@@ -186,3 +186,49 @@ def test_config_tolerance_defaults() -> None:
     assert config.block_size == 128 * 1024
     assert config.sequential_read_tolerance == 10 * 128 * 1024
     assert config.scan_tolerance == 25 * 128 * 1024
+
+
+def test_read_lifecycle_cache_hit_does_not_start_worker() -> None:
+    import trio_util
+
+    stream = _make_stream(cache_hit=True)
+    stream.is_streaming = trio_util.AsyncBool(False)
+    stream._start_lock = trio.Lock()
+    stream.nursery = MagicMock()
+
+    chunk_range = stream.chunker.get_chunk_range(position=0, size=64 * 1024)
+
+    async def _run() -> None:
+        async with stream.read_lifecycle(chunk_range=chunk_range) as read_type:
+            assert read_type == "cache_hit"
+        stream.nursery.start.assert_not_called()
+
+    trio.run(_run)
+
+
+def test_read_lifecycle_body_read_starts_worker() -> None:
+    import trio_util
+
+    stream = _make_stream(cache_hit=False)
+    stream.is_streaming = trio_util.AsyncBool(False)
+    stream._start_lock = trio.Lock()
+
+    mock_nursery = MagicMock()
+
+    async def mock_start(fn, pos):
+        pass
+
+    mock_nursery.start = MagicMock(side_effect=mock_start)
+    stream.nursery = mock_nursery
+
+    _set_previous_read(stream, position=stream.config.header_size, size=128 * 1024)
+    next_pos = stream.config.header_size + 128 * 1024
+    chunk_range = stream.chunker.get_chunk_range(position=next_pos, size=128 * 1024)
+
+    async def _run() -> None:
+        async with stream.read_lifecycle(chunk_range=chunk_range) as read_type:
+            assert read_type == "body_read"
+        mock_nursery.start.assert_called_once_with(stream.run, next_pos)
+
+    trio.run(_run)
+
