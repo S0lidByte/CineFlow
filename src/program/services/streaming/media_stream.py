@@ -390,7 +390,7 @@ class MediaStream:
                                 async def _process_chunks(
                                     chunks: OrderedSet[Chunk],
                                 ) -> None:
-                                    nonlocal needs_url_refresh
+                                    nonlocal needs_url_refresh, position
                                     if len(chunks) == 0:
                                         if self.enable_tracing:
                                             logger.log(
@@ -497,6 +497,8 @@ class MediaStream:
                                                 connection.current_read_position += len(
                                                     data
                                                 )
+
+                                                position = connection.current_read_position
 
                                                 self.session_statistics.bytes_transferred += len(
                                                     data
@@ -628,18 +630,9 @@ class MediaStream:
                                                         )
                                                     )
                                                     if gap_range.uncached_chunks:
-                                                        try:
-                                                            await _process_chunks(
-                                                                gap_range.uncached_chunks
-                                                            )
-                                                        except EmptyDataException:
-                                                            # Gap-fill prefetch failed (stale
-                                                            # connection / partial torrent);
-                                                            # skip and wait for next VFS event.
-                                                            self._trace_stream(
-                                                                "Prefetch gap-fill returned empty data; skipping prefetch cycle"
-                                                            )
-                                                            continue
+                                                        await _process_chunks(
+                                                            gap_range.uncached_chunks
+                                                        )
                                                 else:
                                                     connection.seek(
                                                         chunk_range=self.chunker.get_chunk_range(
@@ -648,17 +641,7 @@ class MediaStream:
                                                         )
                                                     )
                                                     break
-                                            try:
-                                                await _process_chunks(ahead)
-                                            except EmptyDataException:
-                                                # Prefetch is opportunistic — an empty response
-                                                # (stale connection, partial torrent, CDN gap)
-                                                # is not fatal. Skip this prefetch cycle and
-                                                # continue the VFS event loop; the actual read
-                                                # path has its own retry/fallback logic.
-                                                self._trace_stream(
-                                                    "Prefetch returned empty data; skipping prefetch cycle"
-                                                )
+                                            await _process_chunks(ahead)
 
                             position = connection.current_read_position
                             seek_range = connection.seek_range
