@@ -346,7 +346,9 @@ class FilesystemModel(Observable):
         description=(
             "Optional hot-tier directory (typically tmpfs). When set, new chunks are "
             "written here first; LRU overflow is demoted to cache_dir (warm). "
-            "Leave empty for a single-tier cache."
+            "Leave empty for a single-tier cache. Bare /dev/shm or /run/shm paths "
+            "are automatically scoped to a riven-cache subdirectory so unrelated "
+            "shared-memory files are never treated as cache data."
         ),
     )
     cache_max_size_mb: int = Field(
@@ -434,6 +436,18 @@ class FilesystemModel(Observable):
             "Multi-episode files automatically use range format (e.g., e01-05) based on episode number formatting."
         ),
     )
+
+    @field_validator("cache_dir", "cache_hot_dir", mode="before")
+    def scope_bare_tmpfs_cache_roots(cls, v: str | Path | None) -> Path | None:
+        """Keep Riven cache ownership below shared tmpfs mount roots."""
+        if v is None:
+            return None
+
+        path = Path(v)
+        if path.as_posix().rstrip("/") in {"/dev/shm", "/run/shm"}:
+            return path / "riven-cache"
+
+        return path
 
     @field_validator("library_profiles")
     def validate_library_profiles(cls, v: dict[str, LibraryProfile]):
@@ -1199,8 +1213,10 @@ class StreamModel(Observable):
         le=64,
         description=(
             "On sequential body playback, fetch this many uncached chunks ahead of "
-            "the playhead (default 12; 0 disables). Bounded by N × chunk_size_mb so "
-            "multi-title stays safe. Required for smooth 4K without large chunk sizes."
+            "the playhead (default 12; 0 disables). Total read-ahead work is "
+            "prefetch_chunks × chunk_size_mb per stream (12 MB at the 1 MB × 12 "
+            "defaults). For higher-throughput playback, tune toward 96–128 MB. "
+            "Values above 256 MB are aggressive during resume/seek."
         ),
     )
     connect_timeout_seconds: int = Field(

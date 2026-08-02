@@ -1,4 +1,4 @@
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from functools import cached_property
 from http import HTTPStatus
@@ -191,9 +191,8 @@ class MediaStream:
 
         # Use proxy client if provider requires it (resolved per-request so pool
         # recycle can swap DI singletons without restarting MediaStream).
-        self._use_proxy_client = (
-            provider in PROXY_REQUIRED_PROVIDERS
-            and bool(settings_manager.settings.downloaders.proxy_url)
+        self._use_proxy_client = provider in PROXY_REQUIRED_PROVIDERS and bool(
+            settings_manager.settings.downloaders.proxy_url
         )
         self._active_stream_connection: StreamConnection | None = None
 
@@ -302,6 +301,35 @@ class MediaStream:
 
             self._trace_stream("Stream lifecycle ended")
 
+    @staticmethod
+    def _response_context(response: httpx.Response) -> str:
+        """Return the range headers needed to distinguish EOF from cancellation."""
+        content_range = response.headers.get("Content-Range", "missing")
+        content_length = response.headers.get("Content-Length", "missing")
+        return (
+            f"status={response.status_code}, content-range={content_range}, "
+            f"content-length={content_length}"
+        )
+
+    async def _run_opportunistic_prefetch(
+        self,
+        chunks: OrderedSet[Chunk],
+        process_chunks: Callable[[OrderedSet[Chunk]], Awaitable[None]],
+        *,
+        label: str,
+    ) -> bool:
+        """Run prefetch without poisoning reads when an idle CDN socket is empty."""
+        try:
+            await process_chunks(chunks)
+        except EmptyDataException as error:
+            self._trace_stream(
+                f"{label} did not return data ({error}); keeping the stream "
+                "available for the next playhead read"
+            )
+            return False
+
+        return True
+
     @asynccontextmanager
     async def manage_connection(
         self,
@@ -385,7 +413,7 @@ class MediaStream:
                                         )
                                     ),
                                 )
-                            ):
+                            ) as reconnect_scope:
 
                                 async def _process_chunks(
                                     chunks: OrderedSet[Chunk],
@@ -421,13 +449,20 @@ class MediaStream:
                                     )
 
                                     with benchmark(
-                                        log=lambda duration,
-                                        conn=connection,
-                                        start=start_read_position: (
+                                        log=lambda duration, conn=connection, start=start_read_position: (
                                             logger.log(
                                                 "STREAM",
                                                 self.build_log_message(
-                                                    f"Stream fetched {start}-{conn.current_read_position} "
+                                                    f"Stream fetch interrupted at byte {start} "
+                                                    f"before data transfer in {duration}s "
+                                                    "(seek, URL refresh, or file close)."
+                                                    if conn.current_read_position
+                                                    == start
+                                                    and (
+                                                        reconnect_scope.cancel_called
+                                                        or self.is_killed.value
+                                                    )
+                                                    else f"Stream fetched {start}-{conn.current_read_position} "
                                                     f"({conn.current_read_position - start} bytes) "
                                                     f"in {duration}s."
                                                 ),
@@ -454,7 +489,9 @@ class MediaStream:
                                                 chunk_buffer = bytearray()
                                                 while len(chunk_buffer) < chunk.size:
                                                     try:
-                                                        raw_part = await anext(connection.reader)
+                                                        raw_part = await anext(
+                                                            connection.reader
+                                                        )
                                                     except StopAsyncIteration:
                                                         break
                                                     if not raw_part:
@@ -472,9 +509,7 @@ class MediaStream:
                                                 )
 
                                             with benchmark(
-                                                log=lambda duration,
-                                                label=chunk_label,
-                                                range_label=chunk_range_label: (
+                                                log=lambda duration, label=chunk_label, range_label=chunk_range_label: (
                                                     logger.log(
                                                         "STREAM",
                                                         self.build_log_message(
@@ -498,7 +533,9 @@ class MediaStream:
                                                     data
                                                 )
 
-                                                position = connection.current_read_position
+                                                position = (
+                                                    connection.current_read_position
+                                                )
 
                                                 self.session_statistics.bytes_transferred += len(
                                                     data
@@ -532,7 +569,9 @@ class MediaStream:
                                                 ),
                                             )
 
-                                        request_start, _ = read.chunk_range.request_range
+                                        request_start, _ = (
+                                            read.chunk_range.request_range
+                                        )
 
                                         if (
                                             self.config.header_size
@@ -555,7 +594,9 @@ class MediaStream:
                                                     ),
                                                 )
 
-                                            connection.seek(chunk_range=read.chunk_range)
+                                            connection.seek(
+                                                chunk_range=read.chunk_range
+                                            )
 
                                             break
 
@@ -580,7 +621,9 @@ class MediaStream:
                                                     ),
                                                 )
 
-                                            connection.seek(chunk_range=read.chunk_range)
+                                            connection.seek(
+                                                chunk_range=read.chunk_range
+                                            )
 
                                             break
 
@@ -591,12 +634,9 @@ class MediaStream:
                                     # waiting independently via is_cached).
                                     if (
                                         self.config.prefetch_chunks > 0
-                                        and read.read_type
-                                        in ("body_read", "cache_hit")
+                                        and read.read_type in ("body_read", "cache_hit")
                                     ):
-                                        _, playhead_end = (
-                                            read.chunk_range.request_range
-                                        )
+                                        _, playhead_end = read.chunk_range.request_range
                                         ahead = self.chunker.get_prefetch_uncached(
                                             after_end=playhead_end,
                                             count=self.config.prefetch_chunks,
@@ -622,17 +662,20 @@ class MediaStream:
                                                     - connection.current_read_position
                                                     <= self.config.chunk_size * 2
                                                 ):
-                                                    gap_range = (
-                                                        self.chunker.get_chunk_range(
-                                                            position=connection.current_read_position,
-                                                            size=first.start
-                                                            - connection.current_read_position,
-                                                        )
+                                                    gap_range = self.chunker.get_chunk_range(
+                                                        position=connection.current_read_position,
+                                                        size=first.start
+                                                        - connection.current_read_position,
                                                     )
                                                     if gap_range.uncached_chunks:
-                                                        await _process_chunks(
-                                                            gap_range.uncached_chunks
+                                                        prefetched = await self._run_opportunistic_prefetch(
+                                                            gap_range.uncached_chunks,
+                                                            _process_chunks,
+                                                            label="Prefetch gap-fill",
                                                         )
+                                                        if not prefetched:
+                                                            needs_url_refresh = False
+                                                            break
                                                 else:
                                                     connection.seek(
                                                         chunk_range=self.chunker.get_chunk_range(
@@ -641,10 +684,31 @@ class MediaStream:
                                                         )
                                                     )
                                                     break
-                                            await _process_chunks(ahead)
+                                            prefetched = (
+                                                await self._run_opportunistic_prefetch(
+                                                    ahead,
+                                                    _process_chunks,
+                                                    label="Prefetch",
+                                                )
+                                            )
+                                            if not prefetched:
+                                                needs_url_refresh = False
+                                                break
 
                             position = connection.current_read_position
                             seek_range = connection.seek_range
+                            if reconnect_scope.cancelled_caught:
+                                if connection.seek_required.value:
+                                    reconnect_reason = "seek requested"
+                                elif self.target_url.value != str(
+                                    connection.response.request.url
+                                ):
+                                    reconnect_reason = "download URL updated"
+                                else:
+                                    reconnect_reason = "connection scope cancelled"
+                                self._trace_stream(
+                                    f"Restarting stream connection: {reconnect_reason}"
+                                )
                     except RecoverableMediaStreamException as e:
                         logger.warning(
                             self.build_log_message(
@@ -742,7 +806,8 @@ class MediaStream:
                     "STREAM",
                     self.build_log_message(
                         f"{response.http_version} stream connection established "
-                        f"from byte {chunk_aligned_start} / {self.file_metadata.file_size}."
+                        f"from byte {chunk_aligned_start} / {self.file_metadata.file_size}; "
+                        f"{self._response_context(response)}."
                     ),
                 )
 
@@ -878,7 +943,6 @@ class MediaStream:
                         start_pos = chunk_range.position
                         with trio.fail_after(self.config.connect_timeout_seconds):
                             await self.nursery.start(self.run, start_pos)
-
 
             self.recent_reads.current_read.value = Read(
                 chunk_range=chunk_range,
@@ -1223,7 +1287,9 @@ class MediaStream:
 
                 if pool_repr:
                     logger.debug(
-                        self.build_log_message(f"All connections are in use: {pool_repr}")
+                        self.build_log_message(
+                            f"All connections are in use: {pool_repr}"
+                        )
                     )
 
                 if attempt == 0:
@@ -1324,12 +1390,10 @@ class MediaStream:
         ):
             return "general_scan"
 
-
         if start < self.file_metadata.file_size - self.footer_size:
             return "body_read"
 
         return "footer_read"
-
 
     async def _fetch_discrete_byte_range(
         self,

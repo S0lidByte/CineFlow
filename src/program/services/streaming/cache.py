@@ -171,7 +171,9 @@ class Cache:
 
     def _shard_for(self, cache_key: str) -> trio.Lock:
         # Stable across process lifetime; collisions only map unrelated keys together.
-        bucket = int(hashlib.sha1(cache_key.encode()).hexdigest(), 16) % self._SHARD_COUNT
+        bucket = (
+            int(hashlib.sha1(cache_key.encode()).hexdigest(), 16) % self._SHARD_COUNT
+        )
         return self._shard_locks[bucket]
 
     @asynccontextmanager
@@ -212,6 +214,16 @@ class Cache:
         with path.open("wb") as f:
             f.write(data)
 
+    @staticmethod
+    def _is_cache_payload_file(root: Path, path: Path) -> bool:
+        """Only identify payloads written in Riven's SHA-1 fanout layout."""
+        key = path.name
+        return (
+            len(key) == 40
+            and all(character in "0123456789abcdef" for character in key)
+            and path.parent == root / key[:2]
+        )
+
     async def _initialize(self) -> None:
         # Lazy-rebuild index for any pre-existing files so size limits apply after restart
         try:
@@ -240,6 +252,9 @@ class Cache:
                                 for fp in sub.iterdir():
                                     try:
                                         if not fp.is_file() or fp.suffix == ".meta":
+                                            continue
+
+                                        if not self._is_cache_payload_file(root, fp):
                                             continue
 
                                         key = fp.name
@@ -271,7 +286,11 @@ class Cache:
                                                 )
                                     except Exception:
                                         continue
-                            elif sub.is_file() and sub.suffix != ".meta":
+                            elif (
+                                sub.is_file()
+                                and sub.suffix != ".meta"
+                                and self._is_cache_payload_file(root, sub)
+                            ):
                                 key = sub.name
                                 st = sub.stat()
                                 metadata = self._read_metadata(key, tier=tier)
@@ -315,7 +334,11 @@ class Cache:
                     for cache_entry in entries:
                         # Prefer hot if the same key appears in both (shouldn't normally)
                         existing = self._index.get(cache_entry.key)
-                        if existing and existing.tier == "hot" and cache_entry.tier == "warm":
+                        if (
+                            existing
+                            and existing.tier == "hot"
+                            and cache_entry.tier == "warm"
+                        ):
                             continue
                         if existing:
                             self._total_bytes -= existing.size
@@ -340,9 +363,7 @@ class Cache:
         h = hashlib.sha1(f"{path}|{start}".encode()).hexdigest()
         return h
 
-    def _file_for(
-        self, key: str, *, tier: Literal["hot", "warm"] = "warm"
-    ) -> Path:
+    def _file_for(self, key: str, *, tier: Literal["hot", "warm"] = "warm") -> Path:
         """Return cache file path without creating directories.
 
         Read paths (``get`` / ``has``) must not mkdir under the global lock —
@@ -444,7 +465,6 @@ class Cache:
                 wf.write(rf.read())
             os.replace(tmp_dst, dst)
             src.unlink(missing_ok=True)
-
 
     def _demote_files_to_warm(self, key: str) -> None:
         """Move payload + metadata from hot to warm on disk."""
@@ -814,7 +834,7 @@ class Cache:
         k = self._key(cache_key, start)
         data = None
         found_tier: Literal["hot", "warm"] = "warm"
-        for probe_tier in (("hot", "warm") if self.cfg.two_tier else ("warm",)):
+        for probe_tier in ("hot", "warm") if self.cfg.two_tier else ("warm",):
             fp = self._file_for(k, tier=probe_tier)  # type: ignore[arg-type]
             data = await trio.to_thread.run_sync(self._read_file_all, fp)
             if data is not None:
@@ -870,9 +890,7 @@ class Cache:
 
         k = self._key(cache_key, start)
         need = len(data)
-        write_tier: Literal["hot", "warm"] = (
-            "hot" if self.cfg.two_tier else "warm"
-        )
+        write_tier: Literal["hot", "warm"] = "hot" if self.cfg.two_tier else "warm"
 
         # Shard serializes writers for the same title; index lock stays brief.
         async with self._shard(cache_key):

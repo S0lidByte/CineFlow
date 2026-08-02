@@ -170,6 +170,30 @@ def test_cache_rebuilds_index_on_restart(tmp_path: Path) -> None:
     trio.run(_reload)
 
 
+def test_cache_initial_scan_preserves_unknown_files(tmp_path: Path) -> None:
+    direct_file = tmp_path / "shared-memory-owner.txt"
+    nested_file = tmp_path / "other-service" / "payload.bin"
+    direct_file.write_text("keep me", encoding="utf-8")
+    nested_file.parent.mkdir()
+    nested_file.write_bytes(b"keep me too")
+
+    _make_cache(tmp_path)
+
+    assert direct_file.read_text(encoding="utf-8") == "keep me"
+    assert nested_file.read_bytes() == b"keep me too"
+
+
+def test_cache_initial_scan_removes_cache_shaped_orphan(tmp_path: Path) -> None:
+    key = "ab" + ("1" * 38)
+    orphan = tmp_path / key[:2] / key
+    orphan.parent.mkdir()
+    orphan.write_bytes(b"incomplete cache write")
+
+    _make_cache(tmp_path)
+
+    assert orphan.exists() is False
+
+
 def test_cache_get_miss_does_not_create_fanout_dirs(tmp_path: Path) -> None:
     """Reads must not mkdir fanout dirs (previously held the global lock)."""
     cache = _make_cache(tmp_path)

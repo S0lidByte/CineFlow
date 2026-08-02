@@ -129,6 +129,9 @@ def process_event(
         # FIX-16: Unreleased items previously fell through all elif branches and
         # were silently dropped (returned no_further_processing). Route them to the
         # indexer so forced refresh events and scheduled re-checks are honoured.
+        if emitted_by == services.indexer:
+            return no_further_processing
+
         logger.debug(
             f"State transition: {existing_item.log_string} is Unreleased — routing to IndexerService for refresh"
         )
