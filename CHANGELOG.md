@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.23](https://github.com/S0lidByte/CineFlow/compare/v1.29.22...v1.29.23) (2026-08-02)
+
+
+### Bug Fixes
+
+* **streaming:** make hybrid cache resume race-safe ([#240](https://github.com/S0lidByte/CineFlow/issues/240)) ([311d5c1](https://github.com/S0lidByte/CineFlow/commit/311d5c120463c4cd850aa59c445c6545728dbbb6))
+
 ## [1.29.22](https://github.com/S0lidByte/CineFlow/compare/v1.29.21...v1.29.22) (2026-08-02)
 
 
