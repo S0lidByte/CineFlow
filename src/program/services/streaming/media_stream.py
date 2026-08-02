@@ -606,13 +606,28 @@ class MediaStream:
                                                 connection.current_read_position
                                                 < first.start
                                             ):
-                                                connection.seek(
-                                                    chunk_range=self.chunker.get_chunk_range(
-                                                        position=first.start,
-                                                        size=first.size,
+                                                if (
+                                                    first.start
+                                                    - connection.current_read_position
+                                                    <= self.config.chunk_size * 2
+                                                ):
+                                                    gap_chunks = (
+                                                        self.chunker.get_chunks_in_range(
+                                                            connection.current_read_position,
+                                                            first.start - 1,
+                                                        )
                                                     )
-                                                )
-                                                break
+                                                    await _process_chunks(
+                                                        gap_chunks
+                                                    )
+                                                else:
+                                                    connection.seek(
+                                                        chunk_range=self.chunker.get_chunk_range(
+                                                            position=first.start,
+                                                            size=first.size,
+                                                        )
+                                                    )
+                                                    break
                                             await _process_chunks(ahead)
 
                             position = connection.current_read_position
@@ -838,8 +853,21 @@ class MediaStream:
                     or self.config.prefetch_chunks > 0
                 )
             ):
-                with trio.fail_after(self.config.connect_timeout_seconds):
-                    await self.nursery.start(self.run, chunk_range.position)
+                start_pos: int | None = chunk_range.position
+                if read_type == "cache_hit":
+                    _, playhead_end = chunk_range.request_range
+                    ahead = self.chunker.get_prefetch_uncached(
+                        after_end=playhead_end,
+                        count=self.config.prefetch_chunks,
+                    )
+                    if ahead:
+                        start_pos = ahead[0].start
+                    else:
+                        start_pos = None
+
+                if start_pos is not None:
+                    with trio.fail_after(self.config.connect_timeout_seconds):
+                        await self.nursery.start(self.run, start_pos)
 
 
             self.recent_reads.current_read.value = Read(
