@@ -59,7 +59,7 @@ class CacheEntry:
 class ChunkInfo:
     chunk_key: str
     chunk_ts: float
-    chunk_file: Path
+    chunk_tier: Literal["hot", "warm"]
     copy_start: int
     bytes_to_read: int
     chunk_end: int
@@ -135,6 +135,7 @@ class Cache:
     """
 
     _SHARD_COUNT = 32
+    _HOT_RESERVATION_TIMEOUT_SECONDS = 5.0
 
     def __init__(self, cfg: CacheConfig) -> None:
         self.cfg = cfg
@@ -148,6 +149,11 @@ class Cache:
         self._thread_lock = threading.Lock()
         # Per-cache_key shards so concurrent titles do not wait on each other.
         self._shard_locks = [trio.Lock() for _ in range(self._SHARD_COUNT)]
+        # Hybrid-cache capacity decisions are serialized, but payload writes are
+        # not. Pending reservations keep concurrent titles within the hot budget.
+        self._hot_write_lock = trio.Lock()
+        self._hot_reserved_bytes = 0
+        self._hot_capacity_changed = trio.Event()
         self._metrics = Metrics(prom_enabled=cfg.metrics_enabled)
         self._last_log = 0.0  # Initialize last log timestamp
 
@@ -374,6 +380,38 @@ class Cache:
             return self.cfg.hot_dir / sub / key
         return self.cfg.cache_dir / sub / key
 
+    def _tier_probe_order(
+        self, preferred: Literal["hot", "warm"]
+    ) -> tuple[Literal["hot", "warm"], ...]:
+        """Probe both tiers during a hot/warm handoff, retrying the preferred tier."""
+        if not self.cfg.two_tier:
+            return (preferred,)
+        alternate: Literal["hot", "warm"] = "warm" if preferred == "hot" else "hot"
+        return (preferred, alternate, preferred)
+
+    async def _read_slice_from_tiers(
+        self,
+        key: str,
+        *,
+        preferred: Literal["hot", "warm"],
+        offset: int,
+        size: int,
+    ) -> bytes:
+        """Read a complete slice while an entry may be moving between tiers."""
+        for tier in self._tier_probe_order(preferred):
+            try:
+                data = await trio.to_thread.run_sync(
+                    self._read_file_slice,
+                    self._file_for(key, tier=tier),
+                    offset,
+                    size,
+                )
+            except FileNotFoundError:
+                continue
+            if len(data) == size:
+                return data
+        return b""
+
     def _ensure_parent(self, path: Path) -> None:
         """Create the two-level fanout directory for a cache file (writes only)."""
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -485,39 +523,84 @@ class Cache:
         to_demote: list[CacheEntry] = []
 
         async with self.locks():
-            target = max(0, self._hot_bytes + need_bytes - self.cfg.hot_max_size_bytes)
+            target = max(
+                0,
+                self._hot_bytes
+                + self._hot_reserved_bytes
+                + need_bytes
+                - self.cfg.hot_max_size_bytes,
+            )
             if target <= 0:
                 return
 
-            for k, cache_entry in list(self._index.items()):
+            for cache_entry in list(self._index.values()):
                 if target <= 0:
                     break
                 if cache_entry.tier != "hot":
                     continue
-                # Re-insert at end temporarily? Better: collect and remove from hot accounting
                 to_demote.append(cache_entry)
-                self._hot_bytes -= cache_entry.size
                 target -= cache_entry.size
-                # Mark as warm in index before disk move
-                self._index[k] = CacheEntry(
-                    key=cache_entry.key,
-                    cache_key=cache_entry.cache_key,
-                    start=cache_entry.start,
-                    size=cache_entry.size,
-                    mtime=cache_entry.mtime,
-                    tier="warm",
-                )
-                self._index.move_to_end(k, last=False)  # demoted = coldest warm
 
         for entry in to_demote:
             try:
                 await trio.to_thread.run_sync(self._demote_files_to_warm, entry.key)
             except Exception as e:
                 logger.warning(f"Failed to demote hot cache entry {entry.key}: {e}")
+                continue
+
+            # Publish the tier change only after the warm payload exists. Readers
+            # probe both paths around this handoff, so no zero-byte window leaks.
+            async with self.locks():
+                with self._thread_lock:
+                    current = self._index.get(entry.key)
+                    if current is None or current.tier != "hot":
+                        continue
+                    self._index[entry.key] = CacheEntry(
+                        key=current.key,
+                        cache_key=current.cache_key,
+                        start=current.start,
+                        size=current.size,
+                        mtime=current.mtime,
+                        tier="warm",
+                    )
+                    self._index.move_to_end(entry.key, last=False)
+                    self._hot_bytes = max(0, self._hot_bytes - current.size)
 
         # Warm may now be over budget
         if to_demote:
             await self._evict_lru(0)
+
+    async def _reserve_hot_capacity(self, need_bytes: int) -> bool:
+        """Reserve hot-tier bytes, returning false when disk fallback is safer."""
+        with trio.move_on_after(self._HOT_RESERVATION_TIMEOUT_SECONDS):
+            while True:
+                async with self._hot_write_lock:
+                    await self._ensure_hot_capacity(need_bytes)
+                    available = (
+                        self.cfg.hot_max_size_bytes
+                        - self._hot_bytes
+                        - self._hot_reserved_bytes
+                    )
+                    if need_bytes <= available:
+                        self._hot_reserved_bytes += need_bytes
+                        return True
+
+                    # With no pending writer to wake us, failure to free enough
+                    # space cannot resolve by waiting. Use the warm tier instead.
+                    if self._hot_reserved_bytes == 0:
+                        return False
+                    capacity_changed = self._hot_capacity_changed
+
+                await capacity_changed.wait()
+
+        return False
+
+    async def _release_hot_capacity(self, reserved_bytes: int) -> None:
+        """Release a pending hot-tier reservation and wake blocked writers."""
+        async with self._hot_write_lock:
+            self._hot_reserved_bytes = max(0, self._hot_reserved_bytes - reserved_bytes)
+            self._hot_capacity_changed.set()
+            self._hot_capacity_changed = trio.Event()
 
     async def _evict_lru(self, need_bytes: int = 0) -> None:
         # Index updates under both _index_lock (via locks()) AND _thread_lock
@@ -628,7 +711,6 @@ class Cache:
         # Fast path: Try to find a single chunk that contains the entire request
         # This avoids holding the lock during file I/O for the common case
         chunk_key = None
-        chunk_file = None
         chunk_start_offset = 0
         chunk_tier: Literal["hot", "warm"] = "warm"
 
@@ -653,12 +735,11 @@ class Cache:
                             # Fast path: single chunk covers entire request
                             chunk_key = self._key(cache_key, chunk_start)
                             chunk_tier = cache_entry.tier
-                            chunk_file = self._file_for(chunk_key, tier=chunk_tier)
                             chunk_start_offset = chunk_start
                             # Don't update timestamps yet - do it after successful read
 
         # Fast path: read single chunk outside the index lock (off trio thread)
-        if chunk_key and chunk_file:
+        if chunk_key:
             try:
                 read_start = time.time()
 
@@ -667,18 +748,19 @@ class Cache:
                 copy_end = end - chunk_start_offset
                 bytes_to_read = copy_end - copy_start + 1
 
-                result = await trio.to_thread.run_sync(
-                    self._read_file_slice,
-                    chunk_file,
-                    copy_start,
-                    bytes_to_read,
+                result = await self._read_slice_from_tiers(
+                    chunk_key,
+                    preferred=chunk_tier,
+                    offset=copy_start,
+                    size=bytes_to_read,
                 )
 
                 read_time = time.time() - read_start
 
                 if read_time > 0.05:  # Log slow reads (>50ms)
                     logger.warning(
-                        f"Slow cache read: {len(result) / (1024 * 1024):.2f}MB in {read_time * 1000:.0f}ms from {chunk_file}"
+                        f"Slow cache read: {len(result) / (1024 * 1024):.2f}MB in "
+                        f"{read_time * 1000:.0f}ms for {chunk_key} ({chunk_tier} preferred)"
                     )
 
                 if len(result) == needed_len:
@@ -765,12 +847,11 @@ class Cache:
                     bytes_to_read = copy_end - copy_start + 1
 
                     # Plan this read operation
-                    chunk_file = self._file_for(chunk_key, tier=cache_entry.tier)
                     chunks_to_read.append(
                         ChunkInfo(
                             chunk_key=chunk_key,
                             chunk_ts=cache_entry.mtime,
-                            chunk_file=chunk_file,
+                            chunk_tier=cache_entry.tier,
                             copy_start=copy_start,
                             bytes_to_read=bytes_to_read,
                             chunk_end=chunk_end,
@@ -785,16 +866,12 @@ class Cache:
             chunks_used = list[tuple[str, float]]()
 
             for chunk_info in chunks_to_read:
-                try:
-                    chunk_slice = await trio.to_thread.run_sync(
-                        self._read_file_slice,
-                        chunk_info.chunk_file,
-                        chunk_info.copy_start,
-                        chunk_info.bytes_to_read,
-                    )
-                except FileNotFoundError:
-                    # Chunk file missing, abort slow path
-                    break
+                chunk_slice = await self._read_slice_from_tiers(
+                    chunk_info.chunk_key,
+                    preferred=chunk_info.chunk_tier,
+                    offset=chunk_info.copy_start,
+                    size=chunk_info.bytes_to_read,
+                )
 
                 if len(chunk_slice) == chunk_info.bytes_to_read:
                     result_data.extend(chunk_slice)
@@ -890,66 +967,80 @@ class Cache:
 
         k = self._key(cache_key, start)
         need = len(data)
-        write_tier: Literal["hot", "warm"] = "hot" if self.cfg.two_tier else "warm"
+        write_tier: Literal["hot", "warm"] = (
+            "hot"
+            if self.cfg.two_tier and need <= self.cfg.hot_max_size_bytes
+            else "warm"
+        )
 
         # Shard serializes writers for the same title; index lock stays brief.
         async with self._shard(cache_key):
+            hot_reservation = 0
             if write_tier == "hot":
-                await self._ensure_hot_capacity(need)
-
-            if self.cfg.eviction == "TTL":
-                await self._evict_ttl()
-            else:
-                await self._evict_lru(need)
-
-            fp = self._file_for(k, tier=write_tier)
+                if await self._reserve_hot_capacity(need):
+                    hot_reservation = need
+                else:
+                    write_tier = "warm"
 
             try:
-                await trio.to_thread.run_sync(self._write_file_bytes, fp, data)
-                # Write metadata after successful data write (also disk I/O)
-                await trio.to_thread.run_sync(
-                    lambda: self._write_metadata(k, cache_key, start, tier=write_tier)
-                )
-            except Exception as e:
-                logger.warning(f"Disk cache write failed: {e}")
-                return
+                if self.cfg.eviction == "TTL":
+                    await self._evict_ttl()
+                else:
+                    await self._evict_lru(need)
 
-            # Priority 3: _thread_lock guards _index writes so sync readers
-            # (has(), sync_size_snapshot()) see a consistent snapshot without
-            # having to wait on the async _index_lock.
-            async with self.locks():
-                with self._thread_lock:
-                    prev = self._index.pop(k, None)
+                fp = self._file_for(k, tier=write_tier)
 
-                    if prev:
-                        self._total_bytes -= prev.size
-                        if prev.tier == "hot":
-                            self._hot_bytes -= prev.size
-                        lst_prev = self._by_path.get(cache_key)
-
-                        if lst_prev:
-                            idx_prev = bisect_right(lst_prev, start) - 1
-
-                            if idx_prev >= 0 and lst_prev[idx_prev] == start:
-                                del lst_prev[idx_prev]
-
-                            if not lst_prev:
-                                self._by_path.pop(cache_key, None)
-
-                    self._index[k] = CacheEntry(
-                        key=k,
-                        cache_key=cache_key,
-                        start=start,
-                        size=need,
-                        mtime=time.time(),
-                        tier=write_tier,
+                try:
+                    await trio.to_thread.run_sync(self._write_file_bytes, fp, data)
+                    # Write metadata after successful data write (also disk I/O)
+                    await trio.to_thread.run_sync(
+                        lambda: self._write_metadata(
+                            k, cache_key, start, tier=write_tier
+                        )
                     )
-                    lst = self._by_path.setdefault(cache_key, [])
-                    insort(lst, start)
-                    self._total_bytes += need
-                    if write_tier == "hot":
-                        self._hot_bytes += need
-                    self._metrics.record_bytes_written(need)
+                except Exception as e:
+                    logger.warning(f"Disk cache write failed: {e}")
+                    return
+
+                # Priority 3: _thread_lock guards _index writes so sync readers
+                # (has(), sync_size_snapshot()) see a consistent snapshot without
+                # having to wait on the async _index_lock.
+                async with self.locks():
+                    with self._thread_lock:
+                        prev = self._index.pop(k, None)
+
+                        if prev:
+                            self._total_bytes -= prev.size
+                            if prev.tier == "hot":
+                                self._hot_bytes -= prev.size
+                            lst_prev = self._by_path.get(cache_key)
+
+                            if lst_prev:
+                                idx_prev = bisect_right(lst_prev, start) - 1
+
+                                if idx_prev >= 0 and lst_prev[idx_prev] == start:
+                                    del lst_prev[idx_prev]
+
+                                if not lst_prev:
+                                    self._by_path.pop(cache_key, None)
+
+                        self._index[k] = CacheEntry(
+                            key=k,
+                            cache_key=cache_key,
+                            start=start,
+                            size=need,
+                            mtime=time.time(),
+                            tier=write_tier,
+                        )
+                        lst = self._by_path.setdefault(cache_key, [])
+                        insort(lst, start)
+                        self._total_bytes += need
+                        if write_tier == "hot":
+                            self._hot_bytes += need
+                        self._metrics.record_bytes_written(need)
+            finally:
+                if hot_reservation:
+                    await self._release_hot_capacity(hot_reservation)
 
     def has(self, cache_key: str, start: int, end: int) -> bool:
         """
@@ -976,9 +1067,10 @@ class Cache:
             tier = cache_entry.tier
 
         # Check file existence outside the lock
-        fp = self._file_for(k, tier=tier)
-
-        return fp.exists()
+        return any(
+            self._file_for(k, tier=probe_tier).exists()
+            for probe_tier in self._tier_probe_order(tier)
+        )
 
     async def trim(self) -> None:
         # Primary policy-based trimming
