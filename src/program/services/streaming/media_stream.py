@@ -354,6 +354,12 @@ class MediaStream:
             async with trio_util.move_on_when(lambda: self.is_killed.wait_value(True)):
                 attempt_count = 0
                 max_attempts = 4
+                # Tracks whether the download URL has been refreshed for the
+                # current run() invocation; reset once per retry cycle.
+                url_refresh_attempted = False
+                # Set to True by _process_chunks when it reads 0 bytes, so the
+                # outer retry loop can refresh the URL before reconnecting.
+                needs_url_refresh = False
 
                 seek_range: ChunkRange | None = None
 
@@ -386,6 +392,7 @@ class MediaStream:
                                 async def _process_chunks(
                                     chunks: OrderedSet[Chunk],
                                 ) -> None:
+                                    nonlocal needs_url_refresh
                                     if len(chunks) == 0:
                                         if self.enable_tracing:
                                             logger.log(
@@ -458,6 +465,10 @@ class MediaStream:
                                                 data = bytes(chunk_buffer)
 
                                             if not data:
+                                                # Signal the outer loop to refresh the URL
+                                                # before the next reconnect attempt.
+                                                needs_url_refresh = True
+
                                                 raise EmptyDataException(
                                                     range=(chunk.start, chunk.end)
                                                 )
@@ -641,6 +652,13 @@ class MediaStream:
                             )
                         )
 
+                        # If the connection returned 0 bytes (URL expired/exhausted),
+                        # refresh the download URL before the next retry so we don't
+                        # loop forever on a dead debrid link.
+                        if needs_url_refresh and not url_refresh_attempted:
+                            url_refresh_attempted = True
+                            await self._refresh_download_url()
+
                         should_retry = await self._retry_with_backoff(
                             attempt_count,
                             max_attempts,
@@ -649,6 +667,10 @@ class MediaStream:
 
                         if should_retry:
                             attempt_count += 1
+                            # Reset per-cycle flags so a sustained URL expiry can
+                            # attempt a fresh refresh on the next retry.
+                            url_refresh_attempted = False
+                            needs_url_refresh = False
 
                             continue
                         self._stream_error.value = e.original_exception
