@@ -115,6 +115,7 @@ class MediaStream:
         self.recent_reads: RecentReads = RecentReads()
         self.is_streaming: trio_util.AsyncBool = trio_util.AsyncBool(False)
         self.is_killed: trio_util.AsyncBool = trio_util.AsyncBool(False)
+        self._start_lock = trio.Lock()
         self._stream_error: trio_util.AsyncValue[Exception | None] = (
             trio_util.AsyncValue(None)
         )
@@ -897,21 +898,23 @@ class MediaStream:
                     or self.config.prefetch_chunks > 0
                 )
             ):
-                start_pos: int | None = chunk_range.position
-                if read_type == "cache_hit":
-                    _, playhead_end = chunk_range.request_range
-                    ahead = self.chunker.get_prefetch_uncached(
-                        after_end=playhead_end,
-                        count=self.config.prefetch_chunks,
-                    )
-                    if ahead:
-                        start_pos = ahead[0].start
-                    else:
-                        start_pos = None
+                async with self._start_lock:
+                    if not self.is_streaming.value:
+                        start_pos: int | None = chunk_range.position
+                        if read_type == "cache_hit":
+                            _, playhead_end = chunk_range.request_range
+                            ahead = self.chunker.get_prefetch_uncached(
+                                after_end=playhead_end,
+                                count=self.config.prefetch_chunks,
+                            )
+                            if ahead:
+                                start_pos = ahead[0].start
+                            else:
+                                start_pos = None
 
-                if start_pos is not None:
-                    with trio.fail_after(self.config.connect_timeout_seconds):
-                        await self.nursery.start(self.run, start_pos)
+                        if start_pos is not None:
+                            with trio.fail_after(self.config.connect_timeout_seconds):
+                                await self.nursery.start(self.run, start_pos)
 
 
             self.recent_reads.current_read.value = Read(
