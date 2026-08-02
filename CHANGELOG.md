@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.19](https://github.com/S0lidByte/CineFlow/compare/v1.29.18...v1.29.19) (2026-08-02)
+
+
+### Bug Fixes
+
+* **stream:** prevent concurrent nursery.start race condition in read_lifecycle ([595fe3e](https://github.com/S0lidByte/CineFlow/commit/595fe3e907ad395b896f28ff0ae12eafd7558e88))
+
 ## [1.29.18](https://github.com/S0lidByte/CineFlow/compare/v1.29.17...v1.29.18) (2026-08-02)
 
 
