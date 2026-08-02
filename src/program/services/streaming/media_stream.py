@@ -611,15 +611,17 @@ class MediaStream:
                                                     - connection.current_read_position
                                                     <= self.config.chunk_size * 2
                                                 ):
-                                                    gap_chunks = (
-                                                        self.chunker.get_chunks_in_range(
-                                                            connection.current_read_position,
-                                                            first.start - 1,
+                                                    gap_range = (
+                                                        self.chunker.get_chunk_range(
+                                                            position=connection.current_read_position,
+                                                            size=first.start
+                                                            - connection.current_read_position,
                                                         )
                                                     )
-                                                    await _process_chunks(
-                                                        gap_chunks
-                                                    )
+                                                    if gap_range.uncached_chunks:
+                                                        await _process_chunks(
+                                                            gap_range.uncached_chunks
+                                                        )
                                                 else:
                                                     connection.seek(
                                                         chunk_range=self.chunker.get_chunk_range(
