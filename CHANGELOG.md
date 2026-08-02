@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.22](https://github.com/S0lidByte/CineFlow/compare/v1.29.21...v1.29.22) (2026-08-02)
+
+
+### Bug Fixes
+
+* **streaming:** reconnect after empty prefetch responses ([f1128c1](https://github.com/S0lidByte/CineFlow/commit/f1128c11f72e1733ab82190f470b5894c87e0d58))
+
 ## [1.29.21](https://github.com/S0lidByte/CineFlow/compare/v1.29.20...v1.29.21) (2026-08-02)
 
 
