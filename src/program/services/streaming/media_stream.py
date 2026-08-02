@@ -869,20 +869,15 @@ class MediaStream:
                 chunk_range=chunk_range,
             )
 
-            # Start the stream and wait for a connection before progressing with a body read.
-            # This MUST be done before assigning a value to current_read,
-            # or else the stream will not receive the value.
             # Start the stream and wait for a connection before progressing with an uncached body read.
             # This MUST be done before assigning a value to current_read,
             # or else the stream will not receive the value.
             if read_type == "body_read" and not self.is_streaming.value:
                 async with self._start_lock:
                     if not self.is_streaming.value:
-                        start_pos: int | None = chunk_range.position
-
-                        if start_pos is not None:
-                            with trio.fail_after(self.config.connect_timeout_seconds):
-                                await self.nursery.start(self.run, start_pos)
+                        start_pos = chunk_range.position
+                        with trio.fail_after(self.config.connect_timeout_seconds):
+                            await self.nursery.start(self.run, start_pos)
 
 
             self.recent_reads.current_read.value = Read(
