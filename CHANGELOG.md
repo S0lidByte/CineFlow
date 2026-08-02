@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.29.20](https://github.com/S0lidByte/CineFlow/compare/v1.29.19...v1.29.20) (2026-08-02)
+
+
+### Bug Fixes
+
+* **stream:** restrict background stream worker initialization to body_read ([08c8143](https://github.com/S0lidByte/CineFlow/commit/08c814307e6832810e659846e9ebdf67d5c852fb))
+* **stream:** restrict stream worker initialization in read_lifecycle to uncached body_read ([deede31](https://github.com/S0lidByte/CineFlow/commit/deede31cb0a5a580bd022bdb1390a65ea61f83dc))
+* **stream:** update stream position in real-time and propagate EOF on socket to trigger automatic URL refresh ([34d028c](https://github.com/S0lidByte/CineFlow/commit/34d028ca1c2a6b2cf761dd0df4df686af96e7d62))
+
 ## [1.29.19](https://github.com/S0lidByte/CineFlow/compare/v1.29.18...v1.29.19) (2026-08-02)
 
 
