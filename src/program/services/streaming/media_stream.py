@@ -976,7 +976,7 @@ class MediaStream:
 
                 match read_type:
                     case "cache_hit":
-                        return await self._read_cache(
+                        return await self._read_cached_or_fallback(
                             start=request_start,
                             end=request_end,
                         )
@@ -1019,10 +1019,14 @@ class MediaStream:
 
         await self._wait_until_chunks_ready(chunk_range=chunk_range)
 
-        cached_data = await self._read_cache(
+        return await self._read_cached_or_fallback(
             start=start,
             end=end,
         )
+
+    async def _read_cached_or_fallback(self, *, start: int, end: int) -> bytes:
+        """Never expose a transient cache miss as a zero-byte VFS read."""
+        cached_data = await self._read_cache(start=start, end=end)
 
         if cached_data:
             self._trace_stream(
@@ -1386,7 +1390,8 @@ class MediaStream:
             # Playback has already begun, so the header has been served
             # for this file, but the scan happens on a new file handle
             # and is the first request to be made.
-            start > self.config.header_size and self.recent_reads.last_read_end is None
+            start > self.config.header_size
+            and self.recent_reads.last_read_end is None
         ):
             return "general_scan"
 

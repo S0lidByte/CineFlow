@@ -1,6 +1,7 @@
 """Resume-path safeguards for opportunistic streaming prefetch."""
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -9,6 +10,7 @@ import pytest
 import trio
 from ordered_set import OrderedSet
 
+from program.services.streaming.cache import Cache, CacheConfig
 from program.services.streaming.exceptions import EmptyDataException
 from program.services.streaming.media_stream import MediaStream
 
@@ -65,6 +67,76 @@ def test_non_empty_prefetch_error_is_not_suppressed() -> None:
 
     with pytest.raises(RuntimeError, match="unexpected"):
         trio.run(_run)
+
+
+def test_cache_hit_miss_falls_back_instead_of_returning_zero_bytes() -> None:
+    stream = _bare_stream()
+    stream._read_cache = AsyncMock(return_value=b"")  # type: ignore[method-assign]
+    stream._fetch_discrete_byte_range = AsyncMock(  # type: ignore[method-assign]
+        return_value=b"resume-data"
+    )
+    stream.build_log_message = lambda message: message  # type: ignore[method-assign]
+
+    async def _run() -> bytes:
+        return await stream._read_cached_or_fallback(start=100, end=110)
+
+    assert trio.run(_run) == b"resume-data"
+    stream._fetch_discrete_byte_range.assert_awaited_once_with(
+        start=100,
+        size=11,
+        should_cache=True,
+    )
+
+
+def test_exit_and_resume_same_video_from_hybrid_cache(tmp_path: Path) -> None:
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "warm",
+            max_size_bytes=4096,
+            hot_dir=tmp_path / "hot",
+            hot_max_size_bytes=600,
+            metrics_enabled=False,
+        )
+    )
+    filename = "same-video.mkv"
+    first_chunk = bytes(range(256)) * 2
+    second_chunk = bytes(reversed(range(256))) * 2
+
+    def session() -> MediaStream:
+        stream = _bare_stream()
+
+        async def read_cache(*, start: int, end: int) -> bytes:
+            return await cache.get(filename, start, end)
+
+        stream._read_cache = read_cache  # type: ignore[method-assign]
+        stream._fetch_discrete_byte_range = AsyncMock(  # type: ignore[method-assign]
+            side_effect=AssertionError("resume unexpectedly returned to HTTP")
+        )
+        return stream
+
+    async def _run() -> None:
+        await cache.put(filename, 0, first_chunk)
+        playing = session()
+        assert (
+            await playing._read_cached_or_fallback(start=128, end=191)
+            == first_chunk[128:192]
+        )
+
+        # Sequential prefetch fills the next chunk and demotes the watched
+        # chunk to local storage. The player then exits and opens a new handle.
+        await cache.put(filename, len(first_chunk), second_chunk)
+        assert cache._index[cache._key(filename, 0)].tier == "warm"
+        del playing
+        await trio.lowlevel.checkpoint()
+
+        resumed = session()
+        assert (
+            await resumed._read_cached_or_fallback(start=192, end=255)
+            == first_chunk[192:256]
+        )
+        resumed._fetch_discrete_byte_range.assert_not_awaited()
+
+    trio.run(_run)
 
 
 def test_response_context_includes_range_headers() -> None:
