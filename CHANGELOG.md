@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.17](https://github.com/S0lidByte/CineFlow/compare/v1.29.16...v1.29.17) (2026-08-02)
+
+
+### Bug Fixes
+
+* **media-stream:** refresh debrid URL on empty-data response to break dead-loop on expired links ([03e61e8](https://github.com/S0lidByte/CineFlow/commit/03e61e8a4367553a53fd4d7879593e96d2036550))
+
 ## [1.29.16](https://github.com/S0lidByte/CineFlow/compare/v1.29.15...v1.29.16) (2026-08-02)
 
 
