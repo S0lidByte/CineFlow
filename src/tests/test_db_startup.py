@@ -41,6 +41,15 @@ class TestDatabaseErrorClassification:
         exc = _sa_operational("FATAL:  the database system is starting up")
         assert is_transient_database_error(exc)
 
+    def test_not_yet_accepting_connections_is_transient(self):
+        exc = _sa_operational(
+            'connection to server at "riven-db" (172.21.0.8), port 5432 failed: '
+            "FATAL:  the database system is not yet accepting connections\n"
+            "DETAIL:  Consistent recovery state has not been yet reached."
+        )
+        assert is_transient_database_error(exc)
+        assert not is_database_missing_error(exc)
+
     def test_connection_refused_is_transient(self):
         exc = _sa_operational(
             'connection to server at "riven-db", port 5432 failed: Connection refused'

@@ -20,6 +20,9 @@ from . import db, db_host, engine_options
 _TRANSIENT_DB_ERROR_MARKERS = (
     "in recovery mode",
     "is starting up",
+    "not yet accepting connections",
+    "consistent recovery state",
+    "is shutting down",
     "connection refused",
     "could not connect to server",
     "could not translate host name",
