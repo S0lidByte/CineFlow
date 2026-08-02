@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.29.16](https://github.com/S0lidByte/CineFlow/compare/v1.29.15...v1.29.16) (2026-08-02)
+
+
+### Bug Fixes
+
+* **media-stream:** fix gap_range pyright type issue for contiguous prefetch gap ([535296e](https://github.com/S0lidByte/CineFlow/commit/535296e1fbb28d3d178bca3604d24c93e023289e))
+* **media-stream:** position stream worker at first uncached chunk on cache_hit and read small gaps contiguous ([1fda618](https://github.com/S0lidByte/CineFlow/commit/1fda618833aedf347d70ac73e6d9abbddc768afc))
+
 ## [1.29.15](https://github.com/S0lidByte/CineFlow/compare/v1.29.14...v1.29.15) (2026-08-01)
 
 
