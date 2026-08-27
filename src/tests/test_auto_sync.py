@@ -3,8 +3,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from kink import di
 
-from program.media.item import Show
+from program.media.item import Season, Show
+from program.program import Program
 from program.services.indexers import IndexerService
 from program.utils.locking import ItemLock
 from routers.secure.scrape import (
@@ -59,13 +61,20 @@ async def test_auto_scrape_triggers_sync_when_seasons_missing():
     # Mock the execute call that refreshes the item
     mock_session.execute.return_value.scalar_one.return_value = mock_show
 
-    # Mock IndexerService
-    mock_indexer = MagicMock(spec=IndexerService)
-    mock_indexer.run.return_value = iter([mock_show])  # Generator returns the item
+    # Mock the TVDB metadata updater used by the on-demand sync path.
+    mock_season = MagicMock(spec=Season)
+    mock_season.number = 1
+    mock_season.id = 321
+    mock_season.episodes = []
+    mock_tvdb_indexer = MagicMock()
 
-    # Setup DI mock
-    with patch("program.program.riven.services") as mock_services:
-        mock_services.indexer = mock_indexer
+    def add_requested_season(show):
+        show.seasons = [mock_season]
+        return True
+
+    mock_tvdb_indexer._update_show_metadata.side_effect = add_requested_season
+    mock_indexer = MagicMock(spec=IndexerService)
+    mock_indexer.tvdb_indexer = mock_tvdb_indexer
 
     request = AutoScrapeRequest(media_type="tv", tvdb_id="359913", season_numbers=[1])
 
@@ -73,19 +82,23 @@ async def test_auto_scrape_triggers_sync_when_seasons_missing():
     with patch("routers.secure.scrape.db_session") as mock_db_sess_cm:
         mock_db_sess_cm.return_value.__enter__.return_value = mock_session
 
-        # Patch db_functions.get_item which is called before the season check
-        with patch("program.db.db_functions.get_item", return_value=mock_show):
-            # Patch get_ranking_overrides to return a basic model
-            with patch(
-                "routers.secure.scrape.get_ranking_overrides", return_value=MagicMock()
-            ):
-                # Execute
-                response = await auto_scrape(request)
+        # Patch the current external-ID lookup used by resolve_media_item.
+        with patch("program.db.db_functions.get_item_by_external_id", return_value=mock_show):
+            with patch("routers.secure.scrape.di") as mock_di:
+                mock_di[Program].em = MagicMock()
+                with patch("program.program.riven.services") as mock_services:
+                    mock_services.indexer = mock_indexer
+                    # Patch get_ranking_overrides to return a basic model
+                    with patch(
+                        "routers.secure.scrape.get_ranking_overrides", return_value=MagicMock()
+                    ):
+                        # Execute
+                        response = await auto_scrape(request)
 
-                # Verify
-                assert "Started scrape" in response.message
-                mock_indexer.run.assert_called_once_with(mock_show)
-                mock_session.expire.assert_called_with(mock_show)
+    # Verify
+    assert "Started scrape" in response.message
+    mock_tvdb_indexer._update_show_metadata.assert_called_once_with(mock_show)
+    mock_session.add.assert_called_once_with(mock_season)
 
 
 @pytest.mark.asyncio
@@ -98,11 +111,6 @@ async def test_auto_scrape_concurrency_returns_202():
 
     mock_session = MagicMock()
     mock_session.execute.return_value.scalar_one.return_value = mock_show
-
-    # Mock IndexerService with a delay to simulate work
-    async def slow_sync():
-        await asyncio.sleep(0.5)
-        return iter([mock_show])
 
     mock_indexer = MagicMock(spec=IndexerService)
     # We want to test that ItemLock handles the concurrency
@@ -121,7 +129,7 @@ async def test_auto_scrape_concurrency_returns_202():
 
     with patch("routers.secure.scrape.db_session") as mock_db_sess_cm:
         mock_db_sess_cm.return_value.__enter__.return_value = mock_session
-        with patch("program.db.db_functions.get_item", return_value=mock_show):
+        with patch("program.db.db_functions.get_item_by_external_id", return_value=mock_show):
             with patch(
                 "routers.secure.scrape.get_ranking_overrides", return_value=MagicMock()
             ):
@@ -146,25 +154,33 @@ async def test_auto_scrape_handles_sync_timeout():
 
     mock_session = MagicMock()
 
+    mock_tvdb_indexer = MagicMock()
+    mock_tvdb_indexer._update_show_metadata.side_effect = asyncio.TimeoutError
+    mock_indexer = MagicMock(spec=IndexerService)
+    mock_indexer.tvdb_indexer = mock_tvdb_indexer
+
+    request = AutoScrapeRequest(
+        media_type="tv", tvdb_id="359913", season_numbers=[1]
+    )
+
+    mock_session.execute.return_value.scalar_one.return_value = mock_show
+    ItemLock.release(mock_show.id)
+    mock_tvdb_indexer._update_show_metadata.side_effect = asyncio.TimeoutError
+
     with patch("program.program.riven.services") as mock_services:
-        mock_services.indexer = MagicMock(spec=IndexerService)
-
-        request = AutoScrapeRequest(
-            media_type="tv", tvdb_id="359913", season_numbers=[1]
-        )
-
-    with patch("routers.secure.scrape.db_session") as mock_db_sess_cm:
-        mock_db_sess_cm.return_value.__enter__.return_value = mock_session
-        with patch("program.db.db_functions.get_item", return_value=mock_show):
-            with patch(
-                "routers.secure.scrape.get_ranking_overrides", return_value=MagicMock()
-            ):
-                # Simulate timeout in asyncio.wait_for
-                with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
-                    with pytest.raises(HTTPException) as excinfo:
-                        await auto_scrape(request)
-                    assert excinfo.value.status_code == 504
-                    assert "Metadata sync timed out" in excinfo.value.detail
+        mock_services.indexer = mock_indexer
+        with patch("routers.secure.scrape.db_session") as mock_db_sess_cm:
+            mock_db_sess_cm.return_value.__enter__.return_value = mock_session
+            with patch("program.db.db_functions.get_item_by_external_id", return_value=mock_show):
+                with patch("routers.secure.scrape.di") as mock_di:
+                    mock_di[Program].em = MagicMock()
+                    with patch(
+                        "routers.secure.scrape.get_ranking_overrides", return_value=MagicMock()
+                    ):
+                        with pytest.raises(HTTPException) as excinfo:
+                            await auto_scrape(request)
+                        assert excinfo.value.status_code == 504
+                        assert "Metadata sync timed out" in excinfo.value.detail
 
     # Verify lock is released even on timeout
     assert not (await ItemLock.get_lock(mock_show.id)).locked()
