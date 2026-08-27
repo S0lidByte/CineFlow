@@ -53,13 +53,15 @@ services:
       - SYS_ADMIN
     security_opt:
       - apparmor:unconfined
+    devices:
+      - /dev/fuse:/dev/fuse
     volumes:
       - cineflow_test_data:/riven/data
     depends_on:
       riven_postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/docs >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 30
