@@ -197,11 +197,11 @@ wheels = [
 
 [[package]]
 name = "cachetools"
-version = "7.0.5"
+version = "7.1.7"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/af/dd/57fe3fdb6e65b25a5987fd2cdc7e22db0aef508b91634d2e57d22928d41b/cachetools-7.0.5.tar.gz", hash = "sha256:0cd042c24377200c1dcd225f8b7b12b0ca53cc2c961b43757e774ebe190fd990", size = 37367, upload-time = "2026-03-09T20:51:29.451Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/70/d2/47e8bc06fe2a06d3f5bdf20f1126ab66c4e99dc48d940e7ba873f7ac7131/cachetools-7.1.7.tar.gz", hash = "sha256:a3e2a00b14d8f8a6b70c1dae7b4685e7ad3bc965c5b42124a2d6ce895da6cf50", size = 40680, upload-time = "2026-08-01T21:20:40.434Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/06/f3/39cf3367b8107baa44f861dc802cbf16263c945b62d8265d36034fc07bea/cachetools-7.0.5-py3-none-any.whl", hash = "sha256:46bc8ebefbe485407621d0a4264b23c080cedd913921bad7ac3ed2f26c183114", size = 13918, upload-time = "2026-03-09T20:51:27.33Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/d8/767faeda872075724b95dd675466a645f1b92aadcdcf2d1429dcfd76c176/cachetools-7.1.7-py3-none-any.whl", hash = "sha256:ef98ef375ad188819ef2f9b3645e3987f4b8c5b7550e436ad998c2de78296df0", size = 16830, upload-time = "2026-08-01T21:20:38.977Z" },
 ]
 
 [[package]]
@@ -1643,7 +1643,7 @@ requires-dist = [
     { name = "apscheduler", specifier = ">=3.10.4,<4" },
     { name = "babel", specifier = ">=2.18.0,<3" },
     { name = "bencodepy", specifier = ">=0.9.5,<0.10" },
-    { name = "cachetools", specifier = ">=5.3.3,<8" },
+    { name = "cachetools", specifier = ">=7.1.6,<8" },
     { name = "coverage", specifier = ">=7.15.2,<8" },
     { name = "dill", specifier = ">=0.3.8,<0.5" },
     { name = "fastapi", specifier = ">=0.140.0,<1" },
@@ -1652,7 +1652,7 @@ requires-dist = [
     { name = "kink", specifier = ">=0.8.1,<0.10" },
     { name = "lazy-imports", specifier = ">=1.1.0" },
     { name = "loguru", specifier = ">=0.7.2,<0.8" },
-    { name = "lxml", specifier = ">=5.1.0,<7" },
+    { name = "lxml", specifier = ">=6.1.1,<7" },
     { name = "opentelemetry-api", specifier = ">=1.25.0,<2" },
     { name = "opentelemetry-exporter-prometheus", specifier = ">=0.46b0,<0.66" },
     { name = "opentelemetry-sdk", specifier = ">=1.25.0,<2" },
