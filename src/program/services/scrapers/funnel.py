@@ -22,7 +22,9 @@ _REASON_RE = re.compile(
 
 # Last completed scrape funnel per media item id (process-local, TTL).
 _LAST_FUNNEL_LOCK = threading.RLock()
-_LAST_FUNNEL_BY_ITEM: TTLCache[int, dict[str, Any]] = TTLCache(maxsize=2048, ttl=3600)
+_LAST_FUNNEL_BY_ITEM: TTLCache[int, dict[str, Any]] = TTLCache[int, dict[str, Any]](
+    maxsize=2048, ttl=3600
+)
 
 
 def bucket_rtn_reason(exc: BaseException) -> str:
