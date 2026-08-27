@@ -53,6 +53,8 @@ services:
       - SYS_ADMIN
     security_opt:
       - apparmor:unconfined
+    devices:
+      - /dev/fuse:/dev/fuse
     volumes:
       - cineflow_prod_smoke_data:/riven/data
     depends_on:
