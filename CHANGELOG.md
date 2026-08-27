@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.25](https://github.com/S0lidByte/CineFlow/compare/v1.29.24...v1.29.25) (2026-08-27)
+
+
+### Bug Fixes
+
+* annotate cachetools TTL caches ([459b3aa](https://github.com/S0lidByte/CineFlow/commit/459b3aa31cc819b8bf6aa7b8c53a9f8bc101aa15))
+
 ## [1.29.24](https://github.com/S0lidByte/CineFlow/compare/v1.29.23...v1.29.24) (2026-08-02)
 
 
