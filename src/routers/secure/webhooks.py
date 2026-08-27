@@ -32,7 +32,9 @@ WEBHOOK_SECRET_HEADER = "x-webhook-secret"
 PLEX_SCROBBLE_EVENT = "media.scrobble"
 
 # Dedup repeated Plex/Tautulli deliveries of the same scrobble (24h TTL).
-_HISTORY_IDEMPOTENCY: TTLCache[str, bool] = TTLCache(maxsize=4096, ttl=86400)
+_HISTORY_IDEMPOTENCY: TTLCache[str, bool] = TTLCache[str, bool](
+    maxsize=4096, ttl=86400
+)
 
 
 class OverseerrWebhookResponse(BaseModel):
