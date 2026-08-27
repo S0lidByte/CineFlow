@@ -48,7 +48,9 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-_get_items_count_cache: TTLCache[str, int] = TTLCache(maxsize=1024, ttl=5)
+_get_items_count_cache: TTLCache[str, int] = TTLCache[str, int](
+    maxsize=1024, ttl=5
+)
 
 _RETRY_SKIP_RESET_STATES = frozenset(
     {
