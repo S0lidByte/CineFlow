@@ -54,6 +54,7 @@ dev = [
     "pyright>=1.1.352,<2",
     "pyperf>=2.2.0,<3",
     "pytest>=9.0.3,<10",
+    "pytest-asyncio>=1.4.0,<2",
     "pytest-mock>=3.14.0,<4",
     "responses==0.26.2",
     "pyfakefs>=5.4.1,<7",
