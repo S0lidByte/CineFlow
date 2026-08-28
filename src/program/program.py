@@ -237,8 +237,8 @@ class Program(threading.Thread):
             )
 
         if not self.services.updater.initialized:
-            logger.error(
-                "No Updater service initialized, you must enable at least one."
+            logger.info(
+                "No library updater initialized; manual request processing remains enabled."
             )
 
         # Warn about optional content that failed init without blocking the pipeline
@@ -270,12 +270,14 @@ class Program(threading.Thread):
         if not self.services:
             return True
 
+        # Updaters are post-processing integrations. They must not block the
+        # request/download pipeline when no provider is configured; manual
+        # requests still need to reach persistence and the filesystem.
         core = (
             self.services.indexer,
             self.services.scraping,
             self.services.downloader,
             self.services.filesystem,
-            self.services.updater,
         )
         return all(s.initialized for s in core if s.enabled)
 
@@ -292,7 +294,6 @@ class Program(threading.Thread):
                 self.services.scraping,
                 self.services.downloader,
                 self.services.filesystem,
-                self.services.updater,
             )
             if s.enabled and not s.initialized
         ]

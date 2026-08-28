@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from program.media.item import Episode, Movie, Season, Show
+from program.media.state import States
 from program.services.downloaders.models import (
     BitrateLimitExceededException,
     DebridFile,
@@ -25,6 +26,22 @@ def test_coerce_runtime_minutes_rejects_unusable_values():
     assert coerce_runtime_minutes(float("nan")) is None
     assert coerce_runtime_minutes(42) == 42.0
     assert coerce_runtime_minutes("90.5") == 90.5
+
+
+def test_explicit_show_pause_overrides_active_child_state():
+    show = Show({"title": "Show", "type": "show"})
+    season = Season({"title": "Season 1", "type": "season", "number": 1})
+    episode = Episode({"title": "Episode 1", "type": "episode", "number": 1})
+    season.parent = show
+    episode.parent = season
+    season.episodes = [episode]
+    show.seasons = [season]
+    episode.last_state = States.Ongoing
+
+    show.last_state = States.Paused
+
+    assert show.state is States.Paused
+    assert show.to_dict()["state"] == "Paused"
 
 
 def test_movie_init_persists_runtime_from_dict():

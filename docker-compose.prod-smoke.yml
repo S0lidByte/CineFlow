@@ -57,6 +57,7 @@ services:
       - /dev/fuse:/dev/fuse
     volumes:
       - cineflow_prod_smoke_data:/riven/data
+      - cineflow_prod_smoke_library:/media
     depends_on:
       riven_postgres:
         condition: service_healthy
@@ -67,8 +68,20 @@ services:
       retries: 36
       start_period: 90s
 
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: riven-jellyfin
+    ports:
+      - "8096:8096"
+    volumes:
+      - cineflow_prod_smoke_jellyfin_config:/config
+      - cineflow_prod_smoke_jellyfin_cache:/cache
+      - cineflow_prod_smoke_library:/media
+    restart: unless-stopped
+
   riven-frontend:
-    image: coldspirit/cineflow-frontend:dev
+    # Pin smoke verification to the exact frontend artifact under audit.
+    image: coldspirit/cineflow-frontend@sha256:68de15f198a2f7636e900a38c4cd28a3225fc423b31aff25ae2e8ad7ecf3b538
     container_name: riven-frontend
     ports:
       - "3000:3000"
@@ -88,3 +101,6 @@ volumes:
   cineflow_prod_smoke_pg:
   cineflow_prod_smoke_data:
   cineflow_prod_smoke_frontend:
+  cineflow_prod_smoke_jellyfin_config:
+  cineflow_prod_smoke_jellyfin_cache:
+  cineflow_prod_smoke_library:

@@ -960,6 +960,10 @@ class Show(MediaItem):
         super().__init__(item)
 
     def _determine_state(self):
+        # An explicit pause on the show is authoritative over child-derived state.
+        if self.last_state == States.Paused:
+            return States.Paused
+
         if all(season.state == States.Paused for season in self.seasons):
             return States.Paused
 
@@ -1139,6 +1143,10 @@ class Season(MediaItem):
         super().__init__(item)
 
     def _determine_state(self):
+        # An explicit pause on the season is authoritative over child-derived state.
+        if self.last_state == States.Paused:
+            return States.Paused
+
         if len(self.episodes) > 0:
             if all(episode.state == States.Paused for episode in self.episodes):
                 return States.Paused
