@@ -39,6 +39,8 @@ def mock_settings(monkeypatch: pytest.MonkeyPatch):
         downloaders=_settings_ns(
             proxy_url="",
             real_debrid=_settings_ns(enabled=True, api_key="rd-secret-key"),
+            all_debrid=_settings_ns(enabled=True, api_key="ad-secret-key"),
+            debrid_link=_settings_ns(enabled=True, api_key="dl-secret-key"),
         ),
         updaters=_settings_ns(
             plex=_settings_ns(
@@ -131,6 +133,36 @@ def test_real_debrid_unauthorized(mock_settings):
 
     assert result.ok is False
     assert result.message == "Unauthorized"
+
+
+def test_all_debrid_ok(mock_settings):
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.get.return_value = _FakeResponse(200, payload={"status": "success"})
+
+    with patch.object(ct.httpx, "Client", return_value=fake_client):
+        result = ct._probe_all_debrid()
+
+    assert result.ok is True
+    assert result.message == "Connected to AllDebrid"
+    assert fake_client.get.call_args.args[0] == "/v4/user"
+    assert "Bearer ad-secret-key" in fake_client.get.call_args.kwargs["headers"]["Authorization"]
+
+
+def test_debrid_link_ok(mock_settings):
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.get.return_value = _FakeResponse(200, payload={"success": True})
+
+    with patch.object(ct.httpx, "Client", return_value=fake_client) as client_factory:
+        result = ct._probe_debrid_link()
+
+    assert result.ok is True
+    assert result.message == "Connected to Debrid-Link"
+    assert fake_client.get.call_args.args[0] == "/account/infos"
+    assert "Bearer dl-secret-key" in client_factory.call_args.kwargs["headers"]["Authorization"]
 
 
 def test_plex_ok(mock_settings):

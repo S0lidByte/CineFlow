@@ -1,0 +1,65 @@
+name: PostgreSQL Integration
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  postgres-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16.4-alpine3.20
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: riven_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d riven_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: pyproject.toml
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          activate-environment: true
+
+      - name: Install prerequisites
+        run: |
+          sudo apt update
+          sudo apt install -y libfuse3-dev pkg-config
+
+      - name: Install the project
+        run: uv sync --locked --all-extras --dev
+
+      - name: Run PostgreSQL integration tests
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/riven_ci
+        run: |
+          uv run pytest -q \
+            src/tests/test_db_functions.py \
+            src/tests/test_scheduling.py
+
+      - name: Collect PostgreSQL diagnostics on failure
+        if: failure()
+        run: |
+          docker ps -a
+          docker logs "$(docker ps -aq --filter ancestor=postgres:16.4-alpine3.20 | head -n 1)" || true

@@ -23,6 +23,8 @@ PROBE_TIMEOUT_SECONDS = 5.0
 
 ConnectionService = Literal[
     "real_debrid",
+    "all_debrid",
+    "debrid_link",
     "plex",
     "jackett",
     "prowlarr",
@@ -32,6 +34,8 @@ ConnectionService = Literal[
 
 SUPPORTED_SERVICES: tuple[ConnectionService, ...] = (
     "real_debrid",
+    "all_debrid",
+    "debrid_link",
     "plex",
     "jackett",
     "prowlarr",
@@ -169,6 +173,66 @@ def _probe_real_debrid() -> ConnectionTestResponse:
     if username and username.strip():
         return _ok(started, f"Connected as {username.strip()}")
     return _ok(started, "Connected")
+
+
+def _probe_all_debrid() -> ConnectionTestResponse:
+    started = time.perf_counter()
+    settings = settings_manager.settings.downloaders.all_debrid
+    api_key = (settings.api_key or "").strip()
+    if not api_key:
+        return _fail(started, "API key not configured")
+
+    proxy_url = (settings_manager.settings.downloaders.proxy_url or "").strip() or None
+    try:
+        with httpx.Client(
+            base_url="https://api.alldebrid.com",
+            timeout=_httpx_timeout(),
+            proxy=proxy_url,
+            follow_redirects=True,
+        ) as client:
+            response = client.get(
+                "/v4/user",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+    except httpx.TimeoutException:
+        return _fail(started, "Timed out")
+    except httpx.HTTPError:
+        return _fail(started, "Connection failed")
+
+    if response.status_code in (401, 403):
+        return _fail(started, "Unauthorized" if response.status_code == 401 else "Forbidden")
+    if response.status_code >= 400:
+        return _fail(started, f"HTTP {response.status_code}")
+    return _ok(started, "Connected to AllDebrid")
+
+
+def _probe_debrid_link() -> ConnectionTestResponse:
+    started = time.perf_counter()
+    settings = settings_manager.settings.downloaders.debrid_link
+    api_key = (settings.api_key or "").strip()
+    if not api_key:
+        return _fail(started, "API key not configured")
+
+    proxy_url = (settings_manager.settings.downloaders.proxy_url or "").strip() or None
+    try:
+        with httpx.Client(
+            base_url="https://debrid-link.com/api/v2",
+            timeout=_httpx_timeout(),
+            proxy=proxy_url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            follow_redirects=True,
+        ) as client:
+            response = client.get("/account/infos")
+    except httpx.TimeoutException:
+        return _fail(started, "Timed out")
+    except httpx.HTTPError:
+        return _fail(started, "Connection failed")
+
+    if response.status_code in (401, 403):
+        return _fail(started, "Unauthorized" if response.status_code == 401 else "Forbidden")
+    if response.status_code >= 400:
+        return _fail(started, f"HTTP {response.status_code}")
+    return _ok(started, "Connected to Debrid-Link")
 
 
 def _probe_plex() -> ConnectionTestResponse:
@@ -362,6 +426,8 @@ def _probe_subdl() -> ConnectionTestResponse:
 
 _PROBES: dict[ConnectionService, Callable[[], ConnectionTestResponse]] = {
     "real_debrid": _probe_real_debrid,
+    "all_debrid": _probe_all_debrid,
+    "debrid_link": _probe_debrid_link,
     "plex": _probe_plex,
     "jackett": _probe_jackett,
     "prowlarr": _probe_prowlarr,

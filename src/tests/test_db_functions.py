@@ -17,6 +17,11 @@ from program.media.item import Episode, Movie, Season, Show
 
 @pytest.fixture(scope="session")
 def test_container():
+    """Provide a local PostgreSQL container when CI has no service URL."""
+    if os.environ.get("DATABASE_URL"):
+        yield None
+        return
+
     # One container for the whole test session
     with PostgresContainer(
         "postgres:16.4-alpine3.20",
@@ -33,18 +38,34 @@ def db_engine(test_container):
     One engine + one migrated schema for the whole test session.
     We also relax durability for speed (safe in tests).
     """
-    url = test_container.get_connection_url()
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        assert test_container is not None
+        url = test_container.get_connection_url()
     if url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
-    # Make Alembic target this DB
+    # Make both the application settings and Alembic target this DB. Alembic's
+    # env.py derives its URL from settings_manager during command execution.
     os.environ["DATABASE_URL"] = url
+    from program.settings import settings_manager
+
+    settings_manager.settings.database.host = url
+
+    # Build and bind the test engine before migrations; run_migrations checks
+    # the currently bound global engine for the database revision.
+    engine = create_engine(url, future=True, pool_pre_ping=True)
+    db.engine = engine
+    db.Session.configure(bind=engine)
+
+    # Each module owns its session-scoped fixture; reset the disposable schema
+    # so another module's fixture cannot collide on PostgreSQL named types.
+    with engine.begin() as conn:
+        conn.execute(text("DROP SCHEMA public CASCADE"))
+        conn.execute(text("CREATE SCHEMA public"))
 
     # Run migrations ONCE (big win)
     run_migrations(database_url=url)
-
-    # Build an engine for tests
-    engine = create_engine(url, future=True, pool_pre_ping=True)
 
     # Speed knobs (commit is much cheaper now)
     with engine.connect() as conn:
@@ -53,10 +74,6 @@ def db_engine(test_container):
         # Optional extras:
         # conn.execute(text("SET client_min_messages = WARNING"))
         # conn.execute(text("SET log_statement = 'none'"))
-
-    # Rebind global db.* so app code uses this engine
-    db.engine = engine
-    db.Session.configure(bind=engine)
 
     yield engine
 
@@ -156,7 +173,7 @@ def test_item_exists_by_any_id_paths(test_scoped_db_session):
 
 def test_item_exists_by_any_id_negative(test_scoped_db_session):
     assert not item_exists_by_any_id(
-        item_id="non_existent",
+        item_id=-1,
         tvdb_id=None,
         tmdb_id=None,
         imdb_id=None,
