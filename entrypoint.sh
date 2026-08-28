@@ -67,13 +67,14 @@ chown -R "$PUID:$PGID" "$USER_HOME"
 export HOME="$USER_HOME"
 
 # Define the command to run based on the DEBUG flag
+RIVEN_PYTHON=${RIVEN_PYTHON:-/riven/.venv/bin/python}
 if [ "${DEBUG}" != "" ]; then
     echo "Installing debugpy..."
-    /riven/.venv/bin/python -m ensurepip
-    /riven/.venv/bin/python -m pip install debugpy
-    CMD="/riven/.venv/bin/python -m debugpy --listen 0.0.0.0:5678 src/main.py"
+    "$RIVEN_PYTHON" -m ensurepip
+    "$RIVEN_PYTHON" -m pip install debugpy
+    CMD="$RIVEN_PYTHON -m debugpy --listen 0.0.0.0:5678 src/main.py"
 else
-    CMD="/riven/.venv/bin/python src/main.py"
+    CMD="$RIVEN_PYTHON src/main.py"
 fi
 
 
@@ -93,9 +94,28 @@ $RUN_CMD &
 MAIN_PID=$!
 
 echo "Waiting for RivenVFS FUSE mount to initialize..."
-# Wait for the first 'rivenvfs' mount to register
+# Do not leave a failed backend container running forever if initialization fails.
+MOUNT_WAIT_TIMEOUT=${MOUNT_WAIT_TIMEOUT:-120}
+MOUNT_WAIT_ELAPSED=0
 while ! grep -q "rivenvfs" /proc/mounts; do
+    if ! kill -0 "$MAIN_PID" 2>/dev/null; then
+        wait "$MAIN_PID" 2>/dev/null
+        EXIT_CODE=$?
+        echo "Riven exited before the VFS mount initialized (exit code $EXIT_CODE)."
+        cleanup_riven_mounts 20
+        exit "$EXIT_CODE"
+    fi
+
+    if [ "$MOUNT_WAIT_ELAPSED" -ge "$MOUNT_WAIT_TIMEOUT" ]; then
+        echo "Timed out waiting for the RivenVFS mount after ${MOUNT_WAIT_TIMEOUT}s."
+        kill -TERM "$MAIN_PID" 2>/dev/null || true
+        wait "$MAIN_PID" 2>/dev/null
+        cleanup_riven_mounts 20
+        exit 1
+    fi
+
     sleep 1
+    MOUNT_WAIT_ELAPSED=$((MOUNT_WAIT_ELAPSED + 1))
 done
 
 # Give it an extra second to allow host propagation back to the container

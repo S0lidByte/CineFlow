@@ -217,6 +217,20 @@ async def stream_file(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+async def _cleanup_ffmpeg_process(process: asyncio.subprocess.Process) -> None:
+    """Terminate and reap an FFmpeg process without suppressing cancellation."""
+    if process.returncode is not None:
+        await process.wait()
+        return
+
+    process.terminate()
+    try:
+        await asyncio.wait_for(process.wait(), timeout=1.0)
+    except TimeoutError:
+        process.kill()
+        await process.wait()
+
+
 def _get_video_duration(path: str) -> float:
     try:
         result = subprocess.run(
@@ -359,17 +373,19 @@ async def get_hls_segment(
     )
 
     async def stream_output():
-        if not process.stdout or not process.stderr:
-            return
-        while True:
-            chunk = await process.stdout.read(32 * 1024)
-            if not chunk:
-                # If no data, check for errors
-                if process.returncode and process.returncode != 0:
-                    err = await process.stderr.read()
-                    logger.error(f"FFmpeg Error: {err.decode()}")
-                break
-            yield chunk
-        await process.wait()
+        try:
+            if not process.stdout or not process.stderr:
+                return
+            while True:
+                chunk = await process.stdout.read(32 * 1024)
+                if not chunk:
+                    # If no data, check for errors
+                    if process.returncode and process.returncode != 0:
+                        err = await process.stderr.read()
+                        logger.error(f"FFmpeg Error: {err.decode()}")
+                    break
+                yield chunk
+        finally:
+            await _cleanup_ffmpeg_process(process)
 
     return StreamingResponse(stream_output(), media_type="video/mp2t")

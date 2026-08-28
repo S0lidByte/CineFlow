@@ -1,0 +1,4 @@
+# Keep POSIX shell scripts and GitHub Actions workflows Linux-compatible.
+*.sh text eol=lf
+.github/workflows/*.yml text eol=lf
+.github/workflows/*.yaml text eol=lf

@@ -129,7 +129,6 @@ class Server(uvicorn.Server):
             raise
         finally:
             self.should_exit = True
-            sys.exit(0)
 
 
 def signal_handler(_signum: int, _frame: FrameType | None):
@@ -146,6 +145,7 @@ server = Server(config=config)
 
 
 with server.run_in_thread():
+    exit_code = 0
     try:
         di[Program].start()
         if not di[Program].initialized or not di[Program].is_alive():
@@ -154,6 +154,7 @@ with server.run_in_thread():
         di[Program].join()
     except Exception:
         logger.exception("Error in main thread")
+        exit_code = 1
     finally:
         logger.critical("Server has been stopped")
-        sys.exit(0)
+        sys.exit(exit_code)

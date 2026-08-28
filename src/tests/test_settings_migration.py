@@ -3,8 +3,8 @@ import os
 from pathlib import Path
 
 from program.settings import SettingsManager
+from program.utils import get_version
 
-TEST_VERSION = "1.28.3"
 DATA_PATH = Path(os.curdir) / "data"
 
 # Sample old settings data
@@ -51,4 +51,4 @@ def test_load_and_migrate_settings(tmp_path):
         settings_manager.settings.downloaders.proxy_url
         == "https://no_proxy.com"
     )
-    assert settings_manager.settings.version == TEST_VERSION
+    assert settings_manager.settings.version == get_version()

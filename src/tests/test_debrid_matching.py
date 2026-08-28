@@ -1,94 +1,134 @@
-from types import SimpleNamespace
+"""Tests for matching debrid files to media items."""
+
+from unittest.mock import Mock, patch
+
+import pytest
+from RTN import ParsedData
 
 from program.media.item import Episode, Movie, Season, Show
-from program.services.downloaders.realdebrid import RealDebridDownloader
+from program.services.downloaders import Downloader
+from program.services.downloaders.models import (
+    DebridFile,
+    DownloadedTorrent,
+    TorrentContainer,
+    TorrentInfo,
+)
 
-realdebrid_downloader = RealDebridDownloader()
+
+@pytest.fixture
+def downloader():
+    """Create a downloader with a mocked service and no initialization side effects."""
+    with patch.object(Downloader, "__init__", lambda *_: None):
+        instance = Downloader()
+        instance.service = Mock(name="service")
+        instance._service_cooldowns = {}
+        return instance
 
 
-def test_matches_item_movie():
-    torrent_info = SimpleNamespace(
-        files=[
-            SimpleNamespace(path="Inception.mkv", selected=1, bytes=2_000_000_000),
-        ]
+def _download_result(filename: str = "file.mkv") -> tuple[DebridFile, DownloadedTorrent]:
+    file = DebridFile(
+        file_id=1,
+        filename=filename,
+        filesize=800_000_000,
+        download_url="https://example.com/file",
     )
-    item = Movie({"imdb_id": "tt1375666", "requested_by": "user", "title": "Inception"})
-    assert realdebrid_downloader._matches_item(torrent_info, item) is True
-
-
-def test_matches_item_episode():
-    torrent_info = SimpleNamespace(
-        files=[
-            SimpleNamespace(
-                path="The Vampire Diaries s01e01.mkv", selected=1, bytes=800_000_000
-            ),
-        ]
+    result = DownloadedTorrent(
+        id=1,
+        infohash="abc123",
+        container=TorrentContainer(infohash="abc123", files=[file]),
+        info=TorrentInfo(id=1, name=filename),
     )
-    parent_show = Show(
-        {"imdb_id": "tt1405406", "requested_by": "user", "title": "The Vampire Diaries"}
+    return file, result
+
+
+def _parsed(filename: str, *, seasons: list[int], episodes: list[int], type: str) -> ParsedData:
+    return ParsedData(
+        raw_title=filename,
+        parsed_title="title",
+        seasons=seasons,
+        episodes=episodes,
+        type=type,
     )
-    parent_season = Season({"number": 1})
-    episode = Episode({"number": 1})
-    parent_season.add_episode(episode)
-    parent_show.add_season(parent_season)
-    episode.parent = parent_season
-    parent_season.parent = parent_show
-
-    assert realdebrid_downloader._matches_item(torrent_info, episode) is True
 
 
-def test_matches_item_season():
-    torrent_info = SimpleNamespace(
-        files=[
-            SimpleNamespace(
-                path="The Vampire Diaries s01e01.mkv", selected=1, bytes=800_000_000
-            ),
-            SimpleNamespace(
-                path="The Vampire Diaries s01e02.mkv", selected=1, bytes=800_000_000
-            ),
-        ]
-    )
-    show = Show(
-        {"imdb_id": "tt1405406", "requested_by": "user", "title": "The Vampire Diaries"}
-    )
-    season = Season({"number": 1})
-    episode1 = Episode({"number": 1})
-    episode2 = Episode({"number": 2})
-    season.add_episode(episode1)
-    season.add_episode(episode2)
-    show.add_season(season)
-
-    assert realdebrid_downloader._matches_item(torrent_info, season) is True
-
-
-def test_matches_item_partial_season():
-    torrent_info = SimpleNamespace(
-        files=[
-            SimpleNamespace(path="show_s01e01.mkv", selected=1, bytes=800_000_000),
-        ]
-    )
+def _show_with_episodes(*numbers: int) -> tuple[Show, Season]:
     show = Show({"imdb_id": "tt1405406", "requested_by": "user", "title": "Test Show"})
     season = Season({"number": 1})
-    episode1 = Episode({"number": 1})
-    episode2 = Episode({"number": 2})
-    season.add_episode(episode1)
-    season.add_episode(episode2)
+    for number in numbers:
+        season.add_episode(Episode({"number": number}))
     show.add_season(season)
+    return show, season
 
-    assert realdebrid_downloader._matches_item(torrent_info, season) is False
 
-
-def test_matches_item_no_files():
-    torrent_info = SimpleNamespace()
+def test_match_file_to_item_movie(downloader):
+    file, result = _download_result("Inception.mkv")
     item = Movie({"imdb_id": "tt1375666", "requested_by": "user", "title": "Inception"})
-    assert realdebrid_downloader._matches_item(torrent_info, item) is False
+
+    with patch.object(downloader, "_update_attributes") as update:
+        matched = downloader.match_file_to_item(
+            item, _parsed(file.filename, seasons=[], episodes=[], type="movie"), file, result
+        )
+
+    assert matched is True
+    update.assert_called_once()
 
 
-def test_matches_item_no_selected_files():
-    torrent_info = SimpleNamespace(
-        files=[
-            SimpleNamespace(path="movie.mp4", selected=0, bytes=2_000_000_000),
-        ]
+def test_match_file_to_item_episode(downloader):
+    show, season = _show_with_episodes(1)
+    episode = season.episodes[0]
+    file, result = _download_result("Test.Show.S01E01.mkv")
+
+    with patch.object(downloader, "_update_attributes"):
+        matched = downloader.match_file_to_item(
+            episode, _parsed(file.filename, seasons=[1], episodes=[1], type="episode"),
+            file, result, show=show,
+        )
+
+    assert matched is True
+
+
+def test_match_file_to_item_season_matches_all_files(downloader):
+    show, season = _show_with_episodes(1, 2)
+    file, result = _download_result("Test.Show.S01E01-E02.mkv")
+
+    with patch.object(downloader, "_update_attributes"):
+        matched = downloader.match_file_to_item(
+            season, _parsed(file.filename, seasons=[1], episodes=[1, 2], type="episode"),
+            file, result, show=show,
+        )
+
+    assert matched is True
+    assert season.active_stream is not None
+
+
+def test_match_file_to_item_partial_season_is_match(downloader):
+    show, season = _show_with_episodes(1, 2)
+    file, result = _download_result("Test.Show.S01E01.mkv")
+
+    with patch.object(downloader, "_update_attributes"):
+        matched = downloader.match_file_to_item(
+            season, _parsed(file.filename, seasons=[1], episodes=[1], type="episode"),
+            file, result, show=show,
+        )
+
+    assert matched is True
+
+
+def test_update_item_attributes_returns_false_for_empty_container(downloader):
+    item = Movie({"imdb_id": "tt1375666", "requested_by": "user", "title": "Inception"})
+    result = DownloadedTorrent(
+        id=1, infohash="abc123", container=TorrentContainer(infohash="abc123"),
+        info=TorrentInfo(id=1, name="Inception.mkv"),
     )
+
+    # The current production contract represents only selected provider files
+    # in `TorrentContainer.files`; an empty container has no match.
+    assert downloader.update_item_attributes(item, result) is False
+
+
+def test_update_item_attributes_returns_false_for_no_selected_files(downloader):
+    file, result = _download_result("movie.mkv")
     item = Movie({"imdb_id": "tt1375666", "requested_by": "user", "title": "Inception"})
-    assert realdebrid_downloader._matches_item(torrent_info, item) is False
+    result.container.files = []
+
+    assert downloader.update_item_attributes(item, result) is False

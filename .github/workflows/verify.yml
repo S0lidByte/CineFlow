@@ -104,4 +104,10 @@ jobs:
             src/tests/test_trakt_extract_ids.py \
             src/tests/test_plex_trakt_history.py \
             src/tests/test_phase2c_dep_smoke.py \
-            src/tests/test_guessit_subliminal_harness.py
+            src/tests/test_guessit_subliminal_harness.py \
+            src/tests/test_entrypoint.py \
+            src/tests/test_main_startup.py \
+            src/tests/test_db_startup.py \
+            src/tests/test_hls_process_cleanup.py \
+            src/tests/test_debrid_matching.py \
+            src/tests/test_settings_migration.py
