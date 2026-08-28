@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -9,6 +10,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from testcontainers.postgres import PostgresContainer
 
+from program.apis.tvdb_api import SeriesRelease
 from program.db.db import db, run_migrations
 from program.media.item import Episode, Movie, Season, Show
 from program.media.state import States
@@ -18,7 +20,11 @@ from program.scheduling.scheduler import ProgramScheduler
 
 @pytest.fixture(scope="session")
 def test_container():
-    """One container for the whole test session."""
+    """Provide a local PostgreSQL container when CI has no service URL."""
+    if os.environ.get("DATABASE_URL"):
+        yield None
+        return
+
     try:
         container = PostgresContainer(
             "postgres:16.4-alpine3.20",
@@ -43,7 +49,10 @@ def test_container():
 @pytest.fixture(scope="session")
 def db_engine(test_container):
     """One engine + one migrated schema for the whole test session."""
-    url = test_container.get_connection_url()
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        assert test_container is not None
+        url = test_container.get_connection_url()
     if url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
@@ -52,16 +61,21 @@ def db_engine(test_container):
 
     settings_manager.settings.database.host = url
 
-    run_migrations(database_url=url)
-
     engine = create_engine(url, future=True, pool_pre_ping=True)
+    db.engine = engine
+    db.Session.configure(bind=engine)
+
+    # Each module owns its session-scoped fixture; reset the disposable schema
+    # so another module's fixture cannot collide on PostgreSQL named types.
+    with engine.begin() as conn:
+        conn.execute(text("DROP SCHEMA public CASCADE"))
+        conn.execute(text("CREATE SCHEMA public"))
+
+    run_migrations(database_url=url)
 
     with engine.connect() as conn:
         conn = conn.execution_options(isolation_level="AUTOCOMMIT")
         conn.execute(text("SET synchronous_commit = OFF"))
-
-    db.engine = engine
-    db.Session.configure(bind=engine)
 
     yield engine
     engine.dispose()
@@ -243,18 +257,20 @@ class TestComputeNextAirDatetime:
         """Computing next air time from airs_days + airs_time when next_aired is missing."""
 
         now = datetime(2025, 1, 13, 10, 0, 0)  # Monday 10:00 AM
-        release_data = {
-            "airs_days": {
-                "monday": False,
-                "tuesday": True,
-                "wednesday": False,
-                "thursday": False,
-                "friday": False,
-                "saturday": False,
-                "sunday": False,
-            },
-            "airs_time": "20:00",
-        }
+        release_data = SeriesRelease.model_validate(
+            {
+                "airsDays": {
+                    "monday": False,
+                    "tuesday": True,
+                    "wednesday": False,
+                    "thursday": False,
+                    "friday": False,
+                    "saturday": False,
+                    "sunday": False,
+                },
+                "airsTime": "20:00",
+            }
+        )
 
         result = ProgramScheduler._compute_next_air_datetime(release_data, now)
 
@@ -270,10 +286,9 @@ class TestComputeNextAirDatetime:
         """Handling next_aired as a date-only string (should combine with airs_time)."""
 
         now = datetime(2025, 1, 13, 10, 0, 0)
-        release_data = {
-            "next_aired": "2025-01-15",
-            "airs_time": "21:30",
-        }
+        release_data = SeriesRelease.model_validate(
+            {"nextAired": "2025-01-15", "airsTime": "21:30"}
+        )
 
         result = ProgramScheduler._compute_next_air_datetime(release_data, now)
 
@@ -288,9 +303,9 @@ class TestComputeNextAirDatetime:
         """Handling next_aired as a full ISO datetime string."""
 
         now = datetime(2025, 1, 13, 10, 0, 0)
-        release_data = {
-            "next_aired": "2025-01-15T22:00:00",
-        }
+        release_data = SeriesRelease.model_validate(
+            {"nextAired": "2025-01-15T22:00:00"}
+        )
 
         result = ProgramScheduler._compute_next_air_datetime(release_data, now)
 
@@ -301,10 +316,12 @@ class TestComputeNextAirDatetime:
         """Graceful fallback when timezone is invalid or missing."""
 
         now = datetime(2025, 1, 13, 10, 0, 0)
-        release_data = {
-            "next_aired": "2025-01-15T22:00:00",
-            "timezone": "Invalid/Timezone",
-        }
+        release_data = SeriesRelease.model_validate(
+            {
+                "nextAired": "2025-01-15T22:00:00",
+                "timezone": "Invalid/Timezone",
+            }
+        )
 
         result = ProgramScheduler._compute_next_air_datetime(release_data, now)
 
@@ -316,7 +333,7 @@ class TestComputeNextAirDatetime:
         """Returning None when no valid air time can be computed."""
 
         now = datetime(2025, 1, 13, 10, 0, 0)
-        release_data = {}
+        release_data = SeriesRelease()
 
         result = ProgramScheduler._compute_next_air_datetime(release_data, now)
 
@@ -326,10 +343,9 @@ class TestComputeNextAirDatetime:
         """Handling malformed or missing airs_time values."""
 
         now = datetime(2025, 1, 13, 10, 0, 0)
-        release_data = {
-            "airs_days": {"monday": True},
-            "airs_time": "invalid",
-        }
+        release_data = SeriesRelease.model_validate(
+            {"airsDays": {"monday": True}, "airsTime": "invalid"}
+        )
 
         result = ProgramScheduler._compute_next_air_datetime(release_data, now)
 
@@ -633,16 +649,15 @@ class TestStateTransitions:
         mock_settings.settings.indexer.schedule_offset_minutes = 30
 
         program = Program()
-        mock_indexer = MagicMock()
-        mock_indexer.run.return_value = iter([show])
+        program.em = MagicMock()
         program.services = MagicMock()
-        program.services.get.return_value = mock_indexer
-
         scheduler = ProgramScheduler(program)
         scheduler._process_scheduled_tasks()
 
-        # Verify indexer was called
-        mock_indexer.run.assert_called_once()
+        # Reindexing is intentionally enqueued for the event-driven pipeline.
+        program.em.add_event.assert_called_once()
+        event = program.em.add_event.call_args.args[0]
+        assert event.item_id == show.id
 
     @patch("program.scheduling.scheduler.settings_manager")
     def test_completed_items_not_reenqueued(
