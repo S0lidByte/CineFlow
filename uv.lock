@@ -1568,7 +1568,7 @@ wheels = [
 
 [[package]]
 name = "riven"
-version = "1.29.25"
+version = "1.29.26"
 source = { virtual = "." }
 dependencies = [
     { name = "alembic" },

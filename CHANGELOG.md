@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.26](https://github.com/S0lidByte/CineFlow/compare/v1.29.25...v1.29.26) (2026-08-28)
+
+
+### Bug Fixes
+
+* harden startup and HLS cleanup ([0f322df](https://github.com/S0lidByte/CineFlow/commit/0f322dfa99d9a28cca9fabb364e186a8994cf61a))
+
 ## [1.29.25](https://github.com/S0lidByte/CineFlow/compare/v1.29.24...v1.29.25) (2026-08-27)
 
 
