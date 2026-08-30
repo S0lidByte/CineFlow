@@ -60,7 +60,6 @@ services:
       - "127.0.0.1:13003:3000"
     environment:
       BACKEND_URL: http://backend:8080
-      BACKEND_API_KEY: phase35-legacy-api-key-000000001
       BFF_API_KEY: phase35-bff-api-key-000000000002
       ACTOR_CONTEXT_SECRET: phase35-actor-context-secret-release-audit
       AUTH_SECRET: phase35-auth-secret-release-audit-only
