@@ -1,7 +1,12 @@
 from fastapi import Depends, Request
 from fastapi.routing import APIRouter
 
-from auth import require_role, resolve_api_key, resolve_webhook_api_key, resolve_ws_api_key
+from auth import (
+    require_role,
+    resolve_api_key,
+    resolve_webhook_api_key,
+    resolve_ws_api_key,
+)
 from program.settings import settings_manager
 from routers.models.shared import RootResponse
 from routers.secure.database import router as database_router

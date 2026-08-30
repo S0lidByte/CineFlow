@@ -1,11 +1,13 @@
+from unittest.mock import patch
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from unittest.mock import patch
 
 from program.settings import settings_manager
 from program.settings.models import AppModel
-from routers.secure.settings import router as settings_router, API_KEY_SENTINEL
+from routers.secure.settings import API_KEY_SENTINEL
+from routers.secure.settings import router as settings_router
 
 app = FastAPI()
 app.include_router(settings_router, prefix="/api/v1")
