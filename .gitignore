@@ -17,6 +17,7 @@ bin/
 *.bin
 .secrets*
 event.json
+reacher-*.json
 *.patch
 config
 CLAUDE.md
