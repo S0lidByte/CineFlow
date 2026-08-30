@@ -6,13 +6,14 @@ from enum import Enum
 from typing import Annotated, Any, Literal, Self
 
 from cachetools import TTLCache
-from fastapi import APIRouter, Body, HTTPException, Path, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, status
 from kink import di
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session, object_session, selectinload
 
+from auth import require_role
 from program.db import db_functions
 from program.db.db import db_session
 from program.media.item import Episode, MediaItem, Movie, Season, Show
@@ -429,6 +430,7 @@ class AddMediaItemPayload(BaseModel):
     """,
     operation_id="add_items",
     response_model=MessageResponse,
+    dependencies=[Depends(require_role("media:request"))],
 )
 async def add_items(
     payload: Annotated[
@@ -709,6 +711,7 @@ class ResetResponse(MessageResponse):
     description="Reset media items with bases on item IDs",
     operation_id="reset_items",
     response_model=ResetResponse,
+    dependencies=[Depends(require_role("playback:operator"))],
 )
 async def reset_items(
     payload: Annotated[
@@ -838,6 +841,7 @@ class RetryResponse(MessageResponse):
     description="Retry media items with bases on item IDs",
     operation_id="retry_items",
     response_model=RetryResponse,
+    dependencies=[Depends(require_role("playback:operator"))],
 )
 async def retry_items(
     payload: Annotated[
@@ -888,6 +892,7 @@ async def retry_items(
     description="Retry items in the library that failed to download",
     operation_id="retry_library_items",
     response_model=RetryResponse,
+    dependencies=[Depends(require_role("playback:operator"))],
 )
 async def retry_library_items() -> RetryResponse:
     import time
@@ -936,6 +941,7 @@ class RemoveResponse(BaseModel):
     description="Remove media items based on item IDs",
     operation_id="remove_item",
     response_model=RemoveResponse,
+    dependencies=[Depends(require_role("platform:admin"))],
 )
 async def remove_item(
     payload: Annotated[
@@ -1117,6 +1123,7 @@ async def get_item_streams(
     description="Blacklist a stream for a media item",
     operation_id="blacklist_item_stream",
     response_model=MessageResponse,
+    dependencies=[Depends(require_role("playback:operator"))],
 )
 async def blacklist_stream(
     item_id: Annotated[
@@ -1181,6 +1188,7 @@ async def blacklist_stream(
     description="Unblacklist a stream for a media item",
     operation_id="unblacklist_item_stream",
     response_model=MessageResponse,
+    dependencies=[Depends(require_role("playback:operator"))],
 )
 async def unblacklist_stream(
     item_id: Annotated[
@@ -1238,6 +1246,7 @@ async def unblacklist_stream(
     description="Reset all streams for a media item",
     operation_id="reset_item_streams",
     response_model=MessageResponse,
+    dependencies=[Depends(require_role("playback:operator"))],
 )
 async def reset_item_streams(
     item_id: Annotated[
@@ -1293,6 +1302,7 @@ class PauseResponse(MessageResponse):
     description="Pause media items based on item IDs",
     operation_id="pause_items",
     response_model=PauseResponse,
+    dependencies=[Depends(require_role("playback:operator"))],
 )
 async def pause_items(
     payload: Annotated[
@@ -1362,6 +1372,7 @@ async def pause_items(
     description="Unpause media items based on item IDs",
     operation_id="unpause_items",
     response_model=PauseResponse,
+    dependencies=[Depends(require_role("playback:operator"))],
 )
 async def unpause_items(
     payload: Annotated[
@@ -1465,6 +1476,7 @@ class ReindexPayload(BaseModel):
     """,
     operation_id="composite_reindexer",
     response_model=MessageResponse,
+    dependencies=[Depends(require_role("playback:operator"))],
 )
 async def reindex_item(
     payload: Annotated[

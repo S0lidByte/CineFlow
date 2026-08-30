@@ -15,6 +15,9 @@ from schemas.tvdb import (
     SeriesExtendedRecord,
     Translation,
 )
+from schemas.tvdb.models.get_series_artworks200_response import (
+    GetSeriesArtworks200Response,
+)
 
 
 class SeriesRelease(SeriesExtendedRecord):
@@ -137,8 +140,6 @@ class TVDBApi:
                 logger.error(f"Failed to get series details: {response.status_code}")
                 return None
 
-            from schemas.tvdb import GetSeriesArtworks200Response
-
             validated_response = GetSeriesArtworks200Response.model_validate(
                 response.json(),
             )
@@ -190,7 +191,11 @@ class TVDBApi:
                 logger.error(f"Failed to get season details: {response.status_code}")
                 return None
 
-            from schemas.tvdb import GetSeasonExtended200Response
+            # Import the generated model directly to avoid its package's lazy
+            # re-export resolving recursively while the indexer is starting.
+            from schemas.tvdb.models.get_season_extended200_response import (
+                GetSeasonExtended200Response,
+            )
 
             validated_data = GetSeasonExtended200Response.from_dict(response.json())
 

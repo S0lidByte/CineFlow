@@ -1,0 +1,121 @@
+# Isolated, current-source Phase 3.5 release-certification stack.
+# Use a unique Compose project name and remove volumes after the audit.
+name: cineflow-phase35-release-audit
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: cineflow_audit
+      POSTGRES_PASSWORD: audit-postgres-only
+      POSTGRES_DB: cineflow_audit
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - release_audit_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cineflow_audit -d cineflow_audit"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:18081:8080"
+    environment:
+      PUID: "0"
+      PGID: "0"
+      TZ: UTC
+      RIVEN_FORCE_ENV: "true"
+      RIVEN_DATABASE_HOST: postgresql+psycopg2://cineflow_audit:audit-postgres-only@postgres/cineflow_audit
+      API_KEY: phase35-legacy-api-key-000000001
+      BFF_API_KEY: phase35-bff-api-key-000000000002
+      ACTOR_CONTEXT_SECRET: phase35-actor-context-secret-release-audit
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    devices:
+      - /dev/fuse:/dev/fuse
+    volumes:
+      - release_audit_backend:/riven/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/docs >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 90s
+
+  frontend:
+    build:
+      context: ../Triven_frontend
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:13003:3000"
+    environment:
+      BACKEND_URL: http://backend:8080
+      BACKEND_API_KEY: phase35-legacy-api-key-000000001
+      BFF_API_KEY: phase35-bff-api-key-000000000002
+      ACTOR_CONTEXT_SECRET: phase35-actor-context-secret-release-audit
+      AUTH_SECRET: phase35-auth-secret-release-audit-only
+      ORIGIN: http://localhost:13003
+      DATABASE_URL: /riven/data/riven.db
+    volumes:
+      - release_audit_frontend:/riven/data
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/auth/login || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    environment:
+      - PUID=0
+      - PGID=0
+      - TZ=UTC
+    ports:
+      - "127.0.0.1:19696:9696"
+    volumes:
+      - release_audit_prowlarr:/config
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9696/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+
+  emby:
+    image: emby/embyserver:latest
+    environment:
+      - UID=0
+      - GID=0
+      - GIDLIST=0
+    ports:
+      - "127.0.0.1:18096:8096"
+    volumes:
+      - release_audit_emby:/config
+      - release_audit_backend:/mount
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8096/System/Info/Public || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+
+volumes:
+  release_audit_pg:
+  release_audit_backend:
+  release_audit_frontend:
+  release_audit_prowlarr:
+  release_audit_emby:

@@ -196,7 +196,7 @@ async def generate_apikey() -> MessageResponse:
     settings_manager.settings.api_key = new_key
     settings_manager.save()
 
-    return MessageResponse(message=new_key)
+    return MessageResponse(message="API key regenerated successfully.")
 
 
 @router.get("/services", operation_id="services")

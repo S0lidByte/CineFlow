@@ -312,6 +312,15 @@ class Program(threading.Thread):
                 f"{', '.join(failed_content)}"
             )
 
+    def _recover_core_services(self) -> None:
+        """Retry startup-unavailable core integrations without rebuilding the VFS."""
+
+        if not self.services or self.services.scraping.initialized:
+            return
+
+        if self.services.scraping.reinitialize():
+            logger.success("Scraping service recovered after a startup retry")
+
     def validate_database(self) -> bool:
         """Validate that the database is accessible (single probe, no retry)."""
 
@@ -478,11 +487,18 @@ class Program(threading.Thread):
 
     def run(self):
         logged_invalid = False
+        last_recovery_attempt = 0.0
+        recovery_interval_seconds = 10.0
         while self.initialized:
             if not self.is_valid:
                 if not logged_invalid:
                     self._log_pipeline_blockers()
                     logged_invalid = True
+
+                if time.monotonic() - last_recovery_attempt >= recovery_interval_seconds:
+                    last_recovery_attempt = time.monotonic()
+                    self._recover_core_services()
+
                 time.sleep(1)
                 continue
             logged_invalid = False

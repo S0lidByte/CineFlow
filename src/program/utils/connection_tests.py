@@ -311,16 +311,12 @@ def _probe_prowlarr() -> ConnectionTestResponse:
             timeout=_httpx_timeout(),
             follow_redirects=True,
         ) as client:
+            # Use an authenticated endpoint. Prowlarr's /ping endpoint can
+            # succeed without validating the configured API key.
             response = client.get(
-                "/ping",
+                "/api/v1/system/status",
                 headers={"X-Api-Key": api_key},
             )
-            # Some installs expose ping only under /api; fall back to system status.
-            if response.status_code == 404:
-                response = client.get(
-                    "/api/v1/system/status",
-                    headers={"X-Api-Key": api_key},
-                )
     except httpx.TimeoutException:
         return _fail(started, "Timed out")
     except httpx.HTTPError:

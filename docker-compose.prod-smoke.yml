@@ -38,10 +38,14 @@ services:
       start_period: 180s
 
   riven:
-    image: coldspirit/cineflow:dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cineflow-local-backend:latest
     container_name: riven
     ports:
-      - "8080:8080"
+      # Private loopback binding prevents untrusted LAN clients from hitting backend directly
+      - "127.0.0.1:8080:8080"
     environment:
       - PUID=0
       - PGID=0
@@ -49,6 +53,8 @@ services:
       - RIVEN_FORCE_ENV=true
       - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
       - API_KEY=abcdefghijklmnopqrstuvwxyz123456
+      - BFF_API_KEY=local-prod-smoke-bff-key-32chars
+      - ACTOR_CONTEXT_SECRET=local-prod-smoke-actor-secret-32ch
     cap_add:
       - SYS_ADMIN
     security_opt:
@@ -60,6 +66,8 @@ services:
       - cineflow_prod_smoke_library:/media
     depends_on:
       riven_postgres:
+        condition: service_healthy
+      prowlarr:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/docs >/dev/null || curl -fsS http://127.0.0.1:8080/ >/dev/null || exit 1"]
@@ -79,15 +87,38 @@ services:
       - cineflow_prod_smoke_library:/media
     restart: unless-stopped
 
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    ports:
+      - "9696:9696"
+    volumes:
+      - ../container_data/prowlarr:/config
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9696/ >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 60s
+    restart: unless-stopped
+
   riven-frontend:
-    # Pin smoke verification to the exact frontend artifact under audit.
-    image: coldspirit/cineflow-frontend@sha256:68de15f198a2f7636e900a38c4cd28a3225fc423b31aff25ae2e8ad7ecf3b538
+    build:
+      context: ../Triven_frontend
+      dockerfile: Dockerfile
+    image: cineflow-local-frontend:latest
     container_name: riven-frontend
     ports:
       - "3000:3000"
     environment:
       - BACKEND_URL=http://riven:8080
       - BACKEND_API_KEY=abcdefghijklmnopqrstuvwxyz123456
+      - BFF_API_KEY=local-prod-smoke-bff-key-32chars
+      - ACTOR_CONTEXT_SECRET=local-prod-smoke-actor-secret-32ch
       - AUTH_SECRET=local-prod-smoke-auth-secret-32ch
       - ORIGIN=http://localhost:3000
       - DATABASE_URL=/riven/data/riven.db

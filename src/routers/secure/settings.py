@@ -17,6 +17,8 @@ from program.utils.connection_tests import (
 
 from ..models.shared import MessageResponse
 
+API_KEY_SENTINEL = "********"
+
 
 def _validate_ranking_in_settings(settings_dict: dict[str, Any]) -> None:
     ranking = settings_dict.get("ranking")
@@ -153,7 +155,10 @@ async def save_settings() -> MessageResponse:
     response_model=AppModel,
 )
 async def get_all_settings() -> AppModel:
-    return copy(settings_manager.settings)
+    masked = copy(settings_manager.settings)
+    if masked.api_key:
+        masked.api_key = API_KEY_SENTINEL
+    return masked
 
 
 @router.get(
@@ -171,6 +176,9 @@ async def get_settings(
     ],
 ) -> dict[str, Any]:
     current_settings = settings_manager.settings.model_dump()
+    if current_settings.get("api_key"):
+        current_settings["api_key"] = API_KEY_SENTINEL
+
     data = dict[str, Any]()
 
     for path in paths.split(","):
@@ -199,6 +207,12 @@ async def set_all_settings(
         Body(description="New settings to apply"),
     ],
 ) -> MessageResponse:
+    if "api_key" in new_settings:
+        if new_settings["api_key"] == API_KEY_SENTINEL:
+            new_settings["api_key"] = settings_manager.settings.api_key
+        elif not isinstance(new_settings["api_key"], str) or not new_settings["api_key"].strip():
+            raise HTTPException(status_code=400, detail="api_key cannot be empty or whitespace")
+
     current_settings = settings_manager.settings.model_dump()
 
     def update_settings(current_obj: dict[str, Any], new_obj: dict[str, Any]):
@@ -240,6 +254,12 @@ async def set_settings(
         Body(description="Dictionary mapping paths to their new values"),
     ],
 ) -> MessageResponse:
+    if "api_key" in values:
+        if values["api_key"] == API_KEY_SENTINEL:
+            values["api_key"] = settings_manager.settings.api_key
+        elif not isinstance(values["api_key"], str) or not values["api_key"].strip():
+            raise HTTPException(status_code=400, detail="api_key cannot be empty or whitespace")
+
     current_settings = settings_manager.settings.model_dump()
     requested_paths = [p.strip() for p in paths.split(",") if p.strip()]
 

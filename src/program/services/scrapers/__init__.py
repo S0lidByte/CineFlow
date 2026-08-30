@@ -60,6 +60,19 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
         if not self.initialized:
             return
 
+    def reinitialize(self) -> bool:
+        """Retry enabled scrapers that were unavailable during startup."""
+
+        for service in self.services.values():
+            if service.enabled and not service.initialized:
+                service._initialize()
+
+        self.initialized_services = [
+            service for service in self.services.values() if service.initialized
+        ]
+        self.initialized = self.validate()
+        return self.initialized
+
     def validate(self) -> bool:
         """Validate that at least one scraper service is initialized."""
 

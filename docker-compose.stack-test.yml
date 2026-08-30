@@ -41,7 +41,7 @@ services:
       dockerfile: Dockerfile
     container_name: cineflow-test-backend
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       - PUID=0
       - PGID=0
@@ -49,6 +49,7 @@ services:
       - RIVEN_FORCE_ENV=true
       - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
       - API_KEY=abcdefghijklmnopqrstuvwxyz123456
+      - ACTOR_CONTEXT_SECRET=local-stack-test-actor-secret-32chars
     cap_add:
       - SYS_ADMIN
     security_opt:
@@ -77,6 +78,7 @@ services:
     environment:
       - BACKEND_URL=http://riven:8080
       - BACKEND_API_KEY=abcdefghijklmnopqrstuvwxyz123456
+      - ACTOR_CONTEXT_SECRET=local-stack-test-actor-secret-32chars
       - AUTH_SECRET=local-stack-test-auth-secret-32chars
       - ORIGIN=http://localhost:3000
       - DATABASE_URL=/riven/data/riven.db

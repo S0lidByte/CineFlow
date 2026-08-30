@@ -8,6 +8,7 @@ from fastapi import (
     APIRouter,
     BackgroundTasks,
     Body,
+    Depends,
     HTTPException,
     Path,
     Query,
@@ -21,6 +22,7 @@ from RTN import ParsedData, Torrent, parse
 from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.orm import Session
 
+from auth import require_role
 from program.db import db_functions
 from program.db.db import db_session
 from program.media.item import Episode, MediaItem, ProcessedItemType, Season, Show
@@ -595,6 +597,7 @@ def resolve_media_item(
     "",
     summary="Get streams for an item",
     operation_id="scrape_item",
+    dependencies=[Depends(require_role("media:request"))],
 )
 def scrape_item(
     item_id: Annotated[
@@ -851,6 +854,7 @@ def scrape_item(
     summary="Start a manual scraping session",
     operation_id="start_manual_session",
     response_model=StartSessionResponse,
+    dependencies=[Depends(require_role("media:request"))],
 )
 async def start_manual_session(
     background_tasks: BackgroundTasks,
@@ -1014,6 +1018,7 @@ async def start_manual_session(
     "/session/{session_id}",
     summary="Perform an action on a scraping session",
     operation_id="session_action",
+    dependencies=[Depends(require_role("media:request"))],
 )
 async def session_action(
     background_tasks: BackgroundTasks,
@@ -1305,6 +1310,7 @@ class StatelessSelectFilesRequest(BaseModel):
     summary="Trigger auto scraping for an item or specific seasons",
     operation_id="auto_scrape",
     response_model=MessageResponse,
+    dependencies=[Depends(require_role("media:request"))],
 )
 async def auto_scrape(
     request: Annotated[AutoScrapeRequest, Body(description="Auto scrape request")],
@@ -1616,6 +1622,7 @@ async def parse_torrent_titles(
     summary="Fetch Overseerr Requests",
     operation_id="fetch_overseerr_requests",
     response_model=MessageResponse,
+    dependencies=[Depends(require_role("media:request"))],
 )
 async def overseerr_requests(
     filter: Annotated[

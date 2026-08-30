@@ -11,7 +11,7 @@ services:
     tty: true
     shm_size: 1024m
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       - PUID=1000
       - PGID=1000

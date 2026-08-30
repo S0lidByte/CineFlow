@@ -198,21 +198,21 @@ def test_jackett_ok(mock_settings):
     assert "jackett-secret" not in result.message
 
 
-def test_prowlarr_falls_back_to_system_status(mock_settings):
+def test_prowlarr_uses_authenticated_system_status(mock_settings):
     fake_client = MagicMock()
     fake_client.__enter__.return_value = fake_client
     fake_client.__exit__.return_value = False
-    fake_client.get.side_effect = [
-        _FakeResponse(404),
-        _FakeResponse(200, payload={"version": "1"}),
-    ]
+    fake_client.get.return_value = _FakeResponse(200, payload={"version": "1"})
 
     with patch.object(ct.httpx, "Client", return_value=fake_client):
         result = ct._probe_prowlarr()
 
     assert result.ok is True
     assert result.message == "Connected to Prowlarr"
-    assert fake_client.get.call_count == 2
+    fake_client.get.assert_called_once_with(
+        "/api/v1/system/status",
+        headers={"X-Api-Key": "prowlarr-secret"},
+    )
 
 
 def test_opensubtitles_ok(mock_settings):

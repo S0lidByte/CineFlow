@@ -135,15 +135,8 @@ def _extract_response_headers(
 
 
 async def _handle_upstream_error(upstream_response: httpx.Response) -> None:
-    """Log and close failed upstream response."""
-    try:
-        content = await upstream_response.aread()
-        logger.error(
-            f"Upstream returned error {upstream_response.status_code}: {content}"
-        )
-    except Exception as e:
-        logger.debug(f"Could not read upstream error content: {e}")
-
+    """Close a failed upstream response without logging its potentially sensitive body."""
+    logger.error(f"Upstream returned error {upstream_response.status_code}")
     await upstream_response.aclose()
 
     raise HTTPException(
