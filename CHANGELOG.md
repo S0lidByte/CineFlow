@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.27](https://github.com/S0lidByte/CineFlow/compare/v1.29.26...v1.29.27) (2026-09-02)
+
+
+### Bug Fixes
+
+* **vfs:** isolate Trio streaming pool and close FUSE lifecycle race ([c072992](https://github.com/S0lidByte/CineFlow/commit/c0729920aa519488105e1b833916d69608e7caf3))
+
 ## [1.29.26](https://github.com/S0lidByte/CineFlow/compare/v1.29.25...v1.29.26) (2026-08-28)
 
 
