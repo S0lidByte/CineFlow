@@ -231,7 +231,7 @@ def test_stream_timeout_concurrency(mock_vfs):
 def test_close_waits_for_fuse_thread_and_unmounts(mock_vfs):
     """close() should wait for the background thread and force cleanup if needed."""
 
-    mock_vfs._thread.is_alive.side_effect = [True, False]
+    mock_vfs._thread.is_alive.side_effect = [True, True, False]
 
     with (
         patch.object(pyfuse3, "trio_token", object(), create=True),
@@ -243,6 +243,24 @@ def test_close_waits_for_fuse_thread_and_unmounts(mock_vfs):
 
     mock_vfs._thread.join.assert_called_once_with(timeout=10)
     force_unmount.assert_called_once_with(mock_vfs._mountpoint)
+
+
+def test_close_is_noop_after_instance_is_fully_unmounted(mock_vfs):
+    """A stale instance must not use pyfuse3 globals owned by a newer mount."""
+
+    mock_vfs._thread.is_alive.return_value = False
+
+    with (
+        patch.object(pyfuse3, "trio_token", object(), create=True),
+        patch("program.services.filesystem.vfs.rivenvfs.trio.from_thread.run") as request_unmount,
+        patch.object(mock_vfs, "_is_mountpoint_mounted", return_value=False),
+        patch.object(mock_vfs, "_force_unmount_mountpoint") as force_unmount,
+    ):
+        mock_vfs.close()
+
+    request_unmount.assert_not_called()
+    mock_vfs._thread.join.assert_not_called()
+    force_unmount.assert_not_called()
 
 
 def test_get_parent_inodes_collects_ancestors(mock_vfs):
@@ -467,5 +485,56 @@ def test_dead_link_non_owner_open_returns_eagain(mock_vfs):
             with pytest.raises(pyfuse3.FUSEError) as exc_info:
                 await mock_vfs.open(inode, 0, MagicMock())
             assert exc_info.value.errno == errno.EAGAIN
+
+
+def test_vfs_initializes_http_pool_none(mock_vfs):
+    """RivenVFS defines http_pool initialized to None prior to mount."""
+    assert hasattr(mock_vfs, "http_pool")
+    assert mock_vfs.http_pool is None
+
+
+def test_vfs_get_stream_passes_http_pool(mock_vfs):
+    """RivenVFS._get_stream injects self.http_pool into created MediaStream."""
+    mock_pool = MagicMock()
+    mock_vfs.http_pool = mock_pool
+
+    mock_entry = MagicMock()
+    mock_entry.url = "https://cdn.example/file.mkv"
+    mock_entry.provider = "realdebrid"
+    mock_vfs.vfs_db.get_entry_by_original_filename = MagicMock(return_value=mock_entry)
+
+    async def _run():
+        async with trio.open_nursery() as nursery:
+            mock_vfs.stream_nursery = nursery
+            stream = await mock_vfs._get_stream(
+                path="/test.mkv",
+                fh=10,
+                file_size=1024,
+                original_filename="orig.mkv",
+            )
+            assert stream._http_pool is mock_pool
+            nursery.cancel_scope.cancel()
+
+    trio.run(_run)
+
+
+def test_vfs_get_stream_rejects_missing_mount_http_pool(mock_vfs):
+    """A VFS stream must not fall back to a global DI HTTP client."""
+    mock_entry = MagicMock()
+    mock_entry.url = "https://cdn.example/file.mkv"
+    mock_entry.provider = "realdebrid"
+    mock_vfs.vfs_db.get_entry_by_original_filename = MagicMock(return_value=mock_entry)
+
+    async def _run():
+        async with trio.open_nursery() as nursery:
+            mock_vfs.stream_nursery = nursery
+            with pytest.raises(RuntimeError, match="mount-scoped Trio HTTP pool"):
+                await mock_vfs._get_stream(
+                    path="/test.mkv",
+                    fh=10,
+                    file_size=1024,
+                    original_filename="orig.mkv",
+                )
+            nursery.cancel_scope.cancel()
 
     trio.run(_run)

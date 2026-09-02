@@ -37,7 +37,12 @@ from .exceptions import (
     RecoverableMediaStreamException,
 )
 from .file_metadata import FileMetadata
-from .http_pool import admit_stream_request, heal_on_pool_timeout
+from .http_pool import (
+    GenerationLease,
+    TrioStreamingHttpPool,
+    admit_stream_request,
+    heal_on_pool_timeout,
+)
 from .recent_reads import Read, RecentReads
 from .session_statistics import SessionStatistics
 from .stream_connection import StreamConnection
@@ -105,13 +110,21 @@ class MediaStream:
         nursery: trio.Nursery,
         provider: str,
         initial_url: str,
+        http_pool: TrioStreamingHttpPool | None = None,
+        require_mount_http_pool: bool = False,
     ) -> None:
+        if require_mount_http_pool and http_pool is None:
+            raise RuntimeError(
+                "VFS MediaStream requires an injected mount-scoped Trio HTTP pool"
+            )
+
         stream_settings = settings_manager.settings.stream
         fs = settings_manager.settings.filesystem
 
         self.fh = fh
         self.nursery = nursery
         self.provider = provider
+        self._http_pool = http_pool
         self.recent_reads: RecentReads = RecentReads()
         self.is_streaming: trio_util.AsyncBool = trio_util.AsyncBool(False)
         self.is_killed: trio_util.AsyncBool = trio_util.AsyncBool(False)
@@ -199,7 +212,10 @@ class MediaStream:
         self._active_stream_connection: StreamConnection | None = None
 
     def _resolve_async_client(self) -> httpx.AsyncClient:
-        """Return the current DI streaming client (supports pool recycle)."""
+        """Return the current streaming client (from injected pool or DI fallback)."""
+
+        if self._http_pool is not None:
+            return self._http_pool.get_client(use_proxy=self._use_proxy_client)
 
         if self._use_proxy_client:
             return di[ProxyClient]
@@ -1145,9 +1161,26 @@ class MediaStream:
         request_kind = "scan" if end is not None else "body"
 
         for attempt in range(max_attempts):
+            lease: GenerationLease | None = None
+            failed_generation: int | None = None
             try:
-                async with admit_stream_request(request_kind):
-                    async with self._resolve_async_client().stream(
+                if self._http_pool is not None:
+                    failed_generation = self._http_pool.generation
+                    admit_ctx = self._http_pool.admit(request_kind)
+                else:
+                    admit_ctx = admit_stream_request(request_kind)
+
+                async with admit_ctx:
+                    if self._http_pool is not None:
+                        lease = self._http_pool.acquire_lease(
+                            use_proxy=self._use_proxy_client
+                        )
+                        failed_generation = lease.generation
+                        client = lease.client
+                    else:
+                        client = self._resolve_async_client()
+
+                    async with client.stream(
                         method="GET",
                         url=self.target_url.value,
                         headers=headers,
@@ -1341,7 +1374,12 @@ class MediaStream:
                 # Pool saturation: shed + recycle once, then fail-fast (no backoff storm).
                 pool_repr = ""
                 try:
-                    pool_repr = str(self._resolve_async_client()._transport._pool)  # type: ignore[attr-defined]
+                    active_client = (
+                        lease.client
+                        if lease is not None
+                        else self._resolve_async_client()
+                    )
+                    pool_repr = str(active_client._transport._pool)  # type: ignore[attr-defined]
                 except Exception:
                     pool_repr = ""
 
@@ -1359,9 +1397,24 @@ class MediaStream:
                     )
 
                 if attempt == 0:
-                    recycled = await heal_on_pool_timeout(pool_repr=pool_repr)
-                    if recycled:
-                        continue
+                    if self._http_pool is not None:
+                        await self._http_pool.heal_on_pool_timeout(
+                            failed_generation=failed_generation,
+                            pool_repr=pool_repr,
+                        )
+                        # A concurrent caller may have completed the shared
+                        # recovery while this request still held a lease for
+                        # the retired generation. Release it before retrying
+                        # so that generation can drain cleanly.
+                        if lease is not None:
+                            await self._http_pool.release_lease(lease)
+                            lease = None
+                    else:
+                        await heal_on_pool_timeout(pool_repr=pool_repr)
+                    # Every caller receives one post-heal retry. Otherwise,
+                    # follower requests deadlock in the FUSE kernel despite a
+                    # successful single-flight recovery.
+                    continue
 
                 raise DebridServiceClosedConnectionException(
                     provider=self.provider
@@ -1395,6 +1448,9 @@ class MediaStream:
                     "Unexpected error connecting to stream",
                     provider=self.provider,
                 ) from e
+            finally:
+                if lease is not None and self._http_pool is not None:
+                    await self._http_pool.release_lease(lease)
 
         raise DebridServiceException(
             "Unexpected error connecting to stream",

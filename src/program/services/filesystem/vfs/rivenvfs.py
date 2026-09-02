@@ -92,6 +92,7 @@ from ...streaming import (
 if TYPE_CHECKING:
     from program.media.filesystem_entry import FilesystemEntry
     from program.media.item import MediaItem
+    from program.services.streaming.http_pool import TrioStreamingHttpPool
 
 
 class FileHandle(TypedDict):
@@ -282,6 +283,7 @@ class RivenVFS(pyfuse3.Operations):
         self._unmount_requested_preflight: threading.Event = threading.Event()
         self._unmount_requested: trio_util.AsyncBool
         self.stream_nursery: trio.Nursery
+        self.http_pool: TrioStreamingHttpPool | None = None
 
         def _fuse_runner():
             # Track whether an unmount has been requested across restarts.
@@ -350,8 +352,14 @@ class RivenVFS(pyfuse3.Operations):
                         self.stream_nursery = nursery
 
                         from program.services.streaming.http_pool import (
+                            TrioStreamingHttpPool,
                             register_stream_shed_callback,
                         )
+
+                        proxy_url = settings_manager.settings.downloaders.proxy_url
+                        pool = TrioStreamingHttpPool(proxy_url=proxy_url)
+                        pool.register_stream_shed_callback(self._shed_stalled_streams)
+                        self.http_pool = pool
 
                         register_stream_shed_callback(self._shed_stalled_streams)
 
@@ -360,6 +368,8 @@ class RivenVFS(pyfuse3.Operations):
                             yield
                         finally:
                             register_stream_shed_callback(None)
+                            self.http_pool = None
+                            await pool.teardown()
 
                         # Cancel streams on exit
                         nursery.cancel_scope.cancel()
@@ -769,6 +779,16 @@ class RivenVFS(pyfuse3.Operations):
     def close(self) -> None:
         """Clean up and unmount the filesystem."""
 
+        # pyfuse3 exposes one process-global Trio token/session. Once this
+        # instance is fully closed, a repeated close must not terminate a
+        # newer RivenVFS instance that now owns those globals.
+        if (
+            self._thread is not None
+            and not self._thread.is_alive()
+            and not self._is_mountpoint_mounted(self._mountpoint)
+        ):
+            return
+
         async def _request_unmount():
             logger.log("VFS", f"Unmounting RivenVFS from {self._mountpoint}")
 
@@ -802,14 +822,14 @@ class RivenVFS(pyfuse3.Operations):
         if self._is_mountpoint_mounted(self._mountpoint):
             self._force_unmount_mountpoint(self._mountpoint)
 
-    # Helper methods
-
     def __del__(self):
         """Ensure cleanup on garbage collection."""
         try:
             self.close()
         except Exception:
             pass
+
+    # Helper methods
 
     def _prepare_mountpoint(self, mountpoint: str) -> None:
         """Prepare mountpoint by killing processes and unmounting if necessary."""
@@ -2575,6 +2595,8 @@ class RivenVFS(pyfuse3.Operations):
                 provider=entry_info.provider,
                 initial_url=entry_info.url,
                 nursery=self.stream_nursery,
+                http_pool=self.http_pool,
+                require_mount_http_pool=True,
             )
             self._active_stream_count = len(self._active_streams)
 
