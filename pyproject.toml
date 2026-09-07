@@ -74,6 +74,10 @@ test = ["pytest>=9.0.3,<10"]
 [tool.pyright]
 reportMissingImports = "none"
 
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["src/tests"]
+asyncio_mode = "strict"
 
 [tool.uv]
 package = false

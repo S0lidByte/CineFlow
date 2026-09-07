@@ -1,6 +1,9 @@
 {
   "extraPaths": ["src"],
   "ignore": ["src/schemas", "src/tests", "src/alembic"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.13",
   "pythonPlatform": "Linux",
   "deprecateTypingAliases": true,
   "typeCheckingMode": "strict",

@@ -337,7 +337,7 @@ class TestUpdater:
                 assert mock_episode.updated is True
 
     def test_run_no_filesystem_entry(self, mock_settings, mock_movie):
-        """Test run() when item has no filesystem entry"""
+        """A skipped update must not emit a result that triggers a DB commit."""
         mock_settings["emby"].settings.updaters.emby.enabled = True
         mock_movie.media_entry = None
 
@@ -345,10 +345,11 @@ class TestUpdater:
             updater = Updater()
 
             with patch.object(updater, "refresh_path") as mock_refresh:
-                list(updater.run(mock_movie))
+                results = list(updater.run(mock_movie))
 
-                # Should not call refresh_path
                 mock_refresh.assert_not_called()
+                assert results == []
+                assert mock_movie.updated is False
 
     def test_run_not_initialized(self, mock_settings, mock_movie):
         """Test run() when updater is not initialized"""

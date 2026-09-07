@@ -68,6 +68,7 @@ class Updater(Runner[None, BaseUpdater]):
         logger.debug(f"Starting update process for {item.log_string}")
         items = self.get_items_to_update(item)
         refreshed_paths = set[str]()  # Track refreshed paths to avoid duplicates
+        processed_items = 0
 
         for _item in items:
             # Get all VFS paths from the entry's helper method
@@ -104,7 +105,12 @@ class Updater(Runner[None, BaseUpdater]):
                         refreshed_paths.add(refresh_path)
 
             _item.updated = True
+            processed_items += 1
             logger.debug(f"Updated {_item.log_string}")
+
+        if processed_items == 0:
+            logger.debug(f"No refreshable VFS entries for {item.log_string}; skipping")
+            return
 
         logger.info(
             f"Updated {item.log_string} ({len(refreshed_paths)} unique paths refreshed)"

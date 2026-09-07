@@ -285,6 +285,13 @@ class MediaStream:
 
     @property
     def is_timed_out(self) -> bool:
+        try:
+            current_time = trio.current_time()
+        except RuntimeError:
+            # This property can be inspected by synchronous diagnostics outside
+            # the Trio-owned VFS event loop.
+            return False
+
         if not self.recent_reads.current_read.value:
             # Stream was opened but never triggered an HTTP fetch — it is a
             # Plex scan / intro-detection read that was served entirely from
@@ -293,9 +300,9 @@ class MediaStream:
             if self._created_at == 0.0:
                 return False  # Safety: no trio context at construction.
             scan_timeout = min(30.0, float(self.config.activity_timeout_seconds))
-            return trio.current_time() - self._created_at > scan_timeout
+            return current_time - self._created_at > scan_timeout
         return (
-            trio.current_time() - self.recent_reads.current_read.value.timestamp
+            current_time - self.recent_reads.current_read.value.timestamp
             > self.config.activity_timeout_seconds
         )
 
@@ -1478,7 +1485,13 @@ class MediaStream:
         if is_request_fully_cached:
             return "cache_hit"
 
-        if start < end <= self.config.header_size:
+        # A header scan can only satisfy ranges wholly contained in the
+        # pre-fetched header chunk. Chunk ranges are inclusive, so the last
+        # valid header offset is header_chunk.end (header_size - 1).
+        if (
+            start <= self.chunker.header_chunk.end
+            and end <= self.chunker.header_chunk.end
+        ):
             return "header_scan"
 
         file_size = self.file_metadata.file_size

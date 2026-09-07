@@ -336,7 +336,9 @@ def apply_ranking_preset(base: Any, preset_id: str) -> Any:
     ranks = next_settings.custom_ranks
     for category in ranks.__class__.model_fields:
         category_obj = getattr(ranks, category)
-        if category_obj is None or not getattr(category_obj, "model_fields", None):
+        if category_obj is None or not getattr(
+            category_obj.__class__, "model_fields", None
+        ):
             continue
         enabled = set(enable_fetch.get(category, []))
         for attr in category_obj.__class__.model_fields:

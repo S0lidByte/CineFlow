@@ -33,18 +33,18 @@ import httpx
 import pytest
 import sniffio
 
-pytestmark = pytest.mark.skipif(
-    sys.platform != "linux" or not Path("/dev/fuse").exists(),
-    reason="requires Linux pyfuse3 and an accessible /dev/fuse device",
-)
+if sys.platform != "linux" or not Path("/dev/fuse").exists():
+    pytest.skip(
+        "requires Linux pyfuse3 and an accessible /dev/fuse device",
+        allow_module_level=True,
+    )
 
-import pyfuse3  # noqa: I001 - Linux-only FUSE extension import must remain after platform guard.
+pyfuse3 = pytest.importorskip("pyfuse3")
 from kink import di
 
 from program.services.filesystem.vfs.rivenvfs import RivenVFS
 from program.services.filesystem.vfs.vfs_node import VFSDirectory, VFSFile
 from program.services.streaming.http_pool import TrioStreamingHttpPool
-
 
 _PAYLOAD = bytes(range(256)) * 8192  # 2 MiB, deterministic at every offset.
 _FILENAME = "real-fuse-certification.bin"

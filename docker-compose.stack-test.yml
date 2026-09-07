@@ -48,7 +48,9 @@ services:
       - TZ=UTC
       - RIVEN_FORCE_ENV=true
       - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
-      - API_KEY=abcdefghijklmnopqrstuvwxyz123456
+      - RIVEN_API_KEY=local-legacy-api-key-32characters
+      - API_KEY=local-legacy-api-key-32characters
+      - BFF_API_KEY=local-bff-api-key-32characters
       - ACTOR_CONTEXT_SECRET=local-stack-test-actor-secret-32chars
     cap_add:
       - SYS_ADMIN
@@ -77,7 +79,7 @@ services:
       - "3000:3000"
     environment:
       - BACKEND_URL=http://riven:8080
-      - BACKEND_API_KEY=abcdefghijklmnopqrstuvwxyz123456
+      - BFF_API_KEY=local-bff-api-key-32characters
       - ACTOR_CONTEXT_SECRET=local-stack-test-actor-secret-32chars
       - AUTH_SECRET=local-stack-test-auth-secret-32chars
       - ORIGIN=http://localhost:3000

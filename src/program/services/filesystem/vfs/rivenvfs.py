@@ -736,14 +736,14 @@ class RivenVFS(pyfuse3.Operations):
         from program.media.media_entry import MediaEntry
 
         if isinstance(item, Show):
-            for season in item.seasons:
-                self.remove(season)
+            results = [self.remove(season) for season in item.seasons]
+            return any(results)
 
         if isinstance(item, Season):
-            for episode in item.episodes:
-                self.remove(episode)
+            results = [self.remove(episode) for episode in item.episodes]
+            return any(results)
 
-        # Only process if this item has a filesystem entry
+        # Only process leaf media items with a filesystem entry.
         if not item.filesystem_entry:
             logger.debug(f"Item {item.id} has no filesystem_entry, skipping VFS remove")
             return False
@@ -1009,7 +1009,8 @@ class RivenVFS(pyfuse3.Operations):
                 if inode:
                     pinned_inodes.add(int(inode))
 
-            # Create new root node
+            # Retain the existing root as the boundary while preserving old nodes.
+            old_root = self._root
             self._root = VFSRoot()
             new_inode_map: dict[int, VFSNode] = {pyfuse3.ROOT_INODE: self._root}
 
@@ -1019,10 +1020,11 @@ class RivenVFS(pyfuse3.Operations):
             for inode_int, node in self._inode_to_node.items():
                 if inode_int in pinned_inodes:
                     new_inode_map[inode_int] = node
-                    # Walk up and preserve all ancestor inodes
+                    # Walk up and preserve all ancestor inodes, but never replace
+                    # the new root with the stale root from the previous tree.
                     ancestor = node.parent
-                    while ancestor is not None and ancestor != self._root:
-                        if ancestor.inode:
+                    while ancestor is not None and ancestor is not old_root:
+                        if ancestor.inode and ancestor.inode != pyfuse3.ROOT_INODE:
                             new_inode_map[int(ancestor.inode)] = ancestor
                         ancestor = ancestor.parent
 
@@ -2218,9 +2220,16 @@ class RivenVFS(pyfuse3.Operations):
         """
 
         try:
-            # Log cache stats asynchronously (don't block on trim/I/O)
+            # Cache maintenance can evict, unlink, and rebuild accounting.  Run
+            # it in the mount nursery so the FUSE read path never waits on that
+            # periodic work. Cache.maybe_log_stats is single-flight.
             try:
-                await di[Cache].maybe_log_stats()
+                cache = di[Cache]
+                if self.mounted:
+                    self.stream_nursery.start_soon(cache.maybe_log_stats)
+                else:
+                    # Mount-free unit tests do not have a stream nursery.
+                    await cache.maybe_log_stats()
             except Exception:
                 pass
 

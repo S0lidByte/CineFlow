@@ -737,8 +737,11 @@ async def reset_items(
     parsed_ids = handle_ids(payload.ids)
 
     services = di[Program].services
-
-    assert services, "Program services not initialized"
+    if services is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Program services are not initialized",
+        )
 
     # Get updater service for media server refresh
     updater = services.updater
@@ -972,8 +975,11 @@ async def remove_item(
         )
 
     services = di[Program].services
-
-    assert services, "Program services not initialized"
+    if services is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Program services are not initialized",
+        )
 
     # Get services
     overseerr = services.overseerr
@@ -1628,8 +1634,8 @@ async def reindex_item(
 
         try:
             services = di[Program].services
-
-            assert services, "Services not initialized"
+            if services is None:
+                raise RuntimeError("Program services are not initialized")
 
             indexer_service = services.indexer
 
@@ -1658,6 +1664,7 @@ async def reindex_item(
                 mutation_fn=mutation,
                 bubble_parents=True,
             )
+            session.commit()
 
             logger.info(f"Successfully re-indexed {item.log_string}")
 

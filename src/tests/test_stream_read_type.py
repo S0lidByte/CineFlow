@@ -108,6 +108,24 @@ def test_detect_cache_hit() -> None:
     trio.run(_run)
 
 
+def test_detect_header_boundary_crossing_is_not_header_scan() -> None:
+    stream = _make_stream()
+    header_end = stream.chunker.header_chunk.end
+
+    async def _run() -> None:
+        chunk_range = stream.chunker.get_chunk_range(position=header_end, size=2)
+        assert await stream._detect_read_type(chunk_range=chunk_range) != "header_scan"
+
+    trio.run(_run)
+
+
+def test_is_timed_out_is_safe_outside_trio_context() -> None:
+    stream = _make_stream()
+    stream._created_at = 1.0
+
+    assert stream.is_timed_out is False
+
+
 def test_detect_body_read_sequential() -> None:
     stream = _make_stream()
     _set_previous_read(stream, position=stream.config.header_size, size=128 * 1024)

@@ -157,6 +157,10 @@ class Cache:
         self._hot_capacity_changed = trio.Event()
         self._metrics = Metrics(prom_enabled=cfg.metrics_enabled)
         self._last_log = 0.0  # Initialize last log timestamp
+        # FUSE reads may arrive concurrently at the 30-second maintenance
+        # boundary. Only one may trim and collect metrics; the rest must keep
+        # serving reads rather than queueing behind eviction I/O.
+        self._metrics_maintenance_lock = trio.Lock()
 
         try:
             os.makedirs(self.cfg.cache_dir, exist_ok=True)
@@ -1163,23 +1167,34 @@ class Cache:
         return s
 
     async def maybe_log_stats(self) -> None:
-        now = time.time()
-
         if not self.cfg.metrics_enabled:
             return
 
+        now = time.time()
         if now - self._last_log < 30:  # log at most every 30s
             return
 
-        # Proactive safe trim before logging to keep within caps
+        # Do not make ordinary FUSE reads wait for periodic eviction or stats.
+        # ``acquire_nowait`` has no checkpoint, so concurrent callers either
+        # become the sole maintenance worker or return immediately.
         try:
-            await self.trim()
-        except Exception:
-            pass
+            self._metrics_maintenance_lock.acquire_nowait()
+        except trio.WouldBlock:
+            return
 
-        self._last_log = now
-        stats = await self.stats()
-        if self.cfg.metrics_enabled:
+        try:
+            # A prior caller may have completed while this task was scheduled.
+            if now - self._last_log < 30:
+                return
+
+            # Proactive safe trim before logging to keep within caps.
+            try:
+                await self.trim()
+            except Exception:
+                pass
+
+            self._last_log = now
+            stats = await self.stats()
             from program.services.streaming import prom_cache_metrics as prom
 
             prom.set_size_gauges(
@@ -1187,4 +1202,6 @@ class Cache:
                 entries=int(stats.get("entries") or 0),
             )
 
-        logger.log("VFS", f"Cache stats: {stats}")
+            logger.log("VFS", f"Cache stats: {stats}")
+        finally:
+            self._metrics_maintenance_lock.release()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import trio
@@ -200,6 +201,35 @@ def test_cache_ttl_eviction(tmp_path: Path) -> None:
         assert stats["evictions"] >= 1
 
     trio.run(_run)
+
+
+def test_cache_metrics_maintenance_is_single_flight(tmp_path: Path) -> None:
+    """Concurrent FUSE reads must not duplicate periodic trim work."""
+    cache = _make_cache(tmp_path)
+    trim_started = trio.Event()
+    release_trim = trio.Event()
+    trim_calls = 0
+
+    async def _trim() -> None:
+        nonlocal trim_calls
+        trim_calls += 1
+        trim_started.set()
+        await release_trim.wait()
+
+    cache.trim = _trim  # type: ignore[method-assign]
+
+    async def _run() -> None:
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(cache.maybe_log_stats)
+            await trim_started.wait()
+            nursery.start_soon(cache.maybe_log_stats)
+            await trio.lowlevel.checkpoint()
+            release_trim.set()
+
+        assert trim_calls == 1
+
+    with patch("program.services.streaming.cache.logger.log"):
+        trio.run(_run)
 
 
 def test_cache_rebuilds_index_on_restart(tmp_path: Path) -> None:

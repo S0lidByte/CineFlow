@@ -286,6 +286,70 @@ def test_get_parent_inodes_collects_ancestors(mock_vfs):
     assert parents == [pyfuse3.InodeT(3), pyfuse3.InodeT(2)]
 
 
+def test_sync_full_preserves_pinned_file_without_replacing_new_root(mock_vfs):
+    """Pinned nodes retain their old ancestry, but never replace ROOT_INODE."""
+
+    old_root = mock_vfs._root
+    parent = VFSDirectory(name="movies", inode=pyfuse3.InodeT(10), parent=old_root)
+    old_root.add_child(parent)
+    pinned_file = VFSFile(
+        name="movie.mkv",
+        inode=pyfuse3.InodeT(11),
+        parent=parent,
+        original_filename="movie.mkv",
+        file_size=100,
+        created_at="2020-01-01T00:00:00",
+        updated_at="2020-01-01T00:00:00",
+        entry_type="media",
+    )
+    parent.add_child(pinned_file)
+    mock_vfs._inode_to_node = {
+        pyfuse3.ROOT_INODE: old_root,
+        parent.inode: parent,
+        pinned_file.inode: pinned_file,
+    }
+    mock_vfs._file_handles = {pyfuse3.FileHandleT(1): {"inode": pinned_file.inode}}
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = []
+    with patch(
+        "program.services.filesystem.vfs.rivenvfs.db_session"
+    ) as mock_db_session:
+        mock_db_session.return_value.__enter__.return_value = session
+        mock_vfs._sync_full()
+
+    assert mock_vfs._inode_to_node[pyfuse3.ROOT_INODE] is mock_vfs._root
+    assert mock_vfs._root is not old_root
+    assert mock_vfs._inode_to_node[parent.inode] is parent
+    assert mock_vfs._inode_to_node[pinned_file.inode] is pinned_file
+
+
+def test_remove_parent_recursively_removes_children_only(mock_vfs):
+    """Show and Season parents recurse into leaves without processing themselves."""
+
+    from program.media.item import Season, Show
+
+    show = MagicMock(spec=Show)
+    first_season = MagicMock(spec=Season)
+    second_season = MagicMock(spec=Season)
+    first_episode = MagicMock()
+    second_episode = MagicMock()
+    show.seasons = [first_season, second_season]
+    first_season.episodes = [first_episode]
+    second_season.episodes = [second_episode]
+
+    with patch.object(mock_vfs, "remove", wraps=mock_vfs.remove) as remove:
+        assert mock_vfs.remove(show) is False
+
+    assert [call.args[0] for call in remove.call_args_list] == [
+        show,
+        first_season,
+        first_episode,
+        second_season,
+        second_episode,
+    ]
+
+
 def test_flush_pending_invalidations_clears_and_calls_kernel(mock_vfs):
     """Pending inode invalidations are flushed to pyfuse3 and then cleared."""
 

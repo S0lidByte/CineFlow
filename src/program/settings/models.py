@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import (
     BaseModel,
     BeforeValidator,
+    ConfigDict,
     Field,
     field_validator,
     model_validator,
@@ -36,8 +37,7 @@ EmptyOrUrl = Annotated[str, BeforeValidator(validate_empty_or_url)]
 
 
 class Observable(MigratableBaseModel):
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     _notify_observers: Callable[..., Any] | None = None
 

@@ -112,13 +112,26 @@ class AllDebridMagnetStatusResponse(BaseModel):
         status_code: int = Field(alias="statusCode")
         upload_date: int = Field(alias="uploadDate")
         completion_date: int = Field(alias="completionDate")
-        files: list[AllDebridFile | AllDebridDirectory] | None
 
     class MagnetErrorInfo(BaseModel):
         id: str
         error: AllDebridErrorDetail
 
     magnets: list[MagnetInfo | MagnetErrorInfo]
+
+
+class AllDebridMagnetFilesResponse(BaseModel):
+    """Represents file trees and links returned by AllDebrid's magnet/files API."""
+
+    class MagnetFiles(BaseModel):
+        id: int
+        files: list[AllDebridFile | AllDebridDirectory]
+
+    class MagnetErrorInfo(BaseModel):
+        id: str
+        error: AllDebridErrorDetail
+
+    magnets: list[MagnetFiles | MagnetErrorInfo]
 
 
 class AllDebridError(Exception):
@@ -409,40 +422,18 @@ class AllDebridDownloader(DownloaderBase):
         # Return container WITH the TorrentInfo to avoid re-fetching in download phase
         return TorrentContainer(infohash=infohash, files=files), None, info
 
-    def _add_link_to_files_recursive(
+    def _flatten_magnet_files(
         self,
         files: list[AllDebridFile | AllDebridDirectory],
-        download_link: str,
         result: list[AllDebridFile],
     ) -> None:
-        """
-        Recursively process files/folders and add download link to actual files.
-
-        For season packs, AllDebrid returns nested structure:
-        - files[0].n = folder name (e.g., "Show.S01.1080p")
-        - files[0].e = array of episode files
-        - files[0].e[0].n = episode filename
-        - files[0].e[0].s = episode size
-
-        We need to find the actual files (those with 's' field) and add the 'l' field.
-        """
+        """Flatten AllDebrid's file tree without losing leaf download links."""
 
         for file_obj in files:
             if isinstance(file_obj, AllDebridDirectory):
-                # This is a folder, recurse into it
-                self._add_link_to_files_recursive(
-                    files=file_obj.e,
-                    download_link=download_link,
-                    result=result,
-                )
+                self._flatten_magnet_files(file_obj.e, result)
             else:
-                result.append(
-                    AllDebridFile(
-                        n=file_obj.n,
-                        s=file_obj.s,
-                        l=download_link,
-                    )
-                )
+                result.append(file_obj)
 
     def _extract_files_recursive(
         self,
@@ -498,11 +489,13 @@ class AllDebridDownloader(DownloaderBase):
             AllDebridError: If the API returns a failing status.
         """
 
-        assert self.api
+        api = self.api
+        if api is None:
+            raise AllDebridError("AllDebrid API client has not been initialized")
 
         magnet_url = f"magnet:?xt=urn:btih:{infohash}"
 
-        response = self.api.session.post(
+        response = api.session.post(
             "v4/magnet/upload",
             data={
                 "magnets[]": magnet_url,
@@ -579,73 +572,42 @@ class AllDebridDownloader(DownloaderBase):
         self,
         magnet_id: int,
     ) -> list[AllDebridFile] | None:
-        """
-        Get the files and download links for a magnet.
-
-        Returns:
-            list of file objects with 'n' (name), 's' (size), 'l' (link), and optionally 'e' (entries) fields.
-        """
+        """Get flattened files and their download links for a magnet."""
 
         try:
-            assert self.api
+            api = self.api
+            if api is None:
+                raise AllDebridError("AllDebrid API client has not been initialized")
 
-            # Get the magnet status which includes links
-            response = self.api.session.post(
-                "v4.1/magnet/status",
-                data={
-                    "id": str(magnet_id),
-                },
+            # AllDebrid v4.1 moved file trees and leaf download links from
+            # magnet/status to this dedicated endpoint.
+            response = api.session.post(
+                "v4/magnet/files",
+                data={"id": [magnet_id]},
             )
-
             self._maybe_backoff(response)
 
             if not response.ok:
                 return None
 
             data = (
-                AllDebridResponse[AllDebridMagnetStatusResponse]
+                AllDebridResponse[AllDebridMagnetFilesResponse]
                 .model_validate({"data": response.json()})
                 .data
             )
-
             if isinstance(data, AllDebridErrorResponse):
                 return None
 
-            # Get magnets from status response
-            magnets = data.data.magnets
+            for magnet in data.data.magnets:
+                if isinstance(magnet, AllDebridMagnetFilesResponse.MagnetErrorInfo):
+                    continue
 
-            if not magnets:
-                return None
+                all_files: list[AllDebridFile] = []
+                self._flatten_magnet_files(magnet.files, all_files)
+                if all_files:
+                    return all_files
 
-            for magnet in magnets:
-                # Extract files from links in the status response
-                # Structure: links[].link = download URL, links[].files = file/folder objects
-                # For season packs: links[].files[0].e = array of episode files
-
-                if isinstance(magnet, AllDebridMagnetStatusResponse.MagnetErrorInfo):
-                    continue  # Skip errored magnets
-
-                files = magnet.files
-
-                if files:
-                    all_files = list[AllDebridFile]()
-
-                    for file_or_directory in files:
-                        download_link = ""
-
-                        if isinstance(file_or_directory, AllDebridFile):
-                            download_link = file_or_directory.l
-                        else:
-                            # Recursively process files/folders and add download link
-                            self._add_link_to_files_recursive(
-                                file_or_directory.e, download_link, all_files
-                            )
-
-                    if all_files:
-                        return all_files
-
-                return None
-
+            return None
         except Exception as e:
             logger.debug(f"Error getting magnet files: {e}")
             return None
@@ -665,10 +627,12 @@ class AllDebridDownloader(DownloaderBase):
             AllDebridError: If the API returns a failing status.
         """
 
-        assert self.api
+        api = self.api
+        if api is None:
+            raise AllDebridError("AllDebrid API client has not been initialized")
 
         # AllDebrid API expects ID as string
-        response = self.api.session.post(
+        response = api.session.post(
             "v4.1/magnet/status",
             data={
                 "id": str(torrent_id),
@@ -738,10 +702,12 @@ class AllDebridDownloader(DownloaderBase):
             AllDebridError: If the API returns a failing status.
         """
 
-        assert self.api
+        api = self.api
+        if api is None:
+            raise AllDebridError("AllDebrid API client has not been initialized")
 
         # AllDebrid API expects ID as string
-        response = self.api.session.post(
+        response = api.session.post(
             url="v4/magnet/delete",
             data={
                 "id": str(torrent_id),
@@ -765,9 +731,11 @@ class AllDebridDownloader(DownloaderBase):
         """
 
         try:
-            assert self.api
+            api = self.api
+            if api is None:
+                raise AllDebridError("AllDebrid API client has not been initialized")
 
-            response = self.api.session.get(
+            response = api.session.get(
                 "v4/link/unlock",
                 params={
                     "link": link,
@@ -812,9 +780,11 @@ class AllDebridDownloader(DownloaderBase):
         """
 
         try:
-            assert self.api
+            api = self.api
+            if api is None:
+                raise AllDebridError("AllDebrid API client has not been initialized")
 
-            response = self.api.session.get("v4/user")
+            response = api.session.get("v4/user")
 
             self._maybe_backoff(response)
 
