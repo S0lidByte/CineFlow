@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.2](https://github.com/S0lidByte/CineFlow/compare/v1.31.1...v1.31.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* **scrapers:** harden prowlarr session initialization, concurrency limits and thread-safe indexer pruning ([4e28c87](https://github.com/S0lidByte/CineFlow/commit/4e28c8744f8f6296d8394e5fccf0dbea0d825341))
+
 ## [1.31.1](https://github.com/S0lidByte/CineFlow/compare/v1.31.0...v1.31.1) (2026-09-07)
 
 
