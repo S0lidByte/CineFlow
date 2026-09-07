@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.3](https://github.com/S0lidByte/CineFlow/compare/v1.31.2...v1.31.3) (2026-09-07)
+
+
+### Bug Fixes
+
+* **backend:** harden streaming cache, vfs teardown, updater workflows, and test coverage ([e121568](https://github.com/S0lidByte/CineFlow/commit/e121568eb6002f2907d82114f0c55967682f594f))
+
 ## [1.31.2](https://github.com/S0lidByte/CineFlow/compare/v1.31.1...v1.31.2) (2026-09-07)
 
 
