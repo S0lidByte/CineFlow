@@ -69,6 +69,7 @@ CI_UNIT_TESTS = (
     "src/tests/test_hls_process_cleanup.py",
     "src/tests/test_debrid_matching.py",
     "src/tests/test_settings_migration.py",
+    "src/tests/test_prowlarr_concurrency.py",
 )
 
 

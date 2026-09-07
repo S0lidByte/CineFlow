@@ -895,6 +895,12 @@ class ProwlarrConfig(Observable):
         ge=1,
         description="Timeout in seconds for parallel infohash fetching from URLs",
     )
+    max_concurrent_infohash_fetches: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Maximum concurrent download URL resolutions across all Prowlarr indexers",
+    )
     ratelimit: bool = Field(default=True, description="Enable rate limiting")
     limiter_seconds: int = Field(
         default=60, ge=1, description="Rate limiter cooldown in seconds"

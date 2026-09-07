@@ -1,6 +1,7 @@
 """Prowlarr scraper module"""
 
 import concurrent.futures
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -126,8 +127,28 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
         # Shared session for infohash URL resolution — avoids creating a new
         # httpx.Client per URL when hundreds of torrents are fetched in parallel.
         self._infohash_session: SmartSession | None = None
+        self._infohash_semaphore: threading.BoundedSemaphore | None = None
+        self._indexers_lock = threading.Lock()
         self.last_indexer_scan = None
         self._initialize()
+
+    def _get_infohash_semaphore(self) -> threading.BoundedSemaphore:
+        """Lazily initialize and return the global bounded semaphore for URL infohash resolution."""
+        if self._infohash_semaphore is None:
+            cap = max(1, getattr(self.settings, "max_concurrent_infohash_fetches", 10))
+            self._infohash_semaphore = threading.BoundedSemaphore(cap)
+        return self._infohash_semaphore
+
+    def _fetch_infohash_bounded(
+        self,
+        url: str,
+        session: SmartSession | None = None,
+        timeout: float = 10.0,
+    ) -> str | None:
+        """Fetch infohash from URL under global Prowlarr concurrency semaphore."""
+        sem = self._get_infohash_semaphore()
+        with sem:
+            return self.get_infohash_from_url(url, session=session, timeout=timeout)
 
     def _create_session(self) -> SmartSession:
         """Create a session for Prowlarr"""
@@ -157,6 +178,10 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
                 # Uses a short read timeout so individual URL fetches fail fast rather
                 # than blocking for the full 30 s SmartSession default.
                 self._infohash_session = SmartSession(retries=0)
+                cap = max(
+                    1, getattr(self.settings, "max_concurrent_infohash_fetches", 10)
+                )
+                self._infohash_semaphore = threading.BoundedSemaphore(cap)
                 self.indexers = self.get_indexers()
 
                 if not self.indexers:
@@ -176,7 +201,8 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
         return False
 
     def get_indexers(self) -> list[Indexer]:
-        assert self.session
+        if not self.session:
+            self.session = self._create_session()
 
         statuses = self.session.get("/indexerstatus", timeout=15, headers=self.headers)
         response = self.session.get("/indexer", timeout=15, headers=self.headers)
@@ -323,8 +349,10 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
             or (datetime.now(timezone.utc) - self.last_indexer_scan).total_seconds()
             > 1800
         ):
-            self.indexers = self.get_indexers()
-            self.last_indexer_scan = datetime.now(timezone.utc)
+            new_indexers = self.get_indexers()
+            with self._indexers_lock:
+                self.indexers = new_indexers
+                self.last_indexer_scan = datetime.now(timezone.utc)
 
             if len(self.indexers) != previous_count:
                 logger.info(
@@ -376,7 +404,7 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
         self._periodic_indexer_scan()
 
         torrents = dict[str, str]()
-        start_time = time.time()
+        start_time = time.monotonic()
 
         with concurrent.futures.ThreadPoolExecutor(
             thread_name_prefix="ProwlarrScraper", max_workers=len(self.indexers)
@@ -396,7 +424,7 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
                 except Exception as e:
                     logger.error(f"Error processing indexer {indexer.name}: {e}")
 
-        elapsed = time.time() - start_time
+        elapsed = time.monotonic() - start_time
 
         if torrents:
             logger.log(
@@ -520,9 +548,10 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
             logger.error(f"Failed to build search params for {indexer.name}: {e}")
             return {}
 
-        start_time = time.time()
+        start_time = time.monotonic()
 
-        assert self.session
+        if not self.session:
+            self.session = self._create_session()
 
         response = self.session.get(
             "/search",
@@ -540,11 +569,12 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
                 f"Failed to scrape {indexer.name}: [{response.status_code}] {message}"
             )
 
-            self.indexers.remove(indexer)
-
-            logger.debug(
-                f"Removed indexer {indexer.name} from the list of usable indexers"
-            )
+            with self._indexers_lock:
+                if indexer in self.indexers:
+                    self.indexers.remove(indexer)
+                    logger.debug(
+                        f"Removed indexer {indexer.name} from the list of usable indexers"
+                    )
 
             return {}
 
@@ -553,6 +583,7 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
 
         # List of (torrent, title) tuples that need URL fetching
         urls_to_fetch = list[tuple[ReleaseResource, str]]()
+        seen_urls = set[str]()
 
         # First pass: extract infohashes from available fields and collect URLs that need fetching
         for torrent in data:
@@ -575,21 +606,30 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
                     logger.debug(
                         f"Skipping infohash URL fetch for non-video entry: {title}"
                     )
-                else:
+                elif torrent.download_url not in seen_urls:
+                    seen_urls.add(torrent.download_url)
                     urls_to_fetch.append((torrent, title))
             elif infohash and title:
                 # We already have an infohash, add it directly
                 streams[infohash] = title
 
-        # Fetch URLs in parallel
+        # Fetch URLs in parallel under global concurrency cap
         if urls_to_fetch:
-            workers = min(30, max(5, len(urls_to_fetch) // 2))
+            max_concurrent = max(
+                1, getattr(self.settings, "max_concurrent_infohash_fetches", 10)
+            )
+            workers = min(max(1, len(urls_to_fetch)), max_concurrent)
+            batch_start = time.monotonic()
+            resolved_count = 0
+            failed_count = 0
+            timed_out_count = 0
+
             with concurrent.futures.ThreadPoolExecutor(
                 thread_name_prefix="ProwlarrHashExtract", max_workers=workers
             ) as executor:
                 future_to_torrent = {
                     executor.submit(
-                        self.get_infohash_from_url,
+                        self._fetch_infohash_bounded,
                         torrent.download_url,
                         self._infohash_session,  # shared session — no new httpx.Client per URL
                         20.0,  # per-request timeout: Prowlarr proxies to external trackers which can be slow
@@ -614,7 +654,11 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
                         infohash = future.result()
                         if infohash:
                             streams[infohash] = title
+                            resolved_count += 1
+                        else:
+                            failed_count += 1
                     except Exception as e:
+                        failed_count += 1
                         logger.debug(
                             f"Failed to get infohash from downloadUrl for {title}: {e}"
                         )
@@ -623,12 +667,21 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
                 for future in pending:
                     torrent, title = future_to_torrent[future]
                     future.cancel()
+                    timed_out_count += 1
                     logger.debug(
                         f"Timeout getting infohash from downloadUrl for {title}"
                     )
 
+            batch_duration_ms = (time.monotonic() - batch_start) * 1000
+            logger.debug(
+                f"Prowlarr indexer '{indexer.name}' infohash resolution complete: "
+                f"urls_fetched={len(urls_to_fetch)}, resolved={resolved_count}, "
+                f"failed={failed_count}, timed_out={timed_out_count}, "
+                f"duration_ms={batch_duration_ms:.1f}"
+            )
+
         logger.debug(
-            f"Indexer {indexer.name} found {len(streams)} streams for {item.log_string} in {time.time() - start_time:.2f} seconds"
+            f"Indexer {indexer.name} found {len(streams)} streams for {item.log_string} in {time.monotonic() - start_time:.2f} seconds"
         )
 
         return streams
