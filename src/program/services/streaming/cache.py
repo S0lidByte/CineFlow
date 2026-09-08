@@ -178,7 +178,10 @@ class Cache:
                     f"Hot cache directory init warning for {self.cfg.hot_dir}: {e}"
                 )
 
-        trio.run(self._initialize)
+        try:
+            self._sync_initial_scan()
+        except Exception as e:
+            logger.debug(f"Disk cache initial scan skipped: {e}")
 
     def _shard_for(self, cache_key: str) -> trio.Lock:
         # Stable across process lifetime; collisions only map unrelated keys together.
@@ -247,14 +250,7 @@ class Cache:
             and path.parent == root / key[:2]
         )
 
-    async def _initialize(self) -> None:
-        # Lazy-rebuild index for any pre-existing files so size limits apply after restart
-        try:
-            await self._initial_scan()
-        except Exception as e:
-            logger.debug(f"Disk cache initial scan skipped: {e}")
-
-    async def _initial_scan(self) -> None:
+    def _sync_initial_scan(self) -> None:
         # Build index from on-disk files, ordered by mtime ascending for LRU correctness
         entries: list[CacheEntry] = []
 
@@ -347,40 +343,48 @@ class Cache:
         finally:
             entries.sort(key=lambda t: t.mtime)  # by mtime asc
 
-            async with self.locks():
-                with self._thread_lock:
-                    self._index.clear()
-                    self._by_path.clear()
-                    self._total_bytes = 0
-                    self._hot_bytes = 0
+            with self._thread_lock:
+                self._index.clear()
+                self._by_path.clear()
+                self._total_bytes = 0
+                self._hot_bytes = 0
 
-                    for cache_entry in entries:
-                        # Prefer hot if the same key appears in both (shouldn't normally)
-                        existing = self._index.get(cache_entry.key)
-                        if (
-                            existing
-                            and existing.tier == "hot"
-                            and cache_entry.tier == "warm"
-                        ):
-                            continue
-                        if existing:
-                            self._total_bytes -= existing.size
-                            if existing.tier == "hot":
-                                self._hot_bytes -= existing.size
+                for cache_entry in entries:
+                    # Prefer hot if the same key appears in both (shouldn't normally)
+                    existing = self._index.get(cache_entry.key)
+                    if (
+                        existing
+                        and existing.tier == "hot"
+                        and cache_entry.tier == "warm"
+                    ):
+                        continue
+                    if existing:
+                        self._total_bytes -= existing.size
+                        if existing.tier == "hot":
+                            self._hot_bytes -= existing.size
 
-                        self._index[cache_entry.key] = cache_entry
-                        self._total_bytes += cache_entry.size
-                        if cache_entry.tier == "hot":
-                            self._hot_bytes += cache_entry.size
+                    self._index[cache_entry.key] = cache_entry
+                    self._total_bytes += cache_entry.size
+                    if cache_entry.tier == "hot":
+                        self._hot_bytes += cache_entry.size
 
-                        lst = self._by_path.setdefault(cache_entry.cache_key, [])
-                        if cache_entry.start not in lst:
-                            insort(lst, cache_entry.start)
+                    lst = self._by_path.setdefault(cache_entry.cache_key, [])
+                    if cache_entry.start not in lst:
+                        insort(lst, cache_entry.start)
 
-            try:
-                await self.trim()
-            except Exception:
-                pass
+    async def _initialize(self) -> None:
+        try:
+            await self._initial_scan()
+        except Exception as e:
+            logger.debug(f"Disk cache initial scan skipped: {e}")
+
+    async def _initial_scan(self) -> None:
+        async with self.locks():
+            self._sync_initial_scan()
+        try:
+            await self.trim()
+        except Exception:
+            pass
 
     def _key(self, path: str, start: int) -> str:
         h = hashlib.sha1(f"{path}|{start}".encode()).hexdigest()

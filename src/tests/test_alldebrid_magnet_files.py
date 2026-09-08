@@ -47,7 +47,18 @@ def test_get_magnet_files_flattens_tree_and_preserves_leaf_links() -> None:
     files = downloader._get_magnet_files(123)
 
     assert files is not None
-    assert [(file.n, file.l) for file in files] == [
+    # Test directory tree extraction with path validation
+    debrid_files = []
+    downloader._extract_files_recursive(files, "tv", debrid_files, "hash123")
+    assert [(f.filename, f.download_url) for f in debrid_files] == [
+        ("Episode 01.mkv", "https://cdn.example/episode-01"),
+        ("Movie.mkv", "https://cdn.example/movie"),
+    ]
+
+    # Test flat helper utility
+    flat_files = []
+    downloader._flatten_magnet_files(files, flat_files)
+    assert [(f.n, f.l) for f in flat_files] == [
         ("Episode 01.mkv", "https://cdn.example/episode-01"),
         ("Movie.mkv", "https://cdn.example/movie"),
     ]

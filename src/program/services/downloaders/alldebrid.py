@@ -437,7 +437,7 @@ class AllDebridDownloader(DownloaderBase):
 
     def _extract_files_recursive(
         self,
-        file_list: list[AllDebridFile],
+        file_list: list[AllDebridFile | AllDebridDirectory],
         item_type: ProcessedItemType,
         files: list[DebridFile],
         infohash: str,
@@ -454,8 +454,23 @@ class AllDebridDownloader(DownloaderBase):
         """
 
         for file_entry in file_list:
-            name = file_entry.n
-            current_path = f"{path_prefix}/{name}" if path_prefix else name
+            if isinstance(file_entry, AllDebridDirectory):
+                sub_prefix = f"{path_prefix}/{file_entry.n}" if path_prefix else file_entry.n
+                self._extract_files_recursive(
+                    file_entry.e,
+                    item_type,
+                    files,
+                    infohash,
+                    path_prefix=sub_prefix,
+                )
+                continue
+
+            name = file_entry.n.rsplit("/", 1)[-1]
+            current_path = (
+                f"{path_prefix}/{file_entry.n}"
+                if path_prefix and not file_entry.n.startswith(path_prefix)
+                else file_entry.n
+            )
 
             link = file_entry.l
             size = file_entry.s
@@ -571,8 +586,8 @@ class AllDebridDownloader(DownloaderBase):
     def _get_magnet_files(
         self,
         magnet_id: int,
-    ) -> list[AllDebridFile] | None:
-        """Get flattened files and their download links for a magnet."""
+    ) -> list[AllDebridFile | AllDebridDirectory] | None:
+        """Get file entries and download links for a magnet."""
 
         try:
             api = self.api
@@ -602,10 +617,8 @@ class AllDebridDownloader(DownloaderBase):
                 if isinstance(magnet, AllDebridMagnetFilesResponse.MagnetErrorInfo):
                     continue
 
-                all_files: list[AllDebridFile] = []
-                self._flatten_magnet_files(magnet.files, all_files)
-                if all_files:
-                    return all_files
+                if magnet.files:
+                    return magnet.files
 
             return None
         except Exception as e:
