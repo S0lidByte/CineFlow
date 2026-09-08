@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.4](https://github.com/S0lidByte/CineFlow/compare/v1.31.3...v1.31.4) (2026-09-08)
+
+
+### Bug Fixes
+
+* **backend:** recursive AllDebrid folder extraction and synchronous cache init ([e0a839e](https://github.com/S0lidByte/CineFlow/commit/e0a839ebd8118b2bd386453e38e84b9c7b931945))
+
 ## [1.31.3](https://github.com/S0lidByte/CineFlow/compare/v1.31.2...v1.31.3) (2026-09-07)
 
 
