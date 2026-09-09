@@ -144,11 +144,32 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
         url: str,
         session: SmartSession | None = None,
         timeout: float = 10.0,
+        deadline: float | None = None,
     ) -> str | None:
-        """Fetch infohash from URL under global Prowlarr concurrency semaphore."""
+        """Fetch an infohash under the global cap without exceeding *deadline*."""
         sem = self._get_infohash_semaphore()
-        with sem:
-            return self.get_infohash_from_url(url, session=session, timeout=timeout)
+        acquire_timeout = timeout
+        if deadline is not None:
+            acquire_timeout = min(
+                acquire_timeout, max(0.0, deadline - time.monotonic())
+            )
+
+        if acquire_timeout <= 0 or not sem.acquire(timeout=acquire_timeout):
+            return None
+
+        try:
+            request_timeout = timeout
+            if deadline is not None:
+                request_timeout = min(
+                    request_timeout, max(0.0, deadline - time.monotonic())
+                )
+            if request_timeout <= 0:
+                return None
+            return self.get_infohash_from_url(
+                url, session=session, timeout=request_timeout
+            )
+        finally:
+            sem.release()
 
     def _create_session(self) -> SmartSession:
         """Create a session for Prowlarr"""
@@ -399,30 +420,48 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
         return {}
 
     def scrape(self, item: MediaItem) -> dict[str, str]:
-        """Scrape a single item from all indexers at the same time, return a list of streams"""
+        """Scrape all indexers concurrently, giving each one a single time budget."""
 
         self._periodic_indexer_scan()
 
         torrents = dict[str, str]()
         start_time = time.monotonic()
+        indexers = tuple(self.indexers)
+        if not indexers:
+            logger.log("NOT_FOUND", f"No streams found for {item.log_string}")
+            return torrents
 
-        with concurrent.futures.ThreadPoolExecutor(
-            thread_name_prefix="ProwlarrScraper", max_workers=len(self.indexers)
-        ) as executor:
-            future_to_indexer = {
-                executor.submit(self.scrape_indexer, indexer, item): indexer
-                for indexer in self.indexers
-            }
+        executor = concurrent.futures.ThreadPoolExecutor(
+            thread_name_prefix="ProwlarrScraper", max_workers=len(indexers)
+        )
+        future_to_indexer = {
+            executor.submit(
+                self.scrape_indexer,
+                indexer,
+                item,
+                time.monotonic() + self.timeout,
+            ): indexer
+            for indexer in indexers
+        }
 
-            for future, indexer in future_to_indexer.items():
+        try:
+            for future in concurrent.futures.as_completed(
+                future_to_indexer, timeout=self.timeout
+            ):
+                indexer = future_to_indexer[future]
                 try:
-                    result = future.result(timeout=self.timeout)
-
-                    torrents.update(result)
-                except concurrent.futures.TimeoutError:
-                    logger.debug(f"Timeout for indexer {indexer.name}, skipping.")
+                    torrents.update(future.result())
                 except Exception as e:
                     logger.error(f"Error processing indexer {indexer.name}: {e}")
+        except concurrent.futures.TimeoutError:
+            pass
+        finally:
+            for future, indexer in future_to_indexer.items():
+                if not future.done():
+                    future.cancel()
+                    logger.debug(f"Timeout for indexer {indexer.name}, skipping.")
+            # Do not wait on network calls that have passed their useful deadline.
+            executor.shutdown(wait=False, cancel_futures=True)
 
         elapsed = time.monotonic() - start_time
 
@@ -531,8 +570,13 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
             limit=limit,
         )
 
-    def scrape_indexer(self, indexer: Indexer, item: MediaItem) -> dict[str, str]:
-        """Scrape from a single indexer"""
+    def scrape_indexer(
+        self,
+        indexer: Indexer,
+        item: MediaItem,
+        deadline: float | None = None,
+    ) -> dict[str, str]:
+        """Scrape one indexer within its optional monotonic deadline."""
 
         if (
             indexer.name in ANIME_ONLY_INDEXERS
@@ -549,6 +593,16 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
             return {}
 
         start_time = time.monotonic()
+        if deadline is None:
+            deadline = start_time + self.timeout
+
+        def remaining_budget() -> float:
+            return max(0.0, deadline - time.monotonic())
+
+        search_timeout = min(float(self.timeout), remaining_budget())
+        if search_timeout <= 0:
+            logger.debug(f"Timeout for indexer {indexer.name}, skipping.")
+            return {}
 
         if not self.session:
             self.session = self._create_session()
@@ -556,7 +610,7 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
         response = self.session.get(
             "/search",
             params=params.model_dump(),
-            timeout=self.timeout,
+            timeout=search_timeout,
             headers=self.headers,
         )
 
@@ -624,29 +678,35 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
             failed_count = 0
             timed_out_count = 0
 
-            with concurrent.futures.ThreadPoolExecutor(
+            resolver_deadline = min(
+                deadline,
+                batch_start + float(self.settings.infohash_fetch_timeout),
+            )
+            executor = concurrent.futures.ThreadPoolExecutor(
                 thread_name_prefix="ProwlarrHashExtract", max_workers=workers
-            ) as executor:
-                future_to_torrent = {
-                    executor.submit(
-                        self._fetch_infohash_bounded,
-                        torrent.download_url,
-                        self._infohash_session,  # shared session — no new httpx.Client per URL
-                        20.0,  # per-request timeout: Prowlarr proxies to external trackers which can be slow
-                    ): (
-                        torrent,
-                        title,
-                    )
-                    for torrent, title in urls_to_fetch
-                    if torrent.download_url
-                }
+            )
+            future_to_torrent = {
+                executor.submit(
+                    self._fetch_infohash_bounded,
+                    torrent.download_url,
+                    self._infohash_session,  # shared session — no new httpx.Client per URL
+                    min(20.0, max(0.0, resolver_deadline - time.monotonic())),
+                    resolver_deadline,
+                ): (
+                    torrent,
+                    title,
+                )
+                for torrent, title in urls_to_fetch
+                if torrent.download_url
+            }
 
+            try:
                 done, pending = concurrent.futures.wait(
                     future_to_torrent.keys(),
-                    timeout=self.settings.infohash_fetch_timeout,
+                    timeout=max(0.0, resolver_deadline - time.monotonic()),
                 )
 
-                # Process completed futures
+                # Process completed futures.
                 for future in done:
                     torrent, title = future_to_torrent[future]
 
@@ -663,7 +723,7 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
                             f"Failed to get infohash from downloadUrl for {title}: {e}"
                         )
 
-                # Cancel and log timeouts for pending futures
+                # Report pending work but never wait for it during executor teardown.
                 for future in pending:
                     torrent, title = future_to_torrent[future]
                     future.cancel()
@@ -671,6 +731,8 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
                     logger.debug(
                         f"Timeout getting infohash from downloadUrl for {title}"
                     )
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
 
             batch_duration_ms = (time.monotonic() - batch_start) * 1000
             logger.debug(

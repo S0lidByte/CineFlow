@@ -1,5 +1,6 @@
 """Shared functions for scrapers."""
 
+import re
 from datetime import datetime
 from typing import Literal, cast
 
@@ -54,6 +55,51 @@ RTN_LANGUAGE_ALIASES = {
     "rus": "ru",
     "russian": "ru",
 }
+
+_SEASON_PACK_MARKER = re.compile(
+    r"\b(?:complete|collection|box[ .-]?set|season[ .-]?pack|all[ .-]?(?:episodes|seasons))\b",
+    re.IGNORECASE,
+)
+_SEASON_RANGE_PACK = re.compile(
+    r"\b(?:S\d{1,2}\s*-\s*S\d{1,2}|Seasons\s+\d{1,2}\s*-\s*\d{1,2})\b",
+    re.IGNORECASE,
+)
+_SEASON_DASH_EPISODE = re.compile(
+    r"\bSeason\s+(?P<season>\d{1,2})\s+-\s+(?P<episode>\d{1,3})\b",
+    re.IGNORECASE,
+)
+
+
+def _is_explicit_season_pack(raw_title: str, *, is_complete: bool) -> bool:
+    """Return whether a season-only release is explicitly labelled as a pack."""
+
+    return is_complete or bool(
+        _SEASON_PACK_MARKER.search(raw_title) or _SEASON_RANGE_PACK.search(raw_title)
+    )
+
+
+def _normalize_episode_title_notation(raw_title: str, item: MediaItem) -> str:
+    """Correct the unambiguous ``Season N - N`` episode notation before RTN parses it."""
+
+    if not isinstance(item, Episode) or _is_explicit_season_pack(
+        raw_title, is_complete=False
+    ):
+        return raw_title
+
+    match = _SEASON_DASH_EPISODE.search(raw_title)
+    if not match:
+        return raw_title
+
+    parent_season = cast(Season, item.parent)
+    if (
+        int(match["season"]) != parent_season.number
+        or int(match["episode"]) != item.number
+    ):
+        return raw_title
+
+    return _SEASON_DASH_EPISODE.sub(
+        f"Season {parent_season.number} E{item.number}", raw_title, count=1
+    )
 
 
 def _normalize_rtn_language(language: str) -> str:
@@ -516,13 +562,15 @@ def episode_release_matches(
     season_number: int,
     parsed_episodes: list[int] | None,
     parsed_seasons: list[int] | None,
+    raw_title: str = "",
+    is_complete: bool = False,
 ) -> bool:
     """Return True when a parsed release matches this episode's identity.
 
     Relative episode numbers (E14) require a matching parent season tag so
     S08E14 cannot match S06E14. Absolute-number matches (anime) may omit
-    season tags. Season packs without episode lists are allowed when they
-    contain the parent season.
+    season tags. A release with season tags but no episode tags must be
+    explicitly marked as a complete/range season pack before it can match.
     """
 
     episodes = parsed_episodes or []
@@ -543,7 +591,9 @@ def episode_release_matches(
         return relative_ok or absolute_ok
 
     if seasons:
-        return season_number in seasons
+        return season_number in seasons and _is_explicit_season_pack(
+            raw_title, is_complete=is_complete
+        )
 
     return False
 
@@ -586,8 +636,19 @@ def _streams_from_torrents(
     if log_msg:
         logger.debug(f"Found {len(torrents)} streams for {item.log_string}")
 
+    blacklisted_infohashes = (
+        {stream.infohash.lower() for stream in getattr(item, "blacklisted_streams", ())}
+        if not manual
+        else set()
+    )
+    eligible_torrents = {
+        torrent
+        for torrent in torrents
+        if torrent.infohash.lower() not in blacklisted_infohashes
+    }
+
     sorted_torrents = sort_torrents(
-        torrents,
+        eligible_torrents,
         bucket_limit=scraping_settings.bucket_limit if not manual else 0,
     )
 
@@ -599,7 +660,8 @@ def _streams_from_torrents(
     if log_msg:
         logger.debug(
             f"Kept {len(torrent_stream_map)} streams for {item.log_string} "
-            f"after processing bucket limit"
+            f"after excluding {len(torrents) - len(eligible_torrents)} blacklisted "
+            "streams and processing bucket limit"
         )
 
     return torrent_stream_map
@@ -631,11 +693,13 @@ def _accumulate_ranked_torrents(
         if infohash in processed_infohashes:
             continue
 
+        ranking_title = _normalize_episode_title_notation(raw_title, item)
+
         try:
             torrent = _rank_with_language_compat(
                 rtn_instance,
                 active_settings,
-                raw_title=raw_title,
+                raw_title=ranking_title,
                 infohash=infohash,
                 correct_title=correct_title,
                 remove_trash=(
@@ -644,6 +708,8 @@ def _accumulate_ranked_torrents(
                 aliases=aliases,
                 item=item,
             )
+            if ranking_title != raw_title:
+                torrent = torrent.model_copy(update={"raw_title": raw_title})
         except Exception as e:
             logger.debug(f"RTN rejected '{raw_title[:60]}': {type(e).__name__}: {e}")
             if funnel is not None:
@@ -777,6 +843,8 @@ def _accumulate_ranked_torrents(
                 season_number=parent_season.number,
                 parsed_episodes=torrent.data.episodes,
                 parsed_seasons=torrent.data.seasons,
+                raw_title=raw_title,
+                is_complete=torrent.data.complete,
             ):
                 logger.trace(
                     f"Skipping incorrect episode torrent for {item.log_string}: {raw_title}"

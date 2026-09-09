@@ -182,7 +182,9 @@ class Zilean(ScraperService[ZileanConfig]):
             torrents[info_hash] = result.raw_title
 
         if torrents:
-            logger.log("SCRAPER", f"Found {len(torrents)} streams for {item.log_string}")
+            logger.log(
+                "SCRAPER", f"Found {len(torrents)} streams for {item.log_string}"
+            )
         else:
             logger.log("NOT_FOUND", f"No streams found for {item.log_string}")
         return torrents

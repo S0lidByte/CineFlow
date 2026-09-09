@@ -1,6 +1,34 @@
 """Episode scrape must match season+episode, not episode number alone."""
 
-from program.services.scrapers.shared import episode_release_matches
+from RTN import parse
+
+from program.media.item import Episode, Season
+from program.services.scrapers.shared import (
+    _normalize_episode_title_notation,
+    episode_release_matches,
+)
+
+
+def test_malformed_season_dash_episode_is_normalized_for_rtn_and_preserved():
+    """Doomdos-style ``Season 3 - 9`` must rank as S03E09 without UI title drift."""
+    raw_title = (
+        "[Doomdos] - Mushoku Tensei Jobless Reincarnation Season 3 - 9 "
+        "[2160p IQ WEB-DL]"
+    )
+
+    season = Season({"number": 3})
+    episode = Episode({"number": 9})
+    episode.parent = season
+
+    normalized_title = _normalize_episode_title_notation(raw_title, episode)
+    parsed = parse(normalized_title)
+
+    assert parsed.seasons == [3]
+    assert parsed.episodes == [9]
+    assert raw_title == (
+        "[Doomdos] - Mushoku Tensei Jobless Reincarnation Season 3 - 9 "
+        "[2160p IQ WEB-DL]"
+    )
 
 
 def test_episode_release_rejects_wrong_season_same_episode_number():
@@ -38,13 +66,27 @@ def test_episode_release_accepts_correct_season_and_episode():
     )
 
 
-def test_episode_release_accepts_season_pack_containing_parent_season():
+def test_episode_release_accepts_explicit_season_pack_containing_parent_season():
     assert episode_release_matches(
         episode_number=14,
         absolute_number=None,
         season_number=6,
         parsed_episodes=None,
         parsed_seasons=[1, 2, 3, 4, 5, 6, 7, 8, 9],
+        raw_title="Show Name Seasons 1-9 Complete 1080p",
+        is_complete=True,
+    )
+
+
+def test_episode_release_rejects_unmarked_season_only_release():
+    """A bare season tag is not evidence that it includes every episode."""
+    assert not episode_release_matches(
+        episode_number=9,
+        absolute_number=None,
+        season_number=3,
+        parsed_episodes=None,
+        parsed_seasons=[3],
+        raw_title="Show Name Season 3 2160p WEB-DL",
     )
 
 
@@ -55,6 +97,8 @@ def test_episode_release_rejects_season_pack_missing_parent_season():
         season_number=6,
         parsed_episodes=None,
         parsed_seasons=[1, 2, 3],
+        raw_title="Show Name Seasons 1-3 Complete 1080p",
+        is_complete=True,
     )
 
 

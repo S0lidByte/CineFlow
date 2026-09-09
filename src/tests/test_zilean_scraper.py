@@ -28,7 +28,9 @@ def _scraper_without_network(monkeypatch, **cfg_overrides) -> Zilean:
     )
     monkeypatch.setattr(settings_manager.settings.scraping, "zilean", config)
     monkeypatch.setattr(Zilean, "validate", lambda self: True)
-    monkeypatch.setattr("program.services.scrapers.zilean.logger.log", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "program.services.scrapers.zilean.logger.log", lambda *_a, **_k: None
+    )
     return Zilean()
 
 
@@ -138,7 +140,9 @@ def test_scrape_non_ok_does_not_log_response_body(monkeypatch):
 )
 def test_scrape_received_429_raises_rate_limit(monkeypatch, retry_after, expected):
     scraper = _scraper_without_network(monkeypatch)
-    scraper.session.get = MagicMock(return_value=_response(429, retry_after=retry_after))
+    scraper.session.get = MagicMock(
+        return_value=_response(429, retry_after=retry_after)
+    )
 
     with pytest.raises(RateLimitError) as error:
         scraper.scrape(Movie({"title": "Film"}))
@@ -179,7 +183,9 @@ def test_scrape_url_normalization_single_slash(monkeypatch, url):
     config = ZileanConfig(enabled=True, url=url, timeout=10)
     monkeypatch.setattr(settings_manager.settings.scraping, "zilean", config)
     monkeypatch.setattr(Zilean, "validate", lambda self: True)
-    monkeypatch.setattr("program.services.scrapers.zilean.logger.log", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "program.services.scrapers.zilean.logger.log", lambda *_a, **_k: None
+    )
 
     scraper = Zilean()
     scraper.session.get = MagicMock(return_value=_response(payload=[]))
@@ -201,8 +207,12 @@ def test_validate_url_normalization_single_slash(monkeypatch, url):
     """Trailing slashes in the configured URL must not produce double-slash in validate."""
     config = ZileanConfig(enabled=True, url=url, timeout=10)
     monkeypatch.setattr(settings_manager.settings.scraping, "zilean", config)
-    monkeypatch.setattr("program.services.scrapers.zilean.logger.log", lambda *_a, **_k: None)
-    monkeypatch.setattr("program.services.scrapers.zilean.logger.error", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "program.services.scrapers.zilean.logger.log", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        "program.services.scrapers.zilean.logger.error", lambda *_a, **_k: None
+    )
 
     scraper = Zilean.__new__(Zilean)
     scraper.settings = config
@@ -228,7 +238,9 @@ def test_run_generic_exception_with_rate_limit_text_does_not_raise(monkeypatch, 
     """Generic exceptions mentioning '429' or 'rate limit' must NOT become RateLimitError."""
     scraper = _scraper_without_network(monkeypatch)
     monkeypatch.setattr(scraper, "scrape", lambda _item: (_ for _ in ()).throw(exc))
-    monkeypatch.setattr("program.services.scrapers.zilean.logger.exception", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "program.services.scrapers.zilean.logger.exception", lambda *_a, **_k: None
+    )
 
     result = scraper.run(Movie({"title": "Film"}))
     assert result == {}
@@ -240,7 +252,9 @@ def test_run_typed_http_error_non_429_does_not_raise_rate_limit(monkeypatch):
     raised = HTTPError("500")
     raised.response = SimpleNamespace(status_code=500, headers={})
     monkeypatch.setattr(scraper, "scrape", lambda _item: (_ for _ in ()).throw(raised))
-    monkeypatch.setattr("program.services.scrapers.zilean.logger.exception", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "program.services.scrapers.zilean.logger.exception", lambda *_a, **_k: None
+    )
 
     result = scraper.run(Movie({"title": "Film"}))
     assert result == {}

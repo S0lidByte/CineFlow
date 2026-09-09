@@ -57,7 +57,7 @@ def test_legacy_normalization_and_extraction_remain_permissive():
         # Long-S (ſ) uppercases to S in Python Unicode, which is valid Base32.
         "ſ" * 32,
         # Kelvin sign (K) uppercases to K, valid Base32.
-        "\u212A" * 32,
+        "\u212a" * 32,
         # Mixed ASCII + non-ASCII that could fold into valid Base32.
         "A" * 31 + "ſ",
         # Non-ASCII hex-length string that could fold into valid hex.

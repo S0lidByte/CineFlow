@@ -98,7 +98,10 @@ def test_zilean_probe_success_is_independent_of_scraper_enablement(mock_settings
         "ok": True,
         "message": "Connected to Zilean",
     }
-    assert fake_client.get.call_args.args[0] == "http://zilean.local:8181/healthchecks/ping"
+    assert (
+        fake_client.get.call_args.args[0]
+        == "http://zilean.local:8181/healthchecks/ping"
+    )
     assert client.call_args.kwargs["timeout"] == ct._httpx_timeout()
     assert client.call_args.kwargs["follow_redirects"] is True
 
