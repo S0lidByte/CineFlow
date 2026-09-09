@@ -637,11 +637,16 @@ def _streams_from_torrents(
     if log_msg:
         logger.debug(f"Found {len(torrents)} streams for {item.log_string}")
 
-    blacklisted_infohashes: set[str] = (
-        {stream.infohash.lower() for stream in item.blacklisted_streams}
-        if not manual
-        else set()
-    )
+    blacklisted_infohashes: set[str] = set()
+    if not manual and hasattr(item, "blacklisted_streams"):
+        blacklisted_streams = item.blacklisted_streams
+        if blacklisted_streams:
+            blacklisted_infohashes = {
+                stream.infohash.lower()
+                for stream in blacklisted_streams
+                if hasattr(stream, "infohash") and stream.infohash
+            }
+
     eligible_torrents = {
         torrent
         for torrent in torrents
