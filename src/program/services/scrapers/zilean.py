@@ -1,13 +1,29 @@
-"""Zilean scraper module"""
+"""Zilean scraper module."""
+
+from math import isfinite
+from typing import cast
 
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from program.media.item import Episode, MediaItem, Season, Show
 from program.services.scrapers.base import ScraperService
 from program.settings import settings_manager
 from program.settings.models import ZileanConfig
+from program.utils.exceptions import RateLimitError
 from program.utils.request import SmartSession, get_hostname_from_url
+from program.utils.torrent import canonical_infohash
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Return a safe non-negative numeric Retry-After value, if supplied."""
+    if value is None:
+        return None
+    try:
+        retry_after = float(value)
+    except (TypeError, ValueError):
+        return None
+    return retry_after if isfinite(retry_after) and retry_after >= 0 else None
 
 
 class Params(BaseModel):
@@ -20,8 +36,8 @@ class Params(BaseModel):
 
 class ZileanScrapeResponse(BaseModel):
     class ResultItem(BaseModel):
-        raw_title: str | None
-        info_hash: str | None
+        raw_title: str | None = None
+        info_hash: str | None = None
 
     data: list[ResultItem]
 
@@ -67,7 +83,8 @@ class Zilean(ScraperService[ZileanConfig]):
             return False
 
         try:
-            url = f"{self.settings.url}/healthchecks/ping"
+            base = (self.settings.url or "").rstrip("/")
+            url = f"{base}/healthchecks/ping"
             response = self.session.get(url, timeout=self.timeout)
 
             return response.ok
@@ -76,31 +93,26 @@ class Zilean(ScraperService[ZileanConfig]):
             return False
 
     def run(self, item: MediaItem) -> dict[str, str]:
-        """Scrape the Zilean site for the given media items and update the object with scraped items"""
-
+        """Scrape Zilean and preserve rate-limit scheduling information."""
         try:
             return self.scrape(item)
-        except Exception as e:
+        except RateLimitError:
+            raise
+        except Exception as exc:
             from requests import HTTPError
 
             if (
-                isinstance(e, HTTPError)
-                and e.response is not None
-                and e.response.status_code == 429
+                isinstance(exc, HTTPError)
+                and exc.response is not None
+                and exc.response.status_code == 429
             ):
-                from program.utils.exceptions import RateLimitError
-
-                retry_after = e.response.headers.get("Retry-After")
                 raise RateLimitError(
                     "Zilean rate limit exceeded",
-                    retry_after=int(retry_after) if retry_after else None,
-                )
-            if "rate limit" in str(e).lower() or "429" in str(e):
-                from program.utils.exceptions import RateLimitError
-
-                raise RateLimitError("Zilean rate limit exceeded")
-            logger.exception(f"Zilean exception thrown: {e}")
-
+                    retry_after=_parse_retry_after(
+                        exc.response.headers.get("Retry-After")
+                    ),
+                ) from exc
+            logger.exception("Zilean exception thrown for {}", item.log_string)
         return {}
 
     def _build_query_params(self, item: MediaItem) -> Params:
@@ -125,42 +137,52 @@ class Zilean(ScraperService[ZileanConfig]):
         )
 
     def scrape(self, item: MediaItem) -> dict[str, str]:
-        """Wrapper for `Zilean` scrape method"""
-
-        url = f"{self.settings.url}/dmm/filtered"
+        """Fetch and safely parse filtered Zilean DMM results."""
+        base = (self.settings.url or "").rstrip("/")
+        url = f"{base}/dmm/filtered"
         params = self._build_query_params(item)
-
         response = self.session.get(
             url,
             params=params.model_dump(exclude_none=True),
             timeout=self.timeout,
         )
 
+        if response.status_code == 429:
+            raise RateLimitError(
+                "Zilean rate limit exceeded",
+                retry_after=_parse_retry_after(response.headers.get("Retry-After")),
+            )
         if not response.ok:
-            logger.error(
-                f"Zilean responded with status code {response.status_code} for {item.log_string}: {response.text}"
+            logger.warning(
+                "Zilean returned HTTP {} for {}", response.status_code, item.log_string
             )
             return {}
 
-        data = ZileanScrapeResponse.model_validate({"data": response.json()}).data
-
-        if not data:
-            logger.log("NOT_FOUND", f"No streams found for {item.log_string}")
+        try:
+            payload: object = response.json()
+        except ValueError:
+            logger.warning("Zilean returned invalid JSON for {}", item.log_string)
+            return {}
+        if not isinstance(payload, list):
+            logger.warning("Zilean returned a non-list payload for {}", item.log_string)
             return {}
 
-        torrents = dict[str, str]()
-
-        for result in data:
-            if not result.raw_title or not result.info_hash:
+        rows = cast(list[object], payload)
+        torrents: dict[str, str] = {}
+        for row in rows:
+            if not isinstance(row, dict):
                 continue
-
-            torrents[result.info_hash] = result.raw_title
+            try:
+                result = ZileanScrapeResponse.ResultItem.model_validate(row)
+            except ValidationError:
+                continue
+            info_hash = canonical_infohash(result.info_hash)
+            if not result.raw_title or info_hash is None:
+                continue
+            torrents[info_hash] = result.raw_title
 
         if torrents:
-            logger.log(
-                "SCRAPER", f"Found {len(torrents)} streams for {item.log_string}"
-            )
+            logger.log("SCRAPER", f"Found {len(torrents)} streams for {item.log_string}")
         else:
             logger.log("NOT_FOUND", f"No streams found for {item.log_string}")
-
         return torrents

@@ -4,7 +4,11 @@ permissions:
   contents: read
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
+  workflow_dispatch:
 
 jobs:
   lint:
@@ -85,7 +89,10 @@ jobs:
             src/tests/test_per_library_ranking_packs.py \
             src/tests/test_stats_needs_attention.py \
             src/tests/test_settings_connection.py \
+            src/tests/test_settings_connection_route.py \
             src/tests/test_stremthru_scraper.py \
+            src/tests/test_torrent_utils.py \
+            src/tests/test_zilean_scraper.py \
             src/tests/test_remake_aliases_scrape.py \
             src/tests/test_program_filesystem.py \
             src/tests/test_alldebrid_downloader.py \
