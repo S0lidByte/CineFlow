@@ -90,9 +90,10 @@ def _normalize_episode_title_notation(raw_title: str, item: MediaItem) -> str:
     if not match:
         return raw_title
 
-    parent_season = cast(Season, item.parent)
+    parent_season = item.parent
     if (
-        int(match["season"]) != parent_season.number
+        not parent_season
+        or int(match["season"]) != parent_season.number
         or int(match["episode"]) != item.number
     ):
         return raw_title
@@ -636,8 +637,8 @@ def _streams_from_torrents(
     if log_msg:
         logger.debug(f"Found {len(torrents)} streams for {item.log_string}")
 
-    blacklisted_infohashes = (
-        {stream.infohash.lower() for stream in getattr(item, "blacklisted_streams", ())}
+    blacklisted_infohashes: set[str] = (
+        {stream.infohash.lower() for stream in item.blacklisted_streams}
         if not manual
         else set()
     )
