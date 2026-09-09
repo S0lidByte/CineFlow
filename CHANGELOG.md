@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.5](https://github.com/S0lidByte/CineFlow/compare/v1.31.4...v1.31.5) (2026-09-09)
+
+
+### Bug Fixes
+
+* **scrapers:** harden zilean direct-DMM integration and settings connectivity ([a83c230](https://github.com/S0lidByte/CineFlow/commit/a83c230f49d94936e607ff467510c779d8248e3a))
+
 ## [1.31.4](https://github.com/S0lidByte/CineFlow/compare/v1.31.3...v1.31.4) (2026-09-08)
 
 
