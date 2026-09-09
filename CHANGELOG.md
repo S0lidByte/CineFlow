@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.31.6](https://github.com/S0lidByte/CineFlow/compare/v1.31.5...v1.31.6) (2026-09-09)
+
+
+### Bug Fixes
+
+* **scrapers:** harden RTN parsing, blacklist filtering, retry bounds, and prowlarr concurrency ([9a4a71f](https://github.com/S0lidByte/CineFlow/commit/9a4a71fcc1adfa826df79d1fb20b7e8920475a83))
+* **scrapers:** safely access blacklisted_streams on item candidates ([954a745](https://github.com/S0lidByte/CineFlow/commit/954a745a7db3b3a047be315eb49ff8cc7a8247ad))
+* **types:** resolve pyright diagnostics for item.parent and blacklisted_infohashes ([e21ce96](https://github.com/S0lidByte/CineFlow/commit/e21ce963d55b629e8f97a5d1938519da915a0c4e))
+
 ## [1.31.5](https://github.com/S0lidByte/CineFlow/compare/v1.31.4...v1.31.5) (2026-09-09)
 
 
