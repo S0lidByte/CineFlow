@@ -201,13 +201,13 @@ def normalize_provider_error(
 
         # Extract retry_after attribute if available on exception (e.g. RateLimitError)
         effective_retry_after = retry_after
-        if effective_retry_after is None and hasattr(exception, "retry_after"):
-            try:
-                val = exception.retry_after
-                if val is not None:
-                    effective_retry_after = float(val)
-            except (ValueError, TypeError):
-                pass
+        if effective_retry_after is None:
+            raw_retry: Any = getattr(exception, "retry_after", None)
+            if raw_retry is not None:
+                try:
+                    effective_retry_after = float(raw_retry)  # type: ignore[arg-type]
+                except (ValueError, TypeError):
+                    pass
 
         # Check for HTTP status in exception attributes if present (e.g. httpx.HTTPStatusError)
         resp = getattr(exception, "response", None)
