@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.7](https://github.com/S0lidByte/CineFlow/compare/v1.31.6...v1.31.7) (2026-09-10)
+
+
+### Bug Fixes
+
+* preserve pipeline state when resuming paused media ([9b307e0](https://github.com/S0lidByte/CineFlow/commit/9b307e022c888bf3a2bdd57c3c6836221a9ae64a))
+
 ## [1.31.6](https://github.com/S0lidByte/CineFlow/compare/v1.31.5...v1.31.6) (2026-09-09)
 
 
