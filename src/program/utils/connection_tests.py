@@ -1,7 +1,8 @@
 """Thin Settings connection probes for third-party integrations.
 
-Each probe uses saved settings only, enforces a hard ≤5s wall timeout, and
-returns safe messages that never include API keys, tokens, or passwords.
+Each probe uses saved settings only and returns a response after at most five
+seconds. Thread cancellation is cooperative, so a stalled probe may outlive
+that response. Messages never include API keys, tokens, or passwords.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ ConnectionService = Literal[
     "plex",
     "jackett",
     "prowlarr",
+    "zilean",
     "opensubtitles",
     "subdl",
 ]
@@ -39,6 +41,7 @@ SUPPORTED_SERVICES: tuple[ConnectionService, ...] = (
     "plex",
     "jackett",
     "prowlarr",
+    "zilean",
     "opensubtitles",
     "subdl",
 )
@@ -109,18 +112,21 @@ def _ok(started: float, message: str) -> ConnectionTestResponse:
 def _run_with_timeout(
     probe: Callable[[], ConnectionTestResponse],
 ) -> ConnectionTestResponse:
-    """Run a sync probe with a hard wall-clock timeout."""
+    """Bound the response wait; cancellation of an executing thread is cooperative."""
     started = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(probe)
-        try:
-            return future.result(timeout=PROBE_TIMEOUT_SECONDS)
-        except FuturesTimeout:
-            future.cancel()
-            return _fail(started, "Timed out")
-        except Exception as exc:
-            logger.debug(f"Connection probe failed: {type(exc).__name__}")
-            return _fail(started, "Connection failed")
+    pool = ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(probe)
+    try:
+        return future.result(timeout=PROBE_TIMEOUT_SECONDS)
+    except FuturesTimeout:
+        future.cancel()
+        return _fail(started, "Timed out")
+    except Exception as exc:
+        logger.debug(f"Connection probe failed: {type(exc).__name__}")
+        return _fail(started, "Connection failed")
+    finally:
+        # Do not wait after a timeout: Python cannot safely kill running threads.
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def _httpx_timeout() -> httpx.Timeout:
@@ -333,6 +339,31 @@ def _probe_prowlarr() -> ConnectionTestResponse:
     return _ok(started, "Connected to Prowlarr")
 
 
+def _probe_zilean() -> ConnectionTestResponse:
+    """Check the saved Zilean instance, independent of scraper enablement.
+
+    The ping proves reachability only; it does not validate DMM filtering or
+    search availability.
+    """
+    started = time.perf_counter()
+    settings = settings_manager.settings.scraping.zilean
+    url = (settings.url or "").strip().rstrip("/")
+    if not url:
+        return _fail(started, "URL not configured")
+
+    try:
+        with httpx.Client(timeout=_httpx_timeout(), follow_redirects=True) as client:
+            response = client.get(f"{url}/healthchecks/ping")
+    except httpx.TimeoutException:
+        return _fail(started, "Timed out")
+    except httpx.HTTPError:
+        return _fail(started, "Connection failed")
+
+    if response.status_code >= 400:
+        return _fail(started, f"HTTP {response.status_code}")
+    return _ok(started, "Connected to Zilean")
+
+
 def _probe_opensubtitles() -> ConnectionTestResponse:
     started = time.perf_counter()
     settings = (
@@ -431,12 +462,13 @@ _PROBES: dict[ConnectionService, Callable[[], ConnectionTestResponse]] = {
     "plex": _probe_plex,
     "jackett": _probe_jackett,
     "prowlarr": _probe_prowlarr,
+    "zilean": _probe_zilean,
     "opensubtitles": _probe_opensubtitles,
     "subdl": _probe_subdl,
 }
 
 
 def run_connection_test(service: ConnectionService) -> ConnectionTestResponse:
-    """Execute a connection probe for ``service`` with a hard ≤5s timeout."""
+    """Execute a connection probe with a response-bounded five-second wait."""
     probe = _PROBES[service]
     return _run_with_timeout(probe)

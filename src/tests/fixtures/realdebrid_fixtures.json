@@ -1,0 +1,48 @@
+{
+  "user_profile_success": {
+    "id": 123456,
+    "username": "cineflow_user",
+    "email": "user@example.com",
+    "points": 1500,
+    "type": "premium",
+    "premium": 31536000,
+    "expiration": "2027-01-01T00:00:00.000Z"
+  },
+  "instant_availability_success": {
+    "0123456789abcdef0123456789abcdef01234567": {
+      "rd": [
+        {
+          "1": {
+            "filename": "Movie.Title.2024.1080p.WEB-DL.mkv",
+            "filesize": 2147483648
+          }
+        }
+      ]
+    }
+  },
+  "instant_availability_empty": {
+    "ffffffffffffffffffffffffffffffffffffffff": {
+      "rd": []
+    }
+  },
+  "error_bad_token": {
+    "error": "bad_token",
+    "error_code": 8,
+    "message": "Invalid API token supplied"
+  },
+  "error_permission_denied": {
+    "error": "permission_denied",
+    "error_code": 9,
+    "message": "Account does not have premium status"
+  },
+  "error_rate_limited": {
+    "error": "slow_down",
+    "error_code": 11,
+    "message": "Too many requests, slow down"
+  },
+  "error_hoster_unavailable": {
+    "error": "hoster_unavailable",
+    "error_code": 19,
+    "message": "Hoster is temporarily unavailable"
+  }
+}

@@ -455,7 +455,9 @@ class AllDebridDownloader(DownloaderBase):
 
         for file_entry in file_list:
             if isinstance(file_entry, AllDebridDirectory):
-                sub_prefix = f"{path_prefix}/{file_entry.n}" if path_prefix else file_entry.n
+                sub_prefix = (
+                    f"{path_prefix}/{file_entry.n}" if path_prefix else file_entry.n
+                )
                 self._extract_files_recursive(
                     file_entry.e,
                     item_type,

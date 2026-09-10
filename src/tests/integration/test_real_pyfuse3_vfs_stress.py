@@ -26,6 +26,8 @@ import pytest
 import sniffio
 import trio
 
+pytestmark = [pytest.mark.fuse, pytest.mark.integration]
+
 if sys.platform != "linux" or not Path("/dev/fuse").exists():
     pytest.skip(
         "requires Linux pyfuse3 and an accessible /dev/fuse device",

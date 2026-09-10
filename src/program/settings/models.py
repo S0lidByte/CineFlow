@@ -986,10 +986,13 @@ class ScraperModel(Observable):
         default=5, ge=0, le=20, description="Maximum results per quality bucket"
     )
     max_failed_attempts: int = Field(
-        default=0,
+        default=10,
         ge=0,
         le=10,
-        description="Maximum failed scrape attempts before giving up",
+        description=(
+            "Maximum failed scrape attempts before marking an item as failed; "
+            "legacy value 0 uses the default limit of 10"
+        ),
     )
     dubbed_anime_only: bool = Field(
         default=False, description="Only scrape dubbed anime content"

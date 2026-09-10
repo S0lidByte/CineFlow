@@ -28,6 +28,8 @@ from program.services.scrapers.zilean import Zilean
 from program.settings import settings_manager
 from program.settings.models import Observable, ScraperModel
 
+DEFAULT_MAX_FAILED_ATTEMPTS = 10
+
 
 class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
     def __init__(self):
@@ -35,9 +37,7 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
 
         self.initialized = False
         self.settings = settings_manager.settings.scraping
-        self.max_failed_attempts = (
-            settings_manager.settings.scraping.max_failed_attempts
-        )
+        self.max_failed_attempts = self.effective_max_failed_attempts(self.settings)
 
         self.services = {
             AIOStreams: AIOStreams(),
@@ -59,6 +59,13 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
 
         if not self.initialized:
             return
+
+    @staticmethod
+    def effective_max_failed_attempts(settings: ScraperModel) -> int:
+        """Return a finite retry limit, preserving zero as the legacy default."""
+
+        configured_limit = settings.max_failed_attempts
+        return configured_limit if configured_limit > 0 else DEFAULT_MAX_FAILED_ATTEMPTS
 
     def reinitialize(self) -> bool:
         """Retry enabled scrapers that were unavailable during startup."""
@@ -119,10 +126,7 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
 
             item.failed_attempts += 1
 
-            if (
-                self.max_failed_attempts > 0
-                and item.failed_attempts >= self.max_failed_attempts
-            ):
+            if item.failed_attempts >= self.max_failed_attempts:
                 item.store_state(States.Failed)
                 logger.debug(
                     f"Failed scraping after {item.failed_attempts}/{self.max_failed_attempts} tries. Marking as failed: {item.log_string}"
@@ -339,10 +343,7 @@ class Scraping(Runner[ScraperModel, ScraperService[Observable]]):
         if not is_scrapeable:
             return False
 
-        if (
-            settings.max_failed_attempts > 0
-            and item.failed_attempts >= settings.max_failed_attempts
-        ):
+        if item.failed_attempts >= self.effective_max_failed_attempts(settings):
             return False
 
         return True

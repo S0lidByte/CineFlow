@@ -17,6 +17,7 @@ bin/
 *.bin
 .secrets*
 event.json
+openapi.json
 reacher-*.json
 *.patch
 config

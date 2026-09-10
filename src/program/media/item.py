@@ -149,6 +149,9 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
     last_state: Mapped[States | None] = mapped_column(
         sqlalchemy.Enum(States), default=States.Unknown
     )
+    state_before_pause: Mapped[States | None] = mapped_column(
+        sqlalchemy.Enum(States), default=None
+    )
     filesystem_entries: Mapped[list["FilesystemEntry"]] = relationship(
         "FilesystemEntry",
         back_populates="media_item",

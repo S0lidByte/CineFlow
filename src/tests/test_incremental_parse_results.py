@@ -97,3 +97,43 @@ def test_conflicting_infohash_titles_first_wins():
     assert first == second
     assert infohash in first
     assert first[infohash].raw_title == first_title
+
+
+def test_parse_results_excludes_blacklisted_candidates_before_bucket_limit(monkeypatch):
+    """A blacklisted top candidate must not consume the automatic bucket quota."""
+
+    from program.services.scrapers import shared
+
+    class _Torrent:
+        def __init__(self, infohash: str):
+            self.infohash = infohash
+
+        def __hash__(self):
+            return hash(self.infohash)
+
+    blacklisted_hash = "a" * 40
+    fresh_hash = "b" * 40
+    blacklisted = _Torrent(blacklisted_hash)
+    fresh = _Torrent(fresh_hash)
+
+    monkeypatch.setattr(
+        shared,
+        "sort_torrents",
+        lambda torrents, bucket_limit: {
+            torrent.infohash: torrent for torrent in torrents
+        },
+    )
+    monkeypatch.setattr(
+        shared,
+        "Stream",
+        lambda torrent: torrent,
+    )
+
+    item = DummyItem()
+    item.blacklisted_streams = [
+        type("BlacklistEntry", (), {"infohash": blacklisted_hash})()
+    ]
+
+    streams = shared._streams_from_torrents(item, {blacklisted, fresh}, manual=False)
+
+    assert set(streams) == {fresh_hash}
