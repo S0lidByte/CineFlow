@@ -39,7 +39,8 @@ def test_fastapi_testclient_smoke() -> None:
     response = client.get("/healthz")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
-    assert fastapi.__version__.startswith("0.140")
+    major, minor, *_ = (int(part) for part in fastapi.__version__.split("."))
+    assert (major, minor) >= (0, 140)
 
 
 def test_notification_service_apprise_init_and_notify() -> None:
