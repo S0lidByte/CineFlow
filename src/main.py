@@ -54,7 +54,8 @@ class LoguruMiddleware(BaseHTTPMiddleware):
                 f"{request.method} {request.url.path} - {response.status_code if response else '500'} - {process_time:.2f}s",
             )
 
-        assert response is not None
+        if response is None:
+            raise RuntimeError("Request completed without a response")
         return response
 
 
@@ -137,24 +138,24 @@ def signal_handler(_signum: int, _frame: FrameType | None):
     sys.exit(0)
 
 
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
+if __name__ == "__main__":
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
-config = uvicorn.Config(app, host="0.0.0.0", port=args.port, log_config=None)
-server = Server(config=config)
+    config = uvicorn.Config(app, host="0.0.0.0", port=args.port, log_config=None)
+    server = Server(config=config)
 
+    with server.run_in_thread():
+        exit_code = 0
+        try:
+            di[Program].start()
+            if not di[Program].initialized or not di[Program].is_alive():
+                raise RuntimeError("Riven program did not start correctly.")
 
-with server.run_in_thread():
-    exit_code = 0
-    try:
-        di[Program].start()
-        if not di[Program].initialized or not di[Program].is_alive():
-            raise RuntimeError("Riven program did not start correctly.")
-
-        di[Program].join()
-    except Exception:
-        logger.exception("Error in main thread")
-        exit_code = 1
-    finally:
-        logger.critical("Server has been stopped")
-        sys.exit(exit_code)
+            di[Program].join()
+        except Exception:
+            logger.exception("Error in main thread")
+            exit_code = 1
+        finally:
+            logger.critical("Server has been stopped")
+            sys.exit(exit_code)
