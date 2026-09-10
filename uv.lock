@@ -868,11 +868,11 @@ wheels = [
 
 [[package]]
 name = "openapi-generator-cli"
-version = "7.21.0"
+version = "7.25.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ba/3d/5bd1f2934d55b9490344e9384429a6adf8b332a37404fd95faa0b5ed9f4a/openapi_generator_cli-7.21.0.tar.gz", hash = "sha256:a15a21a3500742dd984596234d654ef8dded318e5da7de08934150a2cf1a305e", size = 28005213, upload-time = "2026-03-25T02:23:59.207Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d2/fb/60be1f9412e3134f91e1af0f49d797abfc42a7df7762720f4224b75d9ddb/openapi_generator_cli-7.25.0.tar.gz", hash = "sha256:f91783a92ce5491ae09b212efa7c43acf227b0d9b2d491edb8ce78bf98d9da2c", size = 28625124, upload-time = "2026-08-25T01:16:45.49Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c3/a2/24546fa7ca83a0745ae08fab3a9de83d80046b2aec612e6439ab912851ce/openapi_generator_cli-7.21.0-py3-none-any.whl", hash = "sha256:810362b6685886153735cafdaf7d0be885f419e182c9e0d85503490fe5642381", size = 28019158, upload-time = "2026-03-25T02:24:02.428Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/eb/20387f8f6cf3736eb02e73042f565a806d56b79d1bbe04de482c14698f4b/openapi_generator_cli-7.25.0-py3-none-any.whl", hash = "sha256:dbe64b2d968ec0a32939c1eede5ac1ffa318f28d93d11701ecd0267ed7395266", size = 28639339, upload-time = "2026-08-25T01:16:41.995Z" },
 ]
 
 [package.optional-dependencies]
@@ -1627,9 +1627,9 @@ requires-dist = [
     { name = "lazy-imports", specifier = ">=1.1.0" },
     { name = "loguru", specifier = ">=0.7.2,<0.8" },
     { name = "lxml", specifier = ">=6.1.1,<7" },
-    { name = "opentelemetry-api", specifier = ">=1.25.0,<2" },
+    { name = "opentelemetry-api", specifier = ">=1.44.0,<2" },
     { name = "opentelemetry-exporter-prometheus", specifier = ">=0.46b0,<0.66" },
-    { name = "opentelemetry-sdk", specifier = ">=1.25.0,<2" },
+    { name = "opentelemetry-sdk", specifier = ">=1.44.0,<2" },
     { name = "ordered-set", specifier = ">=4.1.0" },
     { name = "parsett", specifier = ">=1.8.5,<2" },
     { name = "plexapi", specifier = ">=4.17.1,<5" },
@@ -1638,7 +1638,7 @@ requires-dist = [
     { name = "psycopg2-binary", specifier = ">=2.9.9,<3" },
     { name = "pydantic", specifier = ">=2.12.0,<3" },
     { name = "pyfuse3", marker = "sys_platform == 'linux'", specifier = ">=3.4.0,<4" },
-    { name = "python-dotenv", specifier = ">=1.2.2,<2" },
+    { name = "python-dotenv", specifier = ">=1.2.3,<2" },
     { name = "python-multipart", specifier = ">=0.0.31" },
     { name = "rank-torrent-name", specifier = ">=1.11.1,<2" },
     { name = "requests", extras = ["socks"], specifier = ">=2.34.2,<3" },
@@ -1650,7 +1650,7 @@ requires-dist = [
     { name = "starlette", specifier = ">=1.3.1,<2" },
     { name = "subliminal", specifier = ">=2.2.1,<3" },
     { name = "trio-util", specifier = ">=0.8.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.6,<1" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.4,<1" },
 ]
 
 [package.metadata.requires-dev]
@@ -1659,7 +1659,7 @@ dev = [
     { name = "codecov", specifier = ">=2.1.13,<3" },
     { name = "isort", specifier = ">=5.10.1,<9" },
     { name = "mypy", specifier = ">=2.3.1,<3" },
-    { name = "openapi-generator-cli", extras = ["jdk4py"], specifier = ">=7.17.0" },
+    { name = "openapi-generator-cli", extras = ["jdk4py"], specifier = ">=7.25.0" },
     { name = "pre-commit", specifier = ">=4.3.0,<5" },
     { name = "pyfakefs", specifier = ">=6.2.0,<7" },
     { name = "pyperf", specifier = ">=2.2.0,<3" },
@@ -1669,7 +1669,7 @@ dev = [
     { name = "pytest-mock", specifier = ">=3.14.0,<4" },
     { name = "requests-mock", specifier = ">=1.12.1,<2" },
     { name = "responses", specifier = "==0.26.2" },
-    { name = "ruff", specifier = ">=0.16.1,<0.17" },
+    { name = "ruff", specifier = ">=0.16.6,<0.17" },
     { name = "testcontainers", specifier = ">=4.8.0,<5" },
     { name = "types-lxml", specifier = ">=2025.8.25" },
 ]
