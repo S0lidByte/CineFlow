@@ -116,6 +116,9 @@ def mock_vfs(tmp_path):
         mock_settings.settings.filesystem.library_profiles = {}
 
         vfs = RivenVFS(mountpoint=str(tmp_path / "mock_mtpt"), downloader=MagicMock())
+        vfs._thread.is_alive.return_value = False
+        vfs._is_mountpoint_mounted = MagicMock(return_value=False)
+        vfs._force_unmount_mountpoint = MagicMock()
         vfs.vfs_db = MagicMock()
         vfs.vfs_db.get_subtitle_content = MagicMock(return_value=b"subtitle data")
         # FUSE thread is mocked, so the Trio lock never gets created in _fuse_runner.

@@ -1,3 +1,4 @@
+import asyncio
 from copy import copy
 from typing import Annotated, Any, cast
 
@@ -336,9 +337,10 @@ async def test_settings_connection(
 ) -> ConnectionTestResponse:
     """Probe a third-party integration using saved settings.
 
-    Returns ``{ok, latency_ms, message}``. Messages never include secrets.
-    Hard wall-clock timeout is ≤5 seconds per probe.
+    Returns ``{ok, latency_ms, message}`` without secrets. The response wait is
+    bounded to five seconds; cancellation of an in-flight sync probe is
+    cooperative and the worker may finish later.
     """
     if service not in SUPPORTED_SERVICES:
         raise HTTPException(status_code=404, detail="Unknown service")
-    return run_connection_test(service)
+    return await asyncio.to_thread(run_connection_test, service)

@@ -2,7 +2,7 @@ import os
 import re
 import secrets
 import string
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 from time import time
@@ -53,7 +53,7 @@ def benchmark(
     *,
     log: Callable[[float], None] | None,
     decimal_places: int = 3,
-) -> Iterator[None]:
+) -> Generator[None]:
     """Context manager for benchmarking code execution time."""
 
     start_time = time()

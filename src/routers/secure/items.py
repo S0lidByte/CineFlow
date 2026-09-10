@@ -119,6 +119,21 @@ def handle_ids(ids: Sequence[str | int]) -> list[int]:
         ) from e
 
 
+def save_state_before_pause(item: MediaItem) -> None:
+    """Persist the effective state needed to resume a paused item."""
+
+    item.state_before_pause = item.state
+    MediaItem.store_state(item, States.Paused)
+
+
+def restore_state_after_pause(item: MediaItem) -> None:
+    """Restore a paused item's saved state, with a safe legacy fallback."""
+
+    resume_state = item.state_before_pause or States.Requested
+    item.state_before_pause = None
+    MediaItem.store_state(item, resume_state)
+
+
 # Convenience helper to mutate an item and update states consistently
 def apply_item_mutation(
     program: Program,
@@ -1458,7 +1473,7 @@ async def pause_items(
                     ]:
 
                         def mutation(i: MediaItem, _: Session):
-                            i.store_state(States.Paused)
+                            save_state_before_pause(i)
 
                         apply_item_mutation(
                             di[Program],
@@ -1514,7 +1529,7 @@ async def unpause_items(
                     if media_item.last_state == States.Paused:
 
                         def mutation(i: MediaItem, _: Session):
-                            i.store_state(States.Requested)
+                            restore_state_after_pause(i)
 
                         apply_item_mutation(
                             di[Program],

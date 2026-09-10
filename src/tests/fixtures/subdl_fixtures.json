@@ -1,0 +1,26 @@
+{
+  "search_success": {
+    "status": true,
+    "subtitles": [
+      {
+        "release_name": "Example.Movie.2024.1080p.WEB-DL",
+        "name": "example-movie-en.srt",
+        "lang": "en",
+        "author": "SubDLTeam",
+        "url": "/subtitle/sample-download.zip"
+      }
+    ]
+  },
+  "search_empty": {
+    "status": true,
+    "subtitles": []
+  },
+  "error_invalid_api_key": {
+    "status": false,
+    "error": "Invalid API key provided"
+  },
+  "error_rate_limited": {
+    "status": false,
+    "error": "Rate limit exceeded, please retry later"
+  }
+}
