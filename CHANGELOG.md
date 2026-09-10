@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.32.0](https://github.com/S0lidByte/CineFlow/compare/v1.31.7...v1.32.0) (2026-09-10)
+
+
+### Features
+
+* **core:** add state matrix, provider error taxonomy, and headless openapi exporter ([d2cb0ac](https://github.com/S0lidByte/CineFlow/commit/d2cb0ac102d81ef03e8db986f21c4635b94ad954))
+
+
+### Bug Fixes
+
+* **ci:** isolate privileged integration tests ([1bf9f88](https://github.com/S0lidByte/CineFlow/commit/1bf9f88a9240bf648f1329bf5bddec58317d5c27))
+
 ## [1.31.7](https://github.com/S0lidByte/CineFlow/compare/v1.31.6...v1.31.7) (2026-09-10)
 
 
