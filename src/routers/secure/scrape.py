@@ -29,7 +29,6 @@ from program.media.item import Episode, MediaItem, ProcessedItemType, Season, Sh
 from program.media.state import States
 from program.media.stream import Stream as ItemStream
 from program.program import Program
-from routers.secure.items import restore_state_after_pause, save_state_before_pause
 from program.services.downloaders import Downloader
 from program.services.downloaders.models import (
     DebridFile,
@@ -53,6 +52,7 @@ from program.types import Event
 from program.utils.locking import ItemLock
 from program.utils.request import CircuitBreakerOpen
 from program.utils.torrent import extract_infohash
+from routers.secure.items import restore_state_after_pause, save_state_before_pause
 
 from ..models.shared import MessageResponse
 

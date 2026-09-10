@@ -255,4 +255,3 @@ def test_reset_scrape_state_for_retry_handles_paused_items(
     assert ep.state_before_pause is None
     assert ep.streams == []
     assert ep.active_stream is None
-
