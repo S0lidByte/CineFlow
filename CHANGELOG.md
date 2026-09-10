@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.33.0](https://github.com/S0lidByte/CineFlow/compare/v1.32.0...v1.33.0) (2026-09-10)
+
+
+### Features
+
+* **contracts:** add normalized provider error taxonomy and contract test fixtures ([6f00ac8](https://github.com/S0lidByte/CineFlow/commit/6f00ac8dd1405aab8bb48cadd19ecadae8606613))
+
+
+### Bug Fixes
+
+* **contracts:** satisfy pyright strict typing in error normalization ([f564a66](https://github.com/S0lidByte/CineFlow/commit/f564a66836e86601200f19bae3332fa8645392fa))
+
 ## [1.32.0](https://github.com/S0lidByte/CineFlow/compare/v1.31.7...v1.32.0) (2026-09-10)
 
 
