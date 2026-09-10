@@ -15,6 +15,8 @@ from program.db.db import db, run_migrations
 from program.db.db_functions import item_exists_by_any_id
 from program.media.item import Movie, Show
 
+pytestmark = pytest.mark.db
+
 
 @pytest.fixture(scope="session")
 def duplicate_test_container():

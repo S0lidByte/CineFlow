@@ -81,6 +81,7 @@ asyncio_mode = "strict"
 markers = [
     "db: marks tests requiring live database instance",
     "fuse: marks tests requiring Linux FUSE kernel mount",
+    "integration: marks integration tests requiring external subsystems or environments",
 ]
 
 [tool.uv]
