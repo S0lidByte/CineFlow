@@ -808,10 +808,10 @@ class SmartSession:
                 delay = max(0.0, float(int(ra)))
             except Exception:
                 try:
-                    parsed_retry_at = parsedate_to_datetime(ra)
+                    parsed_retry_at = parsedate_to_datetime(ra)  # pyright: ignore[reportUnknownVariableType]
                     delay = max(
                         0.0,
-                        float(int(round(parsed_retry_at.timestamp() - time.time()))),
+                        float(int(round(parsed_retry_at.timestamp() - time.time()))),  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
                     )
                 except Exception:
                     delay = None
