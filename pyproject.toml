@@ -1,6 +1,6 @@
 [project]
 name = "riven"
-version = "1.31.4"
+version = "1.33.0"
 description = "Plex torrent streaming through Real Debrid and 3rd party services like Overseerr, Mdblist, etc."
 authors = [{ name = "Riven Developers" }]
 requires-python = "==3.13.*"
@@ -78,6 +78,11 @@ reportMissingImports = "none"
 pythonpath = ["src"]
 testpaths = ["src/tests"]
 asyncio_mode = "strict"
+markers = [
+    "db: marks tests requiring live database instance",
+    "fuse: marks tests requiring Linux FUSE kernel mount",
+    "integration: marks integration tests requiring external subsystems or environments",
+]
 
 [tool.uv]
 package = false

@@ -17,6 +17,8 @@ from program.media.state import States
 from program.scheduling.models import ScheduledStatus, ScheduledTask
 from program.scheduling.scheduler import ProgramScheduler
 
+pytestmark = pytest.mark.db
+
 
 @pytest.fixture(scope="session")
 def test_container():
