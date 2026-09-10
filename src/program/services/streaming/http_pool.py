@@ -8,7 +8,7 @@ Provides both:
 from __future__ import annotations
 
 import threading
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Literal
@@ -154,7 +154,7 @@ class TrioStreamingHttpPool:
         await self._close_idle_retired_generations()
 
     @asynccontextmanager
-    async def admit(self, kind: RequestKind) -> AsyncIterator[None]:
+    async def admit(self, kind: RequestKind) -> AsyncGenerator[None]:
         """
         Bound concurrent streaming HTTP requests under the httpx max_connections cap.
 
@@ -318,7 +318,8 @@ def _get_limiters() -> tuple[trio.CapacityLimiter, trio.CapacityLimiter]:
             _total_limiter = trio.CapacityLimiter(MAX_TOTAL_STREAM_REQUESTS)
             _body_limiter = trio.CapacityLimiter(MAX_BODY_STREAMS)
 
-        assert _body_limiter is not None
+        if _body_limiter is None:
+            raise RuntimeError("Streaming HTTP body limiter was not initialized")
         return _total_limiter, _body_limiter
 
 
@@ -355,7 +356,7 @@ def pool_generation() -> int:
 
 
 @asynccontextmanager
-async def admit_stream_request(kind: RequestKind) -> AsyncIterator[None]:
+async def admit_stream_request(kind: RequestKind) -> AsyncGenerator[None]:
     """
     Bound concurrent streaming HTTP requests under the httpx max_connections cap.
 

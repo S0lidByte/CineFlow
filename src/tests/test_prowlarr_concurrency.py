@@ -160,7 +160,7 @@ def test_prowlarr_scrape_indexer_deduplicates_urls_and_logs(monkeypatch):
     prowlarr.session = MockSession()
     prowlarr._infohash_session = MockSession()
 
-    def mock_fetch_bounded(url, session=None, timeout=20.0):
+    def mock_fetch_bounded(url, session=None, timeout=20.0, deadline=None):
         if "same_url" in url:
             return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         return "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -295,3 +295,67 @@ def test_prowlarr_thread_safe_indexer_removal_on_error(monkeypatch):
     assert res1 == {}
     assert res2 == {}
     assert prowlarr.indexers == []
+
+
+def test_prowlarr_scrape_returns_at_indexer_deadline(monkeypatch):
+    """A slow worker must not hold the outer scrape past its time budget."""
+    prowlarr = Prowlarr()
+    prowlarr.timeout = 0.05
+    indexer = Indexer(
+        id=1,
+        name="SlowIndexer",
+        enable=True,
+        protocol="torrent",
+        capabilities=Capabilities(
+            supports_raw_search=True,
+            categories=[],
+            search_params=SearchParams(search=[], movie=[], tv=[]),
+        ),
+    )
+    prowlarr.indexers = [indexer]
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_scrape_indexer(_indexer, _item, deadline=None):
+        assert deadline is not None
+        started.set()
+        release.wait(timeout=1)
+        return {}
+
+    monkeypatch.setattr(prowlarr, "scrape_indexer", slow_scrape_indexer)
+    monkeypatch.setattr(prowlarr, "_periodic_indexer_scan", lambda: None)
+    monkeypatch.setattr(
+        "program.services.scrapers.prowlarr.logger.log", lambda *_: None
+    )
+    item = Movie({"title": "Test Movie", "year": 2024})
+
+    start = time.monotonic()
+    assert prowlarr.scrape(item) == {}
+    elapsed = time.monotonic() - start
+    release.set()
+
+    assert started.is_set()
+    assert elapsed < 0.15
+
+
+def test_prowlarr_infohash_fetch_skips_expired_deadline(monkeypatch):
+    """Expired indexer budgets must not acquire a URL-fetch worker or issue I/O."""
+    prowlarr = Prowlarr()
+    invoked = False
+
+    def mock_get_infohash_from_url(*_args, **_kwargs):
+        nonlocal invoked
+        invoked = True
+        return "0123456789abcdef0123456789abcdef01234567"
+
+    monkeypatch.setattr(prowlarr, "get_infohash_from_url", mock_get_infohash_from_url)
+
+    assert (
+        prowlarr._fetch_infohash_bounded(
+            "https://example.invalid/download",
+            deadline=time.monotonic() - 1,
+        )
+        is None
+    )
+    assert not invoked

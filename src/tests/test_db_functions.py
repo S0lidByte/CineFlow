@@ -14,6 +14,8 @@ from program.db.db_functions import (
 )
 from program.media.item import Episode, Movie, Season, Show
 
+pytestmark = pytest.mark.db
+
 
 @pytest.fixture(scope="session")
 def test_container():

@@ -1,0 +1,25 @@
+{
+  "search_success": [
+    {
+      "guid": "sample-guid-12345",
+      "indexerId": 1,
+      "indexer": "TorrentGalaxy",
+      "title": "Example Movie 2024 1080p WEB-DL DDP5.1",
+      "size": 3221225472,
+      "infoHash": "abcdef0123456789abcdef0123456789abcdef01",
+      "seeders": 45,
+      "leechers": 5,
+      "protocol": "torrent",
+      "downloadUrl": "http://prowlarr:9696/1/download"
+    }
+  ],
+  "search_empty": [],
+  "error_unauthorized": {
+    "error": "Unauthorized",
+    "message": "API Key is invalid or missing"
+  },
+  "error_indexer_timeout": {
+    "error": "BadGateway",
+    "message": "Indexer response timed out after 30000ms"
+  }
+}

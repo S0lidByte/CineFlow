@@ -150,3 +150,49 @@ def test_scraper_rejects_blacklisted_stream_and_picks_clean_stream():
     assert len(item.streams) == 1
     assert item.streams[0] is clean_stream
     assert blacklisted_stream not in item.streams
+
+
+def test_scraper_marks_item_failed_at_default_retry_limit():
+    """The default policy must terminate repeated zero-new-stream scrapes."""
+    from program.media.state import States
+    from program.services.scrapers import DEFAULT_MAX_FAILED_ATTEMPTS, Scraping
+
+    item = SimpleNamespace(
+        id=1,
+        log_string="Exhausted Item",
+        streams=[],
+        blacklisted_streams=[],
+        updated=True,
+        failed_attempts=DEFAULT_MAX_FAILED_ATTEMPTS - 1,
+        scraped_times=0,
+        store_state=MagicMock(),
+        set=MagicMock(),
+    )
+
+    scrapers = object.__new__(Scraping)
+    scrapers.max_failed_attempts = DEFAULT_MAX_FAILED_ATTEMPTS
+    scrapers.scrape = MagicMock(return_value={})
+
+    with patch("program.services.scrapers.logger"):
+        list(Scraping.run(scrapers, item))
+
+    assert item.failed_attempts == DEFAULT_MAX_FAILED_ATTEMPTS
+    item.store_state.assert_called_once_with(States.Failed)
+
+
+def test_should_submit_uses_bounded_default_for_legacy_zero_limit():
+    """Legacy persisted zero values must not permit retries forever."""
+    from datetime import datetime, timedelta
+
+    from program.services.scrapers import DEFAULT_MAX_FAILED_ATTEMPTS, Scraping
+    from program.settings import settings_manager
+
+    scrapers = object.__new__(Scraping)
+    item = SimpleNamespace(
+        scraped_at=datetime.now() - timedelta(days=2),
+        scraped_times=0,
+        failed_attempts=DEFAULT_MAX_FAILED_ATTEMPTS,
+    )
+
+    with settings_manager.override(scraping={"max_failed_attempts": 0}):
+        assert not Scraping.should_submit(scrapers, item)
