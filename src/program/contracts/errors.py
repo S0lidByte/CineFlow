@@ -129,3 +129,153 @@ class ProviderQuotaExceededError(ProviderError):
             status_code=status_code,
             raw_error=raw_error,
         )
+
+
+def classify_http_status(
+    status_code: int,
+    message: str = "",
+    *,
+    provider_name: str | None = None,
+    retry_after: float | None = None,
+    raw_payload: Any = None,
+) -> ProviderError:
+    """Classify an HTTP status code into the normalized ProviderError taxonomy."""
+    msg = message or f"HTTP {status_code} error"
+    if status_code in (401, 403):
+        return ProviderAuthError(
+            msg,
+            provider_name=provider_name,
+            status_code=status_code,
+            raw_error=raw_payload,
+        )
+    if status_code == 429:
+        return ProviderRateLimitError(
+            msg,
+            provider_name=provider_name,
+            retry_after_seconds=retry_after,
+            status_code=status_code,
+            raw_error=raw_payload,
+        )
+    if status_code in (402,):
+        return ProviderQuotaExceededError(
+            msg,
+            provider_name=provider_name,
+            status_code=status_code,
+            raw_error=raw_payload,
+        )
+    if 500 <= status_code < 600 or status_code in (520, 521, 522, 523, 524):
+        return ProviderUnavailableError(
+            msg,
+            provider_name=provider_name,
+            status_code=status_code,
+            raw_error=raw_payload,
+        )
+    return ProviderError(
+        msg,
+        provider_name=provider_name,
+        is_transient=False,
+        status_code=status_code,
+        raw_error=raw_payload,
+    )
+
+
+def normalize_provider_error(
+    *,
+    provider_name: str,
+    status_code: int | None = None,
+    message: str = "",
+    raw_payload: Any = None,
+    retry_after: float | None = None,
+    exception: Exception | None = None,
+) -> ProviderError:
+    """Normalize any exception or HTTP status code into a standard ProviderError subclass."""
+    if exception is not None:
+        if isinstance(exception, ProviderError):
+            if not exception.provider_name:
+                exception.provider_name = provider_name
+            return exception
+
+        exc_str = str(exception) or type(exception).__name__
+        msg = f"{message}: {exc_str}" if message else exc_str
+        exc_type = type(exception).__name__.lower()
+
+        # Extract retry_after attribute if available on exception (e.g. RateLimitError)
+        effective_retry_after = retry_after
+        if effective_retry_after is None and hasattr(exception, "retry_after"):
+            try:
+                val = exception.retry_after
+                if val is not None:
+                    effective_retry_after = float(val)
+            except (ValueError, TypeError):
+                pass
+
+        # Check for HTTP status in exception attributes if present (e.g. httpx.HTTPStatusError)
+        resp = getattr(exception, "response", None)
+        if resp is not None and hasattr(resp, "status_code"):
+            code = resp.status_code
+            if effective_retry_after is None and hasattr(resp, "headers"):
+                try:
+                    retry_header = resp.headers.get("retry-after")
+                    if retry_header:
+                        effective_retry_after = float(retry_header)
+                except (ValueError, TypeError, Exception):
+                    pass
+
+            payload = raw_payload
+            if payload is None:
+                try:
+                    payload = resp.text if hasattr(resp, "text") else None
+                except Exception:
+                    payload = None
+
+            return classify_http_status(
+                code,
+                msg,
+                provider_name=provider_name,
+                retry_after=effective_retry_after,
+                raw_payload=payload,
+            )
+
+        # Rate limit exceptions by name
+        if "ratelimit" in exc_type or "rate_limit" in exc_type:
+            return ProviderRateLimitError(
+                msg,
+                provider_name=provider_name,
+                retry_after_seconds=effective_retry_after,
+                status_code=429,
+                raw_error=exception,
+            )
+
+        # Timeout & Network connection exceptions
+        if any(
+            term in exc_type
+            for term in ("timeout", "connect", "network", "socket", "dns", "protocol")
+        ):
+            return ProviderNetworkError(
+                msg,
+                provider_name=provider_name,
+                raw_error=exception,
+            )
+
+        return ProviderError(
+            msg,
+            provider_name=provider_name,
+            is_transient=False,
+            raw_error=exception,
+        )
+
+    if status_code is not None:
+        return classify_http_status(
+            status_code,
+            message,
+            provider_name=provider_name,
+            retry_after=retry_after,
+            raw_payload=raw_payload,
+        )
+
+    return ProviderError(
+        message or "Unknown provider error",
+        provider_name=provider_name,
+        is_transient=False,
+        raw_error=raw_payload,
+    )

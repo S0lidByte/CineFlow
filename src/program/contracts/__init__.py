@@ -7,6 +7,8 @@ from program.contracts.errors import (
     ProviderQuotaExceededError,
     ProviderRateLimitError,
     ProviderUnavailableError,
+    classify_http_status,
+    normalize_provider_error,
 )
 
 __all__ = [
@@ -16,4 +18,6 @@ __all__ = [
     "ProviderQuotaExceededError",
     "ProviderRateLimitError",
     "ProviderUnavailableError",
+    "classify_http_status",
+    "normalize_provider_error",
 ]

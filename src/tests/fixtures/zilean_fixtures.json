@@ -1,0 +1,26 @@
+{
+  "search_success": [
+    {
+      "info_hash": "0123456789abcdef0123456789abcdef01234567",
+      "raw_title": "Example.Movie.2024.1080p.BluRay.x264-GRP",
+      "size": 4294967296,
+      "parsed_data": {
+        "title": "Example Movie",
+        "year": "2024",
+        "resolution": "1080p",
+        "quality": "BluRay"
+      }
+    }
+  ],
+  "search_empty": [],
+  "error_rate_limited": {
+    "title": "Too Many Requests",
+    "status": 429,
+    "detail": "Rate limit quota exceeded. Try again in 60 seconds."
+  },
+  "error_internal_server": {
+    "title": "Internal Server Error",
+    "status": 500,
+    "detail": "Database connection pool exhausted."
+  }
+}
