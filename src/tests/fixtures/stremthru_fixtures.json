@@ -1,0 +1,31 @@
+{
+  "streams_success": {
+    "data": {
+      "items": [
+        {
+          "name": "StremThru RD+",
+          "title": "Example Movie (2024) [1080p] [RD+]",
+          "url": "https://download.real-debrid.com/d/ABC123XYZ/sample.mkv",
+          "behaviorHints": {
+            "bingeGroup": "cineflow"
+          }
+        }
+      ]
+    }
+  },
+  "streams_empty": {
+    "data": {
+      "items": []
+    }
+  },
+  "error_unauthorized": {
+    "error": "Unauthorized",
+    "status": 401,
+    "message": "Invalid store token or proxy authentication failed"
+  },
+  "error_upstream_gateway": {
+    "error": "Bad Gateway",
+    "status": 502,
+    "message": "Failed to connect to upstream Debrid provider"
+  }
+}

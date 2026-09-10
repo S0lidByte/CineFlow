@@ -156,6 +156,9 @@ def test_show_state_transitions(show):
         (States.Symlinked, "StateTransition", "updater"),
         (States.Completed, "StateTransition", "post_processing"),
         (States.Completed, "post_processing", None),
+        (States.Paused, "StateTransition", None),
+        (States.Failed, "StateTransition", None),
+        (States.Requested, "StateTransition", "indexer"),
     ],
 )
 @pytest.mark.parametrize("item_fixture", ["movie", "show", "media_item_movie"])
@@ -179,6 +182,10 @@ def test_process_event_transitions(
 
     expected = getattr(services, expected_service) if expected_service else None
     assert processed_event.service is expected
+    if state in [States.Paused, States.Failed]:
+        assert processed_event.related_media_items == []
+    elif expected is not None:
+        assert len(processed_event.related_media_items) > 0
 
 
 # test media item show

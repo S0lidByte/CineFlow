@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -60,6 +61,10 @@ def mock_settings(monkeypatch: pytest.MonkeyPatch):
                 url="http://prowlarr.local:9696",
                 api_key="prowlarr-secret",
             ),
+            zilean=_settings_ns(
+                enabled=False,
+                url="http://zilean.local:8181/",
+            ),
         ),
         post_processing=_settings_ns(
             subtitle=_settings_ns(
@@ -78,6 +83,61 @@ def mock_settings(monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(ct.settings_manager, "settings", root)
     return root
+
+
+def test_zilean_probe_success_is_independent_of_scraper_enablement(mock_settings):
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.get.return_value = _FakeResponse(200)
+
+    with patch.object(ct.httpx, "Client", return_value=fake_client) as client:
+        result = ct._probe_zilean()
+
+    assert result.model_dump(exclude={"latency_ms"}) == {
+        "ok": True,
+        "message": "Connected to Zilean",
+    }
+    assert (
+        fake_client.get.call_args.args[0]
+        == "http://zilean.local:8181/healthchecks/ping"
+    )
+    assert client.call_args.kwargs["timeout"] == ct._httpx_timeout()
+    assert client.call_args.kwargs["follow_redirects"] is True
+
+
+def test_zilean_probe_missing_url(mock_settings):
+    mock_settings.scraping.zilean.url = " "
+    result = ct._probe_zilean()
+    assert result.message == "URL not configured"
+
+
+@pytest.mark.parametrize("status_code", [400, 503])
+def test_zilean_probe_http_failure(mock_settings, status_code):
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.get.return_value = _FakeResponse(status_code)
+    with patch.object(ct.httpx, "Client", return_value=fake_client):
+        result = ct._probe_zilean()
+    assert result.message == f"HTTP {status_code}"
+
+
+@pytest.mark.parametrize(
+    ("exception", "message"),
+    [
+        (httpx.ReadTimeout("slow"), "Timed out"),
+        (httpx.ConnectError("down"), "Connection failed"),
+    ],
+)
+def test_zilean_probe_transport_errors(mock_settings, exception, message):
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.get.side_effect = exception
+    with patch.object(ct.httpx, "Client", return_value=fake_client):
+        result = ct._probe_zilean()
+    assert result.message == message
 
 
 def test_safe_message_redacts_secret_markers():
@@ -271,19 +331,19 @@ def test_subdl_auth_error_payload(mock_settings):
     assert "api_key" not in result.message.lower()
 
 
-def test_run_connection_test_timeout(mock_settings):
+def test_run_connection_test_timeout_is_response_bounded(mock_settings):
     def slow() -> ConnectionTestResponse:
-        import time
-
-        time.sleep(10)
+        time.sleep(1)
         return ConnectionTestResponse(ok=True, latency_ms=1, message="late")
 
     with (
         patch.dict(ct._PROBES, {"real_debrid": slow}),
         patch.object(ct, "PROBE_TIMEOUT_SECONDS", 0.05),
     ):
+        started = time.perf_counter()
         result = ct.run_connection_test("real_debrid")
 
+    assert time.perf_counter() - started < 0.25
     assert result.ok is False
     assert result.message == "Timed out"
 

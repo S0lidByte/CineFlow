@@ -1,12 +1,39 @@
 """Torrent utilities for infohash extraction and manipulation."""
 
 import base64
+import binascii
 import re
 
 from loguru import logger
 
 # Pattern to match infohashes in magnet links (supports both 40-char hex and 32-char base32)
 INFOHASH_PATTERN = re.compile(r"btih:([a-fA-F0-9]{40}|[a-zA-Z0-9]{32})", re.IGNORECASE)
+_STRICT_HEX_INFOHASH = re.compile(r"[0-9a-fA-F]{40}\Z")
+_STRICT_BASE32_INFOHASH = re.compile(r"[A-Z2-7]{32}\Z")
+
+
+def canonical_infohash(value: str | None) -> str | None:
+    """Return a strict lowercase BTv1 hexadecimal infohash, or ``None``.
+
+    This is intentionally stricter than :func:`normalize_infohash` for untrusted
+    provider input. It accepts exactly 40 ASCII hexadecimal characters or 32
+    RFC 4648 Base32 characters representing exactly 20 bytes; it never trims.
+    """
+    if value is None:
+        return None
+    if not value.isascii():
+        return None
+    if _STRICT_HEX_INFOHASH.fullmatch(value):
+        return value.lower()
+    if not _STRICT_BASE32_INFOHASH.fullmatch(value.upper()):
+        return None
+    try:
+        decoded = base64.b32decode(value.upper(), casefold=False)
+    except (ValueError, binascii.Error):
+        return None
+    if len(decoded) != 20:
+        return None
+    return decoded.hex()
 
 
 def normalize_infohash(infohash: str) -> str:

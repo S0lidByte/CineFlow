@@ -1,5 +1,52 @@
 # Changelog
 
+## [1.33.0](https://github.com/S0lidByte/CineFlow/compare/v1.32.0...v1.33.0) (2026-09-10)
+
+
+### Features
+
+* **contracts:** add normalized provider error taxonomy and contract test fixtures ([6f00ac8](https://github.com/S0lidByte/CineFlow/commit/6f00ac8dd1405aab8bb48cadd19ecadae8606613))
+
+
+### Bug Fixes
+
+* **contracts:** satisfy pyright strict typing in error normalization ([f564a66](https://github.com/S0lidByte/CineFlow/commit/f564a66836e86601200f19bae3332fa8645392fa))
+
+## [1.32.0](https://github.com/S0lidByte/CineFlow/compare/v1.31.7...v1.32.0) (2026-09-10)
+
+
+### Features
+
+* **core:** add state matrix, provider error taxonomy, and headless openapi exporter ([d2cb0ac](https://github.com/S0lidByte/CineFlow/commit/d2cb0ac102d81ef03e8db986f21c4635b94ad954))
+
+
+### Bug Fixes
+
+* **ci:** isolate privileged integration tests ([1bf9f88](https://github.com/S0lidByte/CineFlow/commit/1bf9f88a9240bf648f1329bf5bddec58317d5c27))
+
+## [1.31.7](https://github.com/S0lidByte/CineFlow/compare/v1.31.6...v1.31.7) (2026-09-10)
+
+
+### Bug Fixes
+
+* preserve pipeline state when resuming paused media ([9b307e0](https://github.com/S0lidByte/CineFlow/commit/9b307e022c888bf3a2bdd57c3c6836221a9ae64a))
+
+## [1.31.6](https://github.com/S0lidByte/CineFlow/compare/v1.31.5...v1.31.6) (2026-09-09)
+
+
+### Bug Fixes
+
+* **scrapers:** harden RTN parsing, blacklist filtering, retry bounds, and prowlarr concurrency ([9a4a71f](https://github.com/S0lidByte/CineFlow/commit/9a4a71fcc1adfa826df79d1fb20b7e8920475a83))
+* **scrapers:** safely access blacklisted_streams on item candidates ([954a745](https://github.com/S0lidByte/CineFlow/commit/954a745a7db3b3a047be315eb49ff8cc7a8247ad))
+* **types:** resolve pyright diagnostics for item.parent and blacklisted_infohashes ([e21ce96](https://github.com/S0lidByte/CineFlow/commit/e21ce963d55b629e8f97a5d1938519da915a0c4e))
+
+## [1.31.5](https://github.com/S0lidByte/CineFlow/compare/v1.31.4...v1.31.5) (2026-09-09)
+
+
+### Bug Fixes
+
+* **scrapers:** harden zilean direct-DMM integration and settings connectivity ([a83c230](https://github.com/S0lidByte/CineFlow/commit/a83c230f49d94936e607ff467510c779d8248e3a))
+
 ## [1.31.4](https://github.com/S0lidByte/CineFlow/compare/v1.31.3...v1.31.4) (2026-09-08)
 
 
