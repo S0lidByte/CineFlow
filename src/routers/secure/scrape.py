@@ -29,6 +29,7 @@ from program.media.item import Episode, MediaItem, ProcessedItemType, Season, Sh
 from program.media.state import States
 from program.media.stream import Stream as ItemStream
 from program.program import Program
+from routers.secure.items import restore_state_after_pause, save_state_before_pause
 from program.services.downloaders import Downloader
 from program.services.downloaders.models import (
     DebridFile,
@@ -1254,7 +1255,6 @@ async def session_action(
                 )
 
             # Update Season States (Pause unselected / Unpause selected)
-            # Update Season States (Pause unselected / Unpause selected)
             if isinstance(item, Show) and active_seasons:
                 logger.info(
                     f"Updating season states for {item.log_string}. Active seasons: {active_seasons}"
@@ -1263,18 +1263,26 @@ async def session_action(
                 for season in item.seasons:
                     if season.number in active_seasons:
                         if season.last_state == States.Paused:
-                            season.store_state(States.Unknown)
+                            restore_state_after_pause(season)
                         # Ensure episodes are also unpaused
                         for episode in season.episodes:
                             if episode.last_state == States.Paused:
-                                episode.store_state(States.Unknown)
+                                restore_state_after_pause(episode)
                     else:
-                        if season.last_state != States.Paused:
-                            season.store_state(States.Paused)
+                        if season.last_state not in (
+                            States.Paused,
+                            States.Failed,
+                            States.Completed,
+                        ):
+                            save_state_before_pause(season)
                         # Ensure episodes are also paused
                         for episode in season.episodes:
-                            if episode.last_state != States.Paused:
-                                episode.store_state(States.Paused)
+                            if episode.last_state not in (
+                                States.Paused,
+                                States.Failed,
+                                States.Completed,
+                            ):
+                                save_state_before_pause(episode)
 
             session.commit()
 
@@ -1562,7 +1570,7 @@ async def auto_scrape(
                         or episode.number in targeted_episode_numbers
                     ):
                         if episode.last_state == States.Paused:
-                            episode.last_state = States.Unknown
+                            restore_state_after_pause(episode)
                             session.merge(episode)
                     elif episode.state not in (
                         States.Downloaded,
@@ -1571,12 +1579,18 @@ async def auto_scrape(
                         States.PartiallyCompleted,
                         States.Paused,
                     ):
-                        episode.last_state = States.Paused
+                        save_state_before_pause(episode)
                         session.merge(episode)
 
             for season in seasons_to_pause:
-                if season.state != States.Paused:
-                    season.last_state = States.Paused
+                if season.state not in (
+                    States.Downloaded,
+                    States.Symlinked,
+                    States.Completed,
+                    States.PartiallyCompleted,
+                    States.Paused,
+                ):
+                    save_state_before_pause(season)
                     session.merge(season)
 
                 for episode in season.episodes:
@@ -1587,7 +1601,7 @@ async def auto_scrape(
                         States.PartiallyCompleted,
                         States.Paused,
                     ):
-                        episode.last_state = States.Paused
+                        save_state_before_pause(episode)
                         session.merge(episode)
 
             # Commit state changes so Event Manager sees them

@@ -59,7 +59,6 @@ _RETRY_SKIP_RESET_STATES = frozenset(
         States.Unreleased,
         States.Downloaded,
         States.Symlinked,
-        States.Paused,
     }
 )
 
@@ -67,7 +66,6 @@ _ADD_SKIP_REQUEUE_STATES = frozenset(
     {
         States.Completed,
         States.Unreleased,
-        States.Paused,
     }
 )
 
@@ -75,18 +73,18 @@ _ADD_SKIP_REQUEUE_STATES = frozenset(
 def _reset_scrape_state_for_retry(item: MediaItem) -> None:
     """Reset scrape blockers recursively for retry/requeue operations.
 
-    Skips items in terminal/paused states where scrape reset is not appropriate.
+    Skips items in terminal states where scrape reset is not appropriate.
     """
 
     if item.last_state in _RETRY_SKIP_RESET_STATES:
         return
 
+    item.state_before_pause = None
     item.scraped_at = None
     item.scraped_times = 1
     item.failed_attempts = 0
     item.streams.clear()
     item.active_stream = None
-    item.store_state(States.Indexed)
 
     if isinstance(item, Show):
         for season in item.seasons:
@@ -94,6 +92,8 @@ def _reset_scrape_state_for_retry(item: MediaItem) -> None:
     elif isinstance(item, Season):
         for episode in item.episodes:
             _reset_scrape_state_for_retry(episode)
+
+    item.store_state(States.Indexed)
 
 
 def handle_ids(ids: Sequence[str | int]) -> list[int]:
@@ -132,6 +132,52 @@ def restore_state_after_pause(item: MediaItem) -> None:
     resume_state = item.state_before_pause or States.Requested
     item.state_before_pause = None
     MediaItem.store_state(item, resume_state)
+
+
+def _pause_item_and_descendants(item: MediaItem) -> None:
+    """Recursively pause an item and its active/non-terminal children."""
+    if item.last_state not in (
+        States.Paused,
+        States.Failed,
+        States.Completed,
+        States.Unreleased,
+    ):
+        save_state_before_pause(item)
+
+    if isinstance(item, Show):
+        for season in item.seasons:
+            _pause_item_and_descendants(season)
+    elif isinstance(item, Season):
+        for episode in item.episodes:
+            _pause_item_and_descendants(episode)
+
+
+def _unpause_item_and_descendants(item: MediaItem, unpaused_ids: set[int]) -> None:
+    """Recursively unpause an item and its paused children, and unblock paused ancestors."""
+    if item.last_state == States.Paused:
+        restore_state_after_pause(item)
+        if item.id:
+            unpaused_ids.add(item.id)
+
+    if isinstance(item, Show):
+        for season in item.seasons:
+            _unpause_item_and_descendants(season, unpaused_ids)
+    elif isinstance(item, Season):
+        for episode in item.episodes:
+            _unpause_item_and_descendants(episode, unpaused_ids)
+        if item.parent and item.parent.last_state == States.Paused:
+            restore_state_after_pause(item.parent)
+            if item.parent.id:
+                unpaused_ids.add(item.parent.id)
+    elif isinstance(item, Episode):
+        if item.parent and item.parent.last_state == States.Paused:
+            restore_state_after_pause(item.parent)
+            if item.parent.id:
+                unpaused_ids.add(item.parent.id)
+            if item.parent.parent and item.parent.parent.last_state == States.Paused:
+                restore_state_after_pause(item.parent.parent)
+                if item.parent.parent.id:
+                    unpaused_ids.add(item.parent.parent.id)
 
 
 # Convenience helper to mutate an item and update states consistently
@@ -1466,25 +1512,19 @@ async def pause_items(
                         di[Program].em.cancel_job(id)
                         di[Program].em.remove_id_from_queues(id)
 
-                    if media_item.last_state not in [
-                        States.Paused,
-                        States.Failed,
-                        States.Completed,
-                    ]:
+                    def mutation(i: MediaItem, _: Session):
+                        _pause_item_and_descendants(i)
 
-                        def mutation(i: MediaItem, _: Session):
-                            save_state_before_pause(i)
+                    apply_item_mutation(
+                        di[Program],
+                        session,
+                        media_item,
+                        mutation,
+                        bubble_parents=True,
+                    )
+                    session.commit()
 
-                        apply_item_mutation(
-                            di[Program],
-                            session,
-                            media_item,
-                            mutation,
-                            bubble_parents=False,
-                        )
-                        session.commit()
-
-                    logger.info("Successfully paused items.")
+                    logger.info(f"Successfully paused {media_item.log_string}")
                 except Exception as e:
                     logger.error(f"Failed to pause {media_item.log_string}: {str(e)}")
                     continue
@@ -1526,28 +1566,28 @@ async def unpause_items(
 
             for media_item in items:
                 try:
-                    if media_item.last_state == States.Paused:
+                    unpaused_ids: set[int] = set()
 
-                        def mutation(i: MediaItem, _: Session):
-                            restore_state_after_pause(i)
+                    def mutation(i: MediaItem, _: Session):
+                        _unpause_item_and_descendants(i, unpaused_ids)
 
-                        apply_item_mutation(
-                            di[Program],
-                            session,
-                            media_item,
-                            mutation,
-                            bubble_parents=True,
-                        )
+                    apply_item_mutation(
+                        di[Program],
+                        session,
+                        media_item,
+                        mutation,
+                        bubble_parents=True,
+                    )
 
-                        session.commit()
+                    session.commit()
 
-                        di[Program].em.add_event(Event("RetryItem", media_item.id))
+                    dispatched_ids = unpaused_ids if unpaused_ids else {media_item.id}
+                    for unpaused_id in dispatched_ids:
+                        di[Program].em.add_event(Event("RetryItem", unpaused_id))
 
-                        logger.info(f"Successfully unpaused {media_item.log_string}")
-                    else:
-                        logger.debug(
-                            f"Skipping unpause for {media_item.log_string} - not in paused state"
-                        )
+                    logger.info(
+                        f"Successfully unpaused {media_item.log_string} (dispatched {len(dispatched_ids)} items)"
+                    )
                 except Exception as e:
                     logger.error(f"Failed to unpause {media_item.log_string}: {str(e)}")
                     continue
