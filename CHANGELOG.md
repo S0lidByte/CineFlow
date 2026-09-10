@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.33.1](https://github.com/S0lidByte/CineFlow/compare/v1.33.0...v1.33.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* **lint:** organize imports and clean up types in request utility and scrape router ([07faf8f](https://github.com/S0lidByte/CineFlow/commit/07faf8f2eacf65020f112e2261635e725cf04ef1))
+* **pipeline:** cascade pause and unpause across hierarchy and enable requeue of paused items ([d5d668f](https://github.com/S0lidByte/CineFlow/commit/d5d668f49c94dba55c6d5be337dc604f79f168d1))
+* **typing:** add pyright compatibility ignores for parsedate_to_datetime in request utility ([8234c29](https://github.com/S0lidByte/CineFlow/commit/8234c292193e40d3d991d76bee6e5845163f6713))
+
 ## [1.33.0](https://github.com/S0lidByte/CineFlow/compare/v1.32.0...v1.33.0) (2026-09-10)
 
 
