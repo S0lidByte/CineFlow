@@ -59,7 +59,7 @@ dev = [
     "responses==0.26.2",
     "pyfakefs>=6.2.0,<7",
     "ruff>=0.16.6,<0.17",
-    "isort>=5.10.1,<9",
+    "isort>=9.0.1,<10",
     "codecov>=2.1.13,<3",
     "testcontainers>=4.8.0,<5",
     "mypy>=2.3.1,<3",
