@@ -6,6 +6,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from requests import ReadTimeout
 
+from program.contracts import ProviderRateLimitError, normalize_provider_error
 from program.media.item import MediaItem, Movie
 from program.services.scrapers.base import ScraperService
 from program.settings import settings_manager
@@ -93,25 +94,23 @@ class Jackett(ScraperService[JackettConfig]):
         try:
             return self.scrape(item)
         except Exception as e:
-            from requests import HTTPError
+            norm_err = normalize_provider_error(e, provider_name="Jackett")
+            if isinstance(norm_err, ProviderRateLimitError):
+                from requests import HTTPError
 
-            if (
-                isinstance(e, HTTPError)
-                and e.response is not None
-                and e.response.status_code == 429
-            ):
                 from program.utils.exceptions import RateLimitError
 
-                retry_after = e.response.headers.get("Retry-After")
+                retry_after = (
+                    e.response.headers.get("Retry-After")
+                    if isinstance(e, HTTPError) and e.response is not None
+                    else None
+                )
                 raise RateLimitError(
                     "Jackett rate limit exceeded",
                     retry_after=int(retry_after) if retry_after else None,
-                )
-            if "rate limit" in str(e).lower() or "429" in str(e):
-                from program.utils.exceptions import RateLimitError
+                ) from e
 
-                raise RateLimitError("Jackett rate limit exceeded")
-            logger.error(f"Jackett failed to scrape item with error: {e}")
+            logger.error(f"{norm_err} for {item.log_string}")
 
         return {}
 

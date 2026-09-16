@@ -245,20 +245,26 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
         new_state = given_state or self.state
         self.last_state = new_state
 
-        # Notify about state change via NotificationService
+        # Check transition matrix validity and log diagnostic warning if non-standard
         if previous_state and previous_state != new_state:
+            from program.media.state_matrix import can_transition
+
+            if not can_transition(previous_state, new_state):
+                logger.warning(
+                    f"Non-standard state transition detected: {previous_state.name} -> {new_state.name} for {self.log_string}"
+                )
+
             try:
                 from program.program import Program
 
                 services = di[Program].services
 
-                assert services
-
-                services.notifications.run(
-                    item=self,
-                    previous_state=previous_state,
-                    new_state=new_state,
-                )
+                if services and hasattr(services, "notifications"):
+                    services.notifications.run(
+                        item=self,
+                        previous_state=previous_state,
+                        new_state=new_state,
+                    )
             except Exception as e:
                 # Fallback: log error but don't break state storage
                 logger.debug(f"Failed to send state change notification: {e}")
@@ -800,12 +806,11 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
 
         from program.program import riven
 
-        assert riven.services
+        if riven and riven.services:
+            filesystem_service = riven.services.filesystem
 
-        filesystem_service = riven.services.filesystem
-
-        if filesystem_service.riven_vfs:
-            filesystem_service.riven_vfs.remove(self)
+            if filesystem_service and filesystem_service.riven_vfs:
+                filesystem_service.riven_vfs.remove(self)
 
         self.filesystem_entries.clear()
         self.subtitles.clear()
@@ -839,12 +844,11 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
         # Remove VFS nodes BEFORE clearing entries (so we can still access them)
         from program.program import riven
 
-        assert riven.services
+        if riven and riven.services:
+            filesystem_service = riven.services.filesystem
 
-        filesystem_service = riven.services.filesystem
-
-        if filesystem_service.riven_vfs:
-            filesystem_service.riven_vfs.remove(self)
+            if filesystem_service and filesystem_service.riven_vfs:
+                filesystem_service.riven_vfs.remove(self)
 
         # Clear filesystem entries - ORM automatically deletes orphaned entries
         self.filesystem_entries.clear()

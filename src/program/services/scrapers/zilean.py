@@ -6,6 +6,7 @@ from typing import cast
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from program.contracts import ProviderRateLimitError, normalize_provider_error
 from program.media.item import Episode, MediaItem, Season, Show
 from program.services.scrapers.base import ScraperService
 from program.settings import settings_manager
@@ -99,20 +100,20 @@ class Zilean(ScraperService[ZileanConfig]):
         except RateLimitError:
             raise
         except Exception as exc:
-            from requests import HTTPError
+            norm_err = normalize_provider_error(exc, provider_name="Zilean")
+            if isinstance(norm_err, ProviderRateLimitError):
+                from requests import HTTPError
 
-            if (
-                isinstance(exc, HTTPError)
-                and exc.response is not None
-                and exc.response.status_code == 429
-            ):
+                retry_after = None
+                if isinstance(exc, HTTPError) and exc.response is not None:
+                    retry_after = _parse_retry_after(
+                        exc.response.headers.get("Retry-After")
+                    )
                 raise RateLimitError(
                     "Zilean rate limit exceeded",
-                    retry_after=_parse_retry_after(
-                        exc.response.headers.get("Retry-After")
-                    ),
+                    retry_after=retry_after,
                 ) from exc
-            logger.exception("Zilean exception thrown for {}", item.log_string)
+            logger.warning(f"{norm_err} for {item.log_string}")
         return {}
 
     def _build_query_params(self, item: MediaItem) -> Params:

@@ -9,7 +9,6 @@
   <a href="https://github.com/S0lidByte/CineFlow/issues"><img alt="Issues" src="https://img.shields.io/github/issues/S0lidByte/CineFlow?style=flat-square"></a>
   <a href="https://github.com/S0lidByte/CineFlow/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/S0lidByte/CineFlow?style=flat-square"></a>
   <a href="https://github.com/S0lidByte/CineFlow/graphs/contributors"><img alt="Contributors" src="https://img.shields.io/github/contributors/S0lidByte/CineFlow?style=flat-square"></a>
-  <a href="https://todo"><img alt="Discord" src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=flat-square&logo=discord&logoColor=white"></a>
 </p>
 
 ---

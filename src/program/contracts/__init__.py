@@ -10,8 +10,32 @@ from program.contracts.errors import (
     classify_http_status,
     normalize_provider_error,
 )
+from program.contracts.events import (
+    OperationEvent,
+    OperationStatus,
+    OperationType,
+    create_operation_event,
+)
+from program.contracts.operation_ledger import OperationLedger
+from program.contracts.telemetry import (
+    CORRELATION_ID_HEADER,
+    REQUEST_ID_HEADER,
+    generate_correlation_id,
+    get_correlation_id,
+    is_sensitive_key,
+    redact_sensitive_data,
+    redact_text,
+    reset_correlation_id,
+    set_correlation_id,
+)
 
 __all__ = [
+    "CORRELATION_ID_HEADER",
+    "REQUEST_ID_HEADER",
+    "OperationEvent",
+    "OperationLedger",
+    "OperationStatus",
+    "OperationType",
     "ProviderAuthError",
     "ProviderError",
     "ProviderNetworkError",
@@ -19,5 +43,13 @@ __all__ = [
     "ProviderRateLimitError",
     "ProviderUnavailableError",
     "classify_http_status",
+    "create_operation_event",
+    "generate_correlation_id",
+    "get_correlation_id",
+    "is_sensitive_key",
     "normalize_provider_error",
+    "redact_sensitive_data",
+    "redact_text",
+    "reset_correlation_id",
+    "set_correlation_id",
 ]

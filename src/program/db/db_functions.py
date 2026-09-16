@@ -509,6 +509,26 @@ def run_thread_with_db_item(
                             else:
                                 item.store_state(propagate_down=False)
 
+                            try:
+                                from program.contracts.operation_ledger import (
+                                    enqueue_operation,
+                                )
+
+                                enqueue_operation(
+                                    session=session,
+                                    operation_type=f"service.{_svc.lower()}",
+                                    media_item_id=item.id,
+                                    payload={
+                                        "service": _svc,
+                                        "state": str(getattr(item, "state", None)),
+                                        "item_id": item.id,
+                                    },
+                                )
+                            except Exception as outbox_err:
+                                logger.debug(
+                                    f"Outbox enqueue skipped for item {item.id}: {outbox_err}"
+                                )
+
                             logger.debug(
                                 f"[TRACE] {_svc} item={event.item_id}: session.commit START"
                             )
@@ -560,6 +580,24 @@ def run_thread_with_db_item(
                 session.add(indexed_item)
 
                 if not cancellation_event.is_set():
+                    try:
+                        from program.contracts.operation_ledger import enqueue_operation
+
+                        enqueue_operation(
+                            session=session,
+                            operation_type=f"service.{service.__class__.__name__.lower()}",
+                            media_item_id=indexed_item.id,
+                            payload={
+                                "service": service.__class__.__name__,
+                                "state": str(getattr(indexed_item, "state", None)),
+                                "item_id": indexed_item.id,
+                            },
+                        )
+                    except Exception as outbox_err:
+                        logger.debug(
+                            f"Outbox enqueue skipped for content item {indexed_item.id}: {outbox_err}"
+                        )
+
                     try:
                         session.commit()
                     except IntegrityError as e:

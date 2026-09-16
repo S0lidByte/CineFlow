@@ -9,6 +9,7 @@ from tracemalloc import Snapshot
 from sqlalchemy import func, select, text
 
 from program.apis import bootstrap_apis
+from program.contracts.dispatcher import OutboxDispatcher
 from program.core.runner import Runner
 from program.db import db_functions
 from program.db.db import (
@@ -104,6 +105,7 @@ class Program(threading.Thread):
         self.enable_trace = settings_manager.settings.tracemalloc
         self.em = EventManager()
         self.scheduler_manager = ProgramScheduler(self)
+        self.outbox_dispatcher = OutboxDispatcher(self)
 
         if self.enable_trace:
             import tracemalloc
@@ -431,6 +433,7 @@ class Program(threading.Thread):
             )
 
         self.scheduler_manager.start()
+        self.outbox_dispatcher.start()
 
         self.initialized = True
         super().start()
@@ -569,6 +572,7 @@ class Program(threading.Thread):
             return
 
         self.initialized = False
+        self.outbox_dispatcher.stop()
         self.scheduler_manager.stop()
 
         if self.services:

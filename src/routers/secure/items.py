@@ -211,6 +211,21 @@ def apply_item_mutation(
     except Exception as e:
         logger.warning(f"Failed to store state for {item.id}: {e}")
 
+    try:
+        from program.contracts.operation_ledger import enqueue_operation
+
+        enqueue_operation(
+            session=session,
+            operation_type="mutation.item_update",
+            media_item_id=getattr(item, "id", None),
+            payload={
+                "item_id": getattr(item, "id", None),
+                "last_state": str(getattr(item, "last_state", None)),
+            },
+        )
+    except Exception as outbox_err:
+        logger.debug(f"Outbox enqueue skipped for item mutation: {outbox_err}")
+
     if not bubble_parents:
         return
 
@@ -731,11 +746,7 @@ async def get_item(
             item = session.execute(query).unique().scalar_one_or_none()
 
             if not item:
-                logger.warning(
-                    f"Item not found: id={id!r} media_type={media_type!r} — "
-                    "client requested an ID that does not exist in DB. "
-                    "Check frontend explore/library page link construction."
-                )
+                logger.debug(f"Item not found in database: id={id!r} media_type={media_type!r}")
                 raise HTTPException(status_code=404, detail="Item not found")
 
             if extended:

@@ -4,6 +4,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from requests import HTTPError
 
+from program.contracts import ProviderRateLimitError, normalize_provider_error
 from program.media.item import MediaItem
 from program.services.scrapers.base import ScraperService
 from program.settings import settings_manager
@@ -84,17 +85,23 @@ class Torrentio(ScraperService[TorrentioConfig]):
         try:
             return self.scrape(item)
         except HTTPError as http_err:
-            if http_err.response is not None and http_err.response.status_code == 429:
+            norm_err = normalize_provider_error(http_err, provider_name="Torrentio")
+            if isinstance(norm_err, ProviderRateLimitError):
                 from program.utils.exceptions import RateLimitError
 
-                retry_after = http_err.response.headers.get("Retry-After")
+                retry_after = (
+                    http_err.response.headers.get("Retry-After")
+                    if http_err.response is not None
+                    else None
+                )
                 raise RateLimitError(
                     "Torrentio rate limit exceeded",
                     retry_after=int(retry_after) if retry_after else None,
-                )
-            logger.error(f"Torrentio HTTP error for {item.log_string}: {str(http_err)}")
+                ) from http_err
+            logger.error(f"{norm_err} for {item.log_string}")
         except Exception as e:
-            logger.exception(f"Torrentio exception thrown: {str(e)}")
+            norm_err = normalize_provider_error(e, provider_name="Torrentio")
+            logger.error(f"{norm_err} for {item.log_string}")
 
         return {}
 

@@ -180,13 +180,13 @@ def classify_http_status(
 
 
 def normalize_provider_error(
+    exception: Exception | None = None,
     *,
     provider_name: str,
     status_code: int | None = None,
     message: str = "",
     raw_payload: Any = None,
     retry_after: float | None = None,
-    exception: Exception | None = None,
 ) -> ProviderError:
     """Normalize any exception or HTTP status code into a standard ProviderError subclass."""
     if exception is not None:
@@ -215,8 +215,11 @@ def normalize_provider_error(
             code = resp.status_code
             if effective_retry_after is None and hasattr(resp, "headers"):
                 try:
-                    retry_header = resp.headers.get("retry-after")
-                    if retry_header:
+                    headers = resp.headers
+                    retry_header = None
+                    if hasattr(headers, "get"):
+                        retry_header = headers.get("Retry-After") or headers.get("retry-after")
+                    if retry_header is not None:
                         effective_retry_after = float(retry_header)
                 except (ValueError, TypeError, Exception):
                     pass
