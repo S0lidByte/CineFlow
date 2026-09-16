@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.34.0](https://github.com/S0lidByte/CineFlow/compare/v1.33.1...v1.34.0) (2026-09-16)
+
+
+### Features
+
+* **outbox:** implement OperationLedger durable dispatcher, timeline API, and metrics ([c385e7e](https://github.com/S0lidByte/CineFlow/commit/c385e7e1aee95b44fb02d2eddb6251f64d740d81))
+
 ## [1.33.1](https://github.com/S0lidByte/CineFlow/compare/v1.33.0...v1.33.1) (2026-09-10)
 
 
