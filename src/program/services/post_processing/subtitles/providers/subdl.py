@@ -18,6 +18,8 @@ from babelfish import Error as BabelfishError
 from babelfish import Language
 from loguru import logger
 
+from program.contracts.telemetry import redact_text
+
 from .base import SubtitleItem, SubtitleProvider
 from .opensubtitles import normalize_language_to_alpha3
 
@@ -195,13 +197,18 @@ class SubDLProvider(SubtitleProvider):
             if url.startswith("http")
             else urljoin(SUBDL_DOWNLOAD_BASE + "/", url.lstrip("/"))
         )
+        safe_download_url = redact_text(download_url)
         try:
             response = self._client.get(download_url, timeout=httpx.Timeout(60.0))
             response.raise_for_status()
             content = extract_srt_from_zip(response.content)
             if content is None:
-                logger.warning(f"SubDL download had no .srt in ZIP: {download_url}")
+                logger.warning(
+                    f"SubDL download had no .srt in ZIP: {safe_download_url}"
+                )
             return content
         except Exception as exc:
-            logger.error(f"SubDL download failed ({download_url}): {exc}")
+            logger.error(
+                f"SubDL download failed ({safe_download_url}): {redact_text(str(exc))}"
+            )
             return None

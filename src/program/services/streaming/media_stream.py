@@ -12,6 +12,7 @@ from kink import di
 from loguru import logger
 from ordered_set import OrderedSet
 
+from program.contracts.telemetry import redact_text
 from program.settings import settings_manager
 from program.utils import benchmark
 from program.utils.async_client import AsyncClient
@@ -1146,9 +1147,10 @@ class MediaStream:
         if settings_manager.settings.enable_network_tracing:
 
             async def trace_log(event_name: str, info: Any):
+                safe_info = redact_text(str(info))
                 logger.log(
                     "NETWORK",
-                    self.build_log_message(f"{event_name} - {info}"),
+                    self.build_log_message(f"{event_name} - {safe_info}"),
                 )
 
             extensions = {"trace": trace_log}
@@ -1354,7 +1356,8 @@ class MediaStream:
             ) as e:
                 logger.warning(
                     self.build_log_message(
-                        f"Encountered {e.__class__.__name__}: {e} (attempt {attempt + 1}/{max_attempts})"
+                        f"Encountered {e.__class__.__name__}: {redact_text(str(e))} "
+                        f"(attempt {attempt + 1}/{max_attempts})"
                     )
                 )
 
@@ -1392,7 +1395,8 @@ class MediaStream:
 
                 logger.warning(
                     self.build_log_message(
-                        f"PoolTimeout error (attempt {attempt + 1}/{max_attempts}): {e}"
+                        f"PoolTimeout error (attempt {attempt + 1}/{max_attempts}): "
+                        f"{redact_text(str(e))}"
                     ),
                 )
 

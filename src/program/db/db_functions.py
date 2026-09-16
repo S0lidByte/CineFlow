@@ -457,13 +457,13 @@ def run_thread_with_db_item(
 
                 _svc = service.__class__.__name__
                 _t0 = time.monotonic()
-                logger.debug(f"[TRACE] {_svc} item={event.item_id}: session.get START")
+                logger.trace(f"{_svc} item={event.item_id}: session.get START")
 
                 input_item = session.get(MediaItemModel, event.item_id)
 
                 _t1 = time.monotonic()
-                logger.debug(
-                    f"[TRACE] {_svc} item={event.item_id}: session.get END ({_t1 - _t0:.2f}s) found={input_item is not None}"
+                logger.trace(
+                    f"{_svc} item={event.item_id}: session.get END ({_t1 - _t0:.2f}s) found={input_item is not None}"
                 )
 
                 if input_item:
@@ -471,8 +471,8 @@ def run_thread_with_db_item(
 
                     # Execute service within the settings context if overrides exist
                     overrides = event.overrides or {}
-                    logger.debug(
-                        f"[TRACE] {_svc} item={event.item_id}: next(fn()) START"
+                    logger.trace(
+                        f"{_svc} item={event.item_id}: next(fn()) START"
                     )
                     _t2 = time.monotonic()
 
@@ -480,8 +480,8 @@ def run_thread_with_db_item(
                         runner_result = next(fn(input_item), None)
 
                     _t3 = time.monotonic()
-                    logger.debug(
-                        f"[TRACE] {_svc} item={event.item_id}: next(fn()) END ({_t3 - _t2:.2f}s) result={runner_result is not None}"
+                    logger.trace(
+                        f"{_svc} item={event.item_id}: next(fn()) END ({_t3 - _t2:.2f}s) result={runner_result is not None}"
                     )
 
                     if runner_result:
@@ -529,14 +529,14 @@ def run_thread_with_db_item(
                                     f"Outbox enqueue skipped for item {item.id}: {outbox_err}"
                                 )
 
-                            logger.debug(
-                                f"[TRACE] {_svc} item={event.item_id}: session.commit START"
+                            logger.trace(
+                                f"{_svc} item={event.item_id}: session.commit START"
                             )
                             _t4 = time.monotonic()
                             session.commit()
                             _t5 = time.monotonic()
-                            logger.debug(
-                                f"[TRACE] {_svc} item={event.item_id}: session.commit END ({_t5 - _t4:.2f}s)"
+                            logger.trace(
+                                f"{_svc} item={event.item_id}: session.commit END ({_t5 - _t4:.2f}s)"
                             )
 
                         if run_at:
