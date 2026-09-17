@@ -44,9 +44,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Reverse the repair only when the claim-token index exists."""
-    if _INDEX_NAME in _ledger_indexes():
-        op.drop_index(_INDEX_NAME, table_name=_TABLE_NAME)
+    """Repair migration downgrade is a no-op because claim_token is owned by e5f6a1b2c3d4."""
 
-    if _COLUMN_NAME in _ledger_columns():
-        op.drop_column(_TABLE_NAME, _COLUMN_NAME)
+

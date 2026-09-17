@@ -141,7 +141,7 @@ def downgrade() -> None:
     connection.execute(
         sa.text("""
             UPDATE "MediaItem" 
-            SET active_stream = '{}'::text
+            SET active_stream = '{}'::json
             WHERE active_stream IS NULL
             """)
     )
@@ -149,7 +149,7 @@ def downgrade() -> None:
     connection.execute(
         sa.text("""
             UPDATE "MediaItem" 
-            SET aliases = '{}'::text
+            SET aliases = '{}'::json
             WHERE aliases IS NULL
             """)
     )
