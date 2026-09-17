@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.34.2](https://github.com/S0lidByte/CineFlow/compare/v1.34.1...v1.34.2) (2026-09-17)
+
+
+### Bug Fixes
+
+* **alembic:** resolve postgres downgrade type mismatch and repair idempotency ([32ae1f9](https://github.com/S0lidByte/CineFlow/commit/32ae1f9854008c22acf84f4376c6f50f874f0b4b))
+
 ## [1.34.1](https://github.com/S0lidByte/CineFlow/compare/v1.34.0...v1.34.1) (2026-09-16)
 
 
