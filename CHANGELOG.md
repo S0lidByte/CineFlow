@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.34.1](https://github.com/S0lidByte/CineFlow/compare/v1.34.0...v1.34.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* **logging:** harden redaction for SubDL and HTTPX and demote db micro-timing logs to trace ([ca659c3](https://github.com/S0lidByte/CineFlow/commit/ca659c3daf2b6be083142dd340ba7e602ce5df77))
+
 ## [1.34.0](https://github.com/S0lidByte/CineFlow/compare/v1.33.1...v1.34.0) (2026-09-16)
 
 
