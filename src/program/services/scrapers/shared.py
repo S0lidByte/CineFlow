@@ -2,7 +2,7 @@
 
 import re
 from datetime import datetime
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from loguru import logger
 from RTN import (
@@ -22,6 +22,10 @@ from program.media.stream import Stream
 from program.services.scrapers.funnel import ScrapeFunnelStats
 from program.settings import settings_manager
 from program.settings.models import RTNSettingsModel, ScraperModel
+from program.utils.title_normalizer import (
+    generate_title_alias_variants,
+    normalize_title,
+)
 
 scraping_settings: ScraperModel = settings_manager.settings.scraping
 ranking_settings: RTNSettingsModel = settings_manager.settings.ranking
@@ -193,9 +197,9 @@ def _scraping_settings() -> ScraperModel:
 
 
 def _normalize_alias_title(title: str) -> str:
-    """Casefold + collapse whitespace for remake group membership checks."""
+    """Normalize title using NFKC, diacritic transliteration, and symbol cleanup."""
 
-    return " ".join((title or "").casefold().split())
+    return normalize_title(title, lower=True)
 
 
 def _collect_item_alias_names(
@@ -283,7 +287,7 @@ def _resolve_scrape_aliases(
     item: MediaItem,
     active_settings: SettingsModel,
 ) -> dict[str, list[str]]:
-    """Build aliases for live scrape ranking (indexer + optional remake groups)."""
+    """Build aliases for live scrape ranking (indexer + synthesized variants + optional remake groups)."""
 
     scraping = _scraping_settings()
     if not scraping.enable_aliases:
@@ -293,6 +297,18 @@ def _resolve_scrape_aliases(
     aliases = {
         k: list(v) for k, v in raw.items() if k not in active_settings.languages.exclude
     }
+
+    if item.top_title:
+        variants = generate_title_alias_variants(item.top_title)
+        if variants:
+            xx_list = aliases.setdefault("xx", [])
+            existing_norms = {_normalize_alias_title(n) for n in xx_list}
+            for variant in variants:
+                norm_v = _normalize_alias_title(variant)
+                if norm_v and norm_v not in existing_norms:
+                    xx_list.append(variant)
+                    existing_norms.add(norm_v)
+
     return _merge_remake_aliases(item.top_title or "", aliases)
 
 
@@ -877,8 +893,7 @@ def _accumulate_ranked_torrents(
         if (
             not manual
             and torrent.data.year
-            and item.aired_at
-            and not _check_item_year(item.aired_at, torrent.data)
+            and not _check_item_year(item, torrent.data)
         ):
             # If year is present, then check to make sure it's correct
             logger.trace(
@@ -968,14 +983,67 @@ def merge_parse_results(
 # helper functions
 
 
-def _check_item_year(aired_at: datetime, data: ParsedData) -> bool:
-    """Check if the year of the torrent is within the range of the item."""
+def get_year_candidates(year: int) -> list[int]:
+    """Given a base year, return candidate years (year - 1, year, year + 1)."""
+    return [year - 1, year, year + 1]
 
-    return data.year in [
-        aired_at.year - 1,
-        aired_at.year,
-        aired_at.year + 1,
-    ]
+
+def _extract_year(item_or_date: object | None) -> int | None:
+    """Extract integer year from datetime, MediaItem, or object with year/aired_at."""
+    if item_or_date is None:
+        return None
+    if isinstance(item_or_date, datetime):
+        return item_or_date.year
+    y: Any = getattr(item_or_date, "year", None)
+    if isinstance(y, int) and y > 0:
+        return y
+    aired: Any = getattr(item_or_date, "aired_at", None)
+    if isinstance(aired, datetime):
+        return aired.year
+    return None
+
+
+def _check_item_year(
+    item_or_aired_at: MediaItem | datetime | object, data: ParsedData
+) -> bool:
+    """Check if the torrent's parsed year matches any candidate year in the item's hierarchy.
+
+    Faithfully reproduces upstream Riven-TS year tolerance:
+    - Movies and Shows evaluate candidate years for item.year (or aired_at.year) ± 1.
+    - Seasons and Episodes evaluate candidate years for item.year ± 1 AND top_parent.year ± 1.
+    - Missing year metadata on item or torrent does not reject.
+    """
+    if not data.year:
+        return True
+
+    if isinstance(item_or_aired_at, datetime):
+        candidate_years = set(get_year_candidates(item_or_aired_at.year))
+        return data.year in candidate_years
+
+    candidate_years: set[int] = set()
+
+    item_year = _extract_year(item_or_aired_at)
+    if item_year:
+        for y in get_year_candidates(item_year):
+            candidate_years.add(y)
+
+    # For Season or Episode, include top_parent (root show) premiere year candidates
+    is_hierarchical = isinstance(item_or_aired_at, (Season, Episode)) or getattr(
+        item_or_aired_at, "type", None
+    ) in ("season", "episode")
+
+    if is_hierarchical:
+        top_parent = getattr(item_or_aired_at, "top_parent", None)
+        if top_parent is not None and top_parent is not item_or_aired_at:
+            top_year = _extract_year(top_parent)
+            if top_year:
+                for y in get_year_candidates(top_year):
+                    candidate_years.add(y)
+
+    if not candidate_years:
+        return True
+
+    return data.year in candidate_years
 
 
 def _get_item_country(item: MediaItem) -> str | None:

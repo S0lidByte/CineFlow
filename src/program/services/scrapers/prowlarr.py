@@ -14,6 +14,7 @@ from program.services.scrapers.base import ScraperService
 from program.settings import settings_manager
 from program.settings.models import ProwlarrConfig
 from program.utils.request import SmartSession
+from program.utils.title_normalizer import sanitize_search_query_title
 from program.utils.torrent import extract_infohash, normalize_infohash
 from schemas.prowlarr import (
     IndexerResource,
@@ -483,7 +484,7 @@ class Prowlarr(ScraperService[ProwlarrConfig]):
         season = None
         episode = None
 
-        item_title = item.top_title
+        item_title = sanitize_search_query_title(item.top_title)
 
         search_params = indexer.capabilities.search_params
 

@@ -1,3 +1,4 @@
+import threading
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from functools import cached_property
@@ -81,6 +82,20 @@ def should_emit_hot_stream_trace(counter: int, every: int) -> bool:
 
 # High-frequency read types that flood logs during sequential playback.
 _HOT_STREAM_READ_TYPES: frozenset[str] = frozenset({"cache_hit", "body_read"})
+
+# Scoped lock registry to ensure cross-MediaStream single-flight coordination per media file
+_MEDIA_STREAM_REFRESH_LOCKS: dict[str, trio.Lock] = {}
+_REFRESH_LOCKS_MUTEX = threading.Lock()
+
+
+def _get_stream_refresh_lock(original_filename: str) -> trio.Lock:
+    """Acquire or create the shared Trio lock for single-flight URL refresh coordination."""
+    with _REFRESH_LOCKS_MUTEX:
+        lock = _MEDIA_STREAM_REFRESH_LOCKS.get(original_filename)
+        if lock is None:
+            lock = trio.Lock()
+            _MEDIA_STREAM_REFRESH_LOCKS[original_filename] = lock
+        return lock
 
 
 if TYPE_CHECKING:
@@ -1165,11 +1180,14 @@ class MediaStream:
             }
         )
 
-        max_attempts = 4
+        MAX_DURABLE_REFRESH_ATTEMPTS = 2
+        durable_refresh_attempts = 0
+        max_transport_attempts = 4
+        transport_attempt = 0
         backoffs = [0.2, 0.5, 1.0]
         request_kind = "scan" if end is not None else "body"
 
-        for attempt in range(max_attempts):
+        while transport_attempt < max_transport_attempts:
             lease: GenerationLease | None = None
             failed_generation: int | None = None
             try:
@@ -1255,10 +1273,11 @@ class MediaStream:
                                     )
 
                                     if await self._retry_with_backoff(
-                                        attempt,
-                                        max_attempts,
+                                        transport_attempt,
+                                        max_transport_attempts,
                                         backoffs,
                                     ):
+                                        transport_attempt += 1
                                         continue
 
                                     raise DebridServiceRefusedRangeRequestException(
@@ -1275,20 +1294,28 @@ class MediaStream:
 
                 logger.warning(self.build_log_message(f"HTTP error {status_code}: {e}"))
 
-                if status_code == HTTPStatus.FORBIDDEN:
-                    # Forbidden - could be rate limiting or auth issue, don't refresh URL
+                if status_code in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN):
+                    failed_url = self.target_url.value
                     logger.warning(
                         self.build_log_message(
-                            f"HTTP 403 Forbidden - attempt {attempt + 1}"
-                        ),
+                            f"HTTP {status_code} ({'Unauthorized' if status_code == HTTPStatus.UNAUTHORIZED else 'Forbidden'}) - "
+                            f"durable refresh attempt {durable_refresh_attempts + 1}/{MAX_DURABLE_REFRESH_ATTEMPTS}"
+                        )
                     )
 
-                    if await self._retry_with_backoff(
-                        attempt,
-                        max_attempts,
-                        backoffs,
-                    ):
-                        continue
+                    if durable_refresh_attempts < MAX_DURABLE_REFRESH_ATTEMPTS:
+                        durable_refresh_attempts += 1
+                        has_fresh_url = await self._refresh_download_url(
+                            failed_url=failed_url
+                        )
+
+                        if has_fresh_url:
+                            logger.warning(
+                                self.build_log_message(
+                                    f"Durable URL refresh succeeded after HTTP {status_code}; reconnecting with new URL"
+                                )
+                            )
+                            continue
 
                     raise DebridServiceForbiddenException(provider=self.provider) from e
                 elif status_code in (
@@ -1297,8 +1324,11 @@ class MediaStream:
                     HTTPStatus.SERVICE_UNAVAILABLE,
                 ):
                     # File can't be found at this URL; try refreshing the URL once
-                    if attempt == 0:
-                        has_fresh_url = await self._refresh_download_url()
+                    if transport_attempt == 0:
+                        failed_url = self.target_url.value
+                        has_fresh_url = await self._refresh_download_url(
+                            failed_url=failed_url
+                        )
 
                         if has_fresh_url:
                             logger.warning(
@@ -1308,10 +1338,11 @@ class MediaStream:
                             )
 
                             if await self._retry_with_backoff(
-                                attempt,
-                                max_attempts,
+                                transport_attempt,
+                                max_transport_attempts,
                                 backoffs,
                             ):
+                                transport_attempt += 1
                                 continue
 
                     raise DebridServiceUnableToConnectException(
@@ -1326,15 +1357,16 @@ class MediaStream:
                     # Rate limited - back off exponentially, don't refresh URL
                     logger.warning(
                         self.build_log_message(
-                            f"HTTP 429 Rate Limited - attempt {attempt + 1}"
+                            f"HTTP 429 Rate Limited - attempt {transport_attempt + 1}"
                         )
                     )
 
                     if await self._retry_with_backoff(
-                        attempt,
-                        max_attempts,
+                        transport_attempt,
+                        max_transport_attempts,
                         backoffs,
                     ):
+                        transport_attempt += 1
                         continue
 
                     raise DebridServiceRateLimitedException(
@@ -1357,13 +1389,16 @@ class MediaStream:
                 logger.warning(
                     self.build_log_message(
                         f"Encountered {e.__class__.__name__}: {redact_text(str(e))} "
-                        f"(attempt {attempt + 1}/{max_attempts})"
+                        f"(attempt {transport_attempt + 1}/{max_transport_attempts})"
                     )
                 )
 
-                if attempt == 0:
+                if transport_attempt == 0:
                     # On first exception, try refreshing the URL in case it's a connectivity issue
-                    has_fresh_url = await self._refresh_download_url()
+                    failed_url = self.target_url.value
+                    has_fresh_url = await self._refresh_download_url(
+                        failed_url=failed_url
+                    )
 
                     if has_fresh_url:
                         logger.warning(
@@ -1371,10 +1406,11 @@ class MediaStream:
                         )
 
                 if await self._retry_with_backoff(
-                    attempt,
-                    max_attempts,
+                    transport_attempt,
+                    max_transport_attempts,
                     backoffs,
                 ):
+                    transport_attempt += 1
                     continue
 
                 raise DebridServiceUnableToConnectException(
@@ -1395,7 +1431,7 @@ class MediaStream:
 
                 logger.warning(
                     self.build_log_message(
-                        f"PoolTimeout error (attempt {attempt + 1}/{max_attempts}): "
+                        f"PoolTimeout error (attempt {transport_attempt + 1}/{max_transport_attempts}): "
                         f"{redact_text(str(e))}"
                     ),
                 )
@@ -1407,7 +1443,7 @@ class MediaStream:
                         )
                     )
 
-                if attempt == 0:
+                if transport_attempt == 0:
                     if self._http_pool is not None:
                         await self._http_pool.heal_on_pool_timeout(
                             failed_generation=failed_generation,
@@ -1422,9 +1458,7 @@ class MediaStream:
                             lease = None
                     else:
                         await heal_on_pool_timeout(pool_repr=pool_repr)
-                    # Every caller receives one post-heal retry. Otherwise,
-                    # follower requests deadlock in the FUSE kernel despite a
-                    # successful single-flight recovery.
+                    transport_attempt += 1
                     continue
 
                 raise DebridServiceClosedConnectionException(
@@ -1434,15 +1468,16 @@ class MediaStream:
                 # This can happen if the server closes the connection prematurely
                 logger.warning(
                     self.build_log_message(
-                        f"{e.__class__.__name__} error (attempt {attempt + 1}/{max_attempts}): {e}"
+                        f"{e.__class__.__name__} error (attempt {transport_attempt + 1}/{max_transport_attempts}): {e}"
                     ),
                 )
 
                 if await self._retry_with_backoff(
-                    attempt,
-                    max_attempts,
+                    transport_attempt,
+                    max_transport_attempts,
                     backoffs,
                 ):
+                    transport_attempt += 1
                     continue
 
                 raise DebridServiceClosedConnectionException(
@@ -1673,37 +1708,66 @@ class MediaStream:
             data=data,
         )
 
-    async def _refresh_download_url(self) -> bool:
+    async def _refresh_download_url(self, failed_url: str | None = None) -> bool:
         """
         Refresh download URL by unrestricting from provider.
 
-        Updates the database with the fresh URL.
+        Coordinates concurrent refreshes across MediaStream instances using
+        a scoped lock per original_filename and checks persisted state before
+        calling the provider unrestrict service.
+
+        Args:
+            failed_url: The exact URL that failed, used for race comparison.
+                If omitted, defaults to self.target_url.value.
 
         Returns:
-            True if successfully refreshed, False otherwise
+            True if successfully refreshed with a distinct URL, False otherwise.
         """
-
-        from program.services.filesystem.vfs import VFSDatabase
-
-        # Query database by original_filename and force unrestrict
-        entry_info = di[VFSDatabase].get_entry_by_original_filename(
-            original_filename=self.file_metadata.original_filename,
-            force_resolve=True,
+        target_failed_url = (
+            failed_url if failed_url is not None else self.target_url.value
         )
+        refresh_lock = _get_stream_refresh_lock(self.file_metadata.original_filename)
 
-        if entry_info:
-            fresh_url = entry_info.url
+        async with refresh_lock:
+            from program.services.filesystem.vfs import VFSDatabase
 
-            if fresh_url and fresh_url != self.target_url.value:
-                self._trace_stream(
-                    f"Refreshed URL for {self.file_metadata.original_filename}"
+            vfs_db = di[VFSDatabase]
+
+            # Step 1: Mandatory DB re-check before provider refresh (force_resolve=False)
+            entry_info = await trio.to_thread.run_sync(
+                lambda: vfs_db.get_entry_by_original_filename(
+                    original_filename=self.file_metadata.original_filename,
+                    force_resolve=False,
                 )
+            )
 
-                self.target_url.value = fresh_url
+            if entry_info:
+                persisted_url = entry_info.url
+                if persisted_url and persisted_url != target_failed_url:
+                    self._trace_stream(
+                        f"Adopting already-refreshed URL from DB for {self.file_metadata.original_filename}"
+                    )
+                    self.target_url.value = persisted_url
+                    return True
 
-                return True
+            # Step 2: Persisted state still references failed URL or is missing -> canonical provider refresh
+            entry_info_refreshed = await trio.to_thread.run_sync(
+                lambda: vfs_db.get_entry_by_original_filename(
+                    original_filename=self.file_metadata.original_filename,
+                    force_resolve=True,
+                )
+            )
 
-        return False
+            if entry_info_refreshed:
+                fresh_url = entry_info_refreshed.url
+                if fresh_url and fresh_url != target_failed_url:
+                    self._trace_stream(
+                        f"Refreshed URL from provider for {self.file_metadata.original_filename}"
+                    )
+                    self.target_url.value = fresh_url
+                    return True
+
+            return False
 
     async def _retry_with_backoff(
         self,
