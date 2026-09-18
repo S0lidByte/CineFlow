@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.35.0](https://github.com/S0lidByte/CineFlow/compare/v1.34.2...v1.35.0) (2026-09-18)
+
+
+### Features
+
+* **contracts:** implement provider protocols, outbox engine, and alldebrid v4.1 ([0d8c434](https://github.com/S0lidByte/CineFlow/commit/0d8c4346720e21d09689750bbfb0b784ef655ed8))
+
+
+### Bug Fixes
+
+* **scraping:** harden durable links and title matching ([9c7d8dd](https://github.com/S0lidByte/CineFlow/commit/9c7d8dd58089507fbc3617ec605ebdfb0ab12fda))
+
 ## [1.34.2](https://github.com/S0lidByte/CineFlow/compare/v1.34.1...v1.34.2) (2026-09-17)
 
 
