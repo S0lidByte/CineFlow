@@ -87,7 +87,9 @@ def publish_outbox_lifecycle_event(event_type: str, operation: dict[str, Any]) -
     if listeners:
         executor = _get_listener_executor()
         for listener in listeners:
-            executor.submit(_invoke_listener_safely, listener, event, operation.get("id"))
+            executor.submit(
+                _invoke_listener_safely, listener, event, operation.get("id")
+            )
         try:
             work_queue = getattr(executor, "_work_queue", None)
             if work_queue is not None and hasattr(work_queue, "qsize"):
@@ -222,7 +224,9 @@ class OutboxDispatcher:
             daemon=True,
         )
         self._thread.start()
-        logger.info(f"OutboxDispatcher [{self.worker_id}] started with max_workers={self.max_workers}")
+        logger.info(
+            f"OutboxDispatcher [{self.worker_id}] started with max_workers={self.max_workers}"
+        )
 
     def stop(self, wait: bool = True) -> None:
         """Gracefully stop the outbox dispatcher and wait for in-flight tasks to complete."""
@@ -377,7 +381,9 @@ class OutboxDispatcher:
 
             if completed_operation is None:
                 record_stale_rejection("complete")
-                logger.warning(f"Outbox operation {op_id} lost ownership before completion")
+                logger.warning(
+                    f"Outbox operation {op_id} lost ownership before completion"
+                )
                 return
 
             self._publish_lifecycle_event("operation_completed", completed_operation)
@@ -429,7 +435,9 @@ class OutboxDispatcher:
         stop_event: threading.Event,
     ) -> None:
         """Renew one active lease until its execution or dispatcher is stopped."""
-        while not self._stop_event.is_set() and not stop_event.wait(self._heartbeat_interval_seconds):
+        while not self._stop_event.is_set() and not stop_event.wait(
+            self._heartbeat_interval_seconds
+        ):
             if self._stop_event.is_set():
                 break
             try:
@@ -474,7 +482,9 @@ class OutboxDispatcher:
             return
         heartbeat.stop_event.set()
         if heartbeat.thread is not threading.current_thread():
-            heartbeat.thread.join(timeout=max(1.0, self._heartbeat_interval_seconds + 1.0))
+            heartbeat.thread.join(
+                timeout=max(1.0, self._heartbeat_interval_seconds + 1.0)
+            )
 
     def _stop_all_heartbeats(self, *, wait: bool) -> None:
         """Stop every active heartbeat before dispatcher shutdown continues."""
@@ -486,7 +496,9 @@ class OutboxDispatcher:
         if wait:
             for heartbeat in heartbeats:
                 if heartbeat.thread is not threading.current_thread():
-                    heartbeat.thread.join(timeout=max(1.0, self._heartbeat_interval_seconds + 1.0))
+                    heartbeat.thread.join(
+                        timeout=max(1.0, self._heartbeat_interval_seconds + 1.0)
+                    )
 
     def _handle_operation_failure(
         self,
@@ -508,7 +520,10 @@ class OutboxDispatcher:
 
         next_retry_at: datetime | None = None
         if should_retry:
-            if isinstance(normalized, ProviderRateLimitError) and normalized.retry_after_seconds:
+            if (
+                isinstance(normalized, ProviderRateLimitError)
+                and normalized.retry_after_seconds
+            ):
                 delay = float(normalized.retry_after_seconds)
             else:
                 backoff = self.base_backoff_seconds * (2 ** max(0, attempt_count - 1))
@@ -545,11 +560,15 @@ class OutboxDispatcher:
 
         if failed_operation is None:
             record_stale_rejection("fail")
-            logger.warning(f"Outbox operation {op_id} lost ownership before failure persistence")
+            logger.warning(
+                f"Outbox operation {op_id} lost ownership before failure persistence"
+            )
             return
 
         self._publish_lifecycle_event(event_type, failed_operation)
 
-    def _publish_lifecycle_event(self, event_type: str, operation: dict[str, Any]) -> None:
+    def _publish_lifecycle_event(
+        self, event_type: str, operation: dict[str, Any]
+    ) -> None:
         """Notify isolated listeners and publish the canonical record after commit."""
         publish_outbox_lifecycle_event(event_type, operation)

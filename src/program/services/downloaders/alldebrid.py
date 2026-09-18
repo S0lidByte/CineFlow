@@ -1,11 +1,27 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Generic, Literal, TypeVar
+from enum import Enum, IntEnum
+from typing import Any, Generic, Literal, TypeVar, cast
 
 from loguru import logger
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
+from program.contracts.errors import (
+    ProviderAuthError,
+    ProviderError,
+    ProviderQuotaExceededError,
+    ProviderRateLimitError,
+    ProviderUnavailableError,
+    normalize_provider_error,
+)
 from program.media.item import ProcessedItemType
 from program.services.downloaders.models import (
     DebridFile,
@@ -21,31 +37,166 @@ from program.utils.request import CircuitBreakerOpen, SmartResponse, SmartSessio
 from .shared import DebridVpnBlockedError, DownloaderBase, premium_days_left
 
 
+class AllDebridErrorCode(str, Enum):
+    """Canonical AllDebrid v4/v4.1 API error codes."""
+
+    # Authentication & Credentials
+    AUTH_MISSING_APIKEY = "AUTH_MISSING_APIKEY"
+    AUTH_BAD_APIKEY = "AUTH_BAD_APIKEY"
+    AUTH_USER_BANNED = "AUTH_USER_BANNED"
+    AUTH_USER_NOT_PREMIUM = "AUTH_USER_NOT_PREMIUM"
+
+    # PIN OAuth Authentication
+    PIN_ALREADY_GENERATED = "PIN_ALREADY_GENERATED"
+    PIN_EXPIRED = "PIN_EXPIRED"
+    PIN_INVALID = "PIN_INVALID"
+    PIN_ALREADY_AUTHENTIFIED = "PIN_ALREADY_AUTHENTIFIED"
+
+    # Quota & Rate Limits
+    FREE_TRIAL_LIMIT_REACHED = "FREE_TRIAL_LIMIT_REACHED"
+    TOO_MANY_REQUESTS = "TOO_MANY_REQUESTS"
+    RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
+    MAGNET_TOO_MANY = "MAGNET_TOO_MANY"
+    MAGNET_MUST_BE_PREMIUM = "MAGNET_MUST_BE_PREMIUM"
+    MAGNET_TOO_LARGE = "MAGNET_TOO_LARGE"
+    LINK_TOO_MANY_DOWNLOADS = "LINK_TOO_MANY_DOWNLOADS"
+
+    # Server Availability & Network/VPN Blocking
+    MAGNET_NO_SERVER = "MAGNET_NO_SERVER"
+    NO_SERVER = "NO_SERVER"
+    SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
+
+    # Magnet / Torrent Processing
+    MAGNET_INVALID_ID = "MAGNET_INVALID_ID"
+    MAGNET_INVALID_FILE = "MAGNET_INVALID_FILE"
+    MAGNET_NO_URI = "MAGNET_NO_URI"
+    MAGNET_PROCESSING = "MAGNET_PROCESSING"
+    MAGNET_NOT_FOUND = "MAGNET_NOT_FOUND"
+
+    # Link Unrestrict / Hoster Errors
+    LINK_IS_MISSING = "LINK_IS_MISSING"
+    LINK_HOST_NOT_SUPPORTED = "LINK_HOST_NOT_SUPPORTED"
+    LINK_DOWN = "LINK_DOWN"
+    LINK_PASS_PROTECTED = "LINK_PASS_PROTECTED"  # noqa: S105
+    LINK_HOST_UNAVAILABLE = "LINK_HOST_UNAVAILABLE"
+    LINK_HOST_FULL = "LINK_HOST_FULL"
+    REDIRECTOR_NOT_SUPPORTED = "REDIRECTOR_NOT_SUPPORTED"
+    LINK_ERROR = "LINK_ERROR"
+
+    # Generic Fallback
+    GENERIC_ERROR = "GENERIC_ERROR"
+
+
+class AllDebridMagnetStatusCode(IntEnum):
+    """AllDebrid magnet numeric status codes."""
+
+    IN_QUEUE = 0
+    DOWNLOADING = 1
+    COMPRESSING = 2
+    UPLOADING = 3
+    READY = 4
+    UPLOAD_FAILED = 5
+    ERROR = 6
+    BAD_TORRENT = 7
+    NOT_FOUND = 8
+    DELETED = 9
+    SERVER_MAINTENANCE = 10
+    PAUSED = 11
+
+
 class AllDebridFile(BaseModel):
     """Represents a file in AllDebrid's torrent structure."""
 
-    n: str  # Name
-    s: int  # Size in bytes
-    l: str  # Download link
+    n: str  # Name / path
+    s: int = 0  # Size in bytes
+    l: str = ""  # Download link
+
+
+def parse_alldebrid_entry(v: Any) -> "AllDebridFile | AllDebridDirectory":
+    """Parse a file or directory node from AllDebrid's recursive file tree."""
+    if isinstance(v, (AllDebridFile, AllDebridDirectory)):
+        return v
+    if isinstance(v, dict):
+        raw_dict = cast(dict[str, Any], v)
+        if "e" in raw_dict and raw_dict["e"] is not None:
+            raw_entries = cast(list[Any], raw_dict.get("e", []))
+            entries = [parse_alldebrid_entry(item) for item in raw_entries]
+            return AllDebridDirectory(n=str(raw_dict.get("n", "")), e=entries)
+        return AllDebridFile(
+            n=str(raw_dict.get("n", "")),
+            s=int(raw_dict.get("s", 0)),
+            l=str(raw_dict.get("l", "")),
+        )
+    raise ValueError(f"Invalid AllDebrid entry: {v}")
 
 
 class AllDebridDirectory(BaseModel):
     """Represents a directory in AllDebrid's torrent structure."""
 
     n: str  # Name
-    e: list[AllDebridFile | AllDebridDirectory]  # Entries (files and subdirectories)
+    e: list[Any] = Field(default_factory=list)  # Entries (files and subdirectories)
+
+    @field_validator("e", mode="before")
+    @classmethod
+    def _validate_entries(cls, v: Any) -> list[Any]:
+        if isinstance(v, list):
+            entry_list = cast(list[Any], v)
+            return [parse_alldebrid_entry(item) for item in entry_list]
+        return []
 
 
 class AllDebridErrorDetail(BaseModel):
-    code: str
-    message: str
+    """Normalized AllDebrid error details supporting string, dict, or code-only payloads."""
+
+    code: str = AllDebridErrorCode.GENERIC_ERROR.value
+    message: str = "An unknown AllDebrid error occurred"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_detail(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return {"code": value, "message": value}
+        if isinstance(value, dict):
+            dict_val = cast(dict[str, Any], value)
+            if "error" in dict_val and isinstance(dict_val["error"], dict):
+                inner = cast(dict[str, Any], dict_val["error"])
+                raw_code: Any = inner.get("code") or "GENERIC_ERROR"
+                raw_message: Any = inner.get("message") or str(raw_code)
+            else:
+                raw_code = (
+                    dict_val.get("code") or dict_val.get("error") or "GENERIC_ERROR"
+                )
+                raw_message = (
+                    dict_val.get("message") or dict_val.get("error") or str(raw_code)
+                )
+            return {"code": str(raw_code), "message": str(raw_message)}
+        return value
 
 
 class AllDebridErrorResponse(BaseModel):
-    """Represents an AllDebrid API error response."""
+    """Represents an AllDebrid API error response envelope."""
 
-    status: Literal["error"]
+    status: Literal["error"] = "error"
     error: AllDebridErrorDetail
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_envelope(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            dict_val = cast(dict[str, Any], value)
+            if "error" not in dict_val and (
+                "message" in dict_val or "code" in dict_val
+            ):
+                res: dict[str, Any] = {
+                    "status": str(dict_val.get("status", "error")),
+                    "error": {
+                        "code": str(dict_val.get("code", "GENERIC_ERROR")),
+                        "message": str(dict_val.get("message", "Unknown error")),
+                    },
+                }
+                return res
+            return dict_val
+        return value
 
 
 T = TypeVar("T", bound=BaseModel | None)
@@ -67,28 +218,44 @@ class AllDebridResponse(BaseModel, Generic[T]):
 
 
 class AllDebridMagnet(BaseModel):
-    """Represents magnet information returned by AllDebrid."""
+    """Represents magnet upload/creation information returned by AllDebrid."""
+
+    model_config = ConfigDict(populate_by_name=True)
 
     class MagnetInfo(BaseModel):
+        model_config = ConfigDict(populate_by_name=True)
+
         id: int
-        magnet: str
-        hash: str
-        name: str
-        size: int
-        ready: bool
+        magnet: str = ""
+        hash: str = ""
+        name: str = ""
+        size: int = 0
+        ready: bool = False
+        filename_original: str = ""
 
     magnets: list[MagnetInfo]
+
+    @field_validator("magnets", mode="before")
+    @classmethod
+    def _ensure_list(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return [cast(dict[str, Any], value)]
+        return value
 
 
 class AllDebridUserResponse(BaseModel):
     """Represents user information returned by AllDebrid."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     class UserData(BaseModel):
+        model_config = ConfigDict(populate_by_name=True)
+
         username: str
-        email: str
+        email: str = ""
         is_premium: bool = Field(alias="isPremium")
-        premium_until: int = Field(alias="premiumUntil")
-        fidelity_points: int = Field(alias="fidelityPoints")
+        premium_until: int = Field(default=0, alias="premiumUntil")
+        fidelity_points: int = Field(default=0, alias="fidelityPoints")
 
     user: UserData
 
@@ -96,46 +263,253 @@ class AllDebridUserResponse(BaseModel):
 class AllDebridLinkUnlockResponse(BaseModel):
     """Represents link unlock response from AllDebrid."""
 
-    link: str
-    filename: str
-    filesize: int
+    model_config = ConfigDict(populate_by_name=True)
+
+    link: str = ""
+    filename: str = ""
+    filesize: int = 0
+    id: str | int | None = None
+    host: str | None = None
+    p2p: bool | None = None
 
 
 class AllDebridMagnetStatusResponse(BaseModel):
-    """Represents magnet status information returned by AllDebrid."""
+    """Represents magnet status information returned by AllDebrid v4/v4.1."""
+
+    model_config = ConfigDict(populate_by_name=True)
 
     class MagnetInfo(BaseModel):
+        model_config = ConfigDict(populate_by_name=True)
+
         id: int
-        filename: str
-        size: int
-        status: str
-        status_code: int = Field(alias="statusCode")
-        upload_date: int = Field(alias="uploadDate")
-        completion_date: int = Field(alias="completionDate")
+        filename: str = ""
+        size: int = 0
+        status: str = ""
+        status_code: int = Field(default=0, alias="statusCode")
+        downloaded: int = 0
+        uploaded: int = 0
+        seeders: int = 0
+        download_speed: int = Field(default=0, alias="downloadSpeed")
+        upload_speed: int = Field(default=0, alias="uploadSpeed")
+        upload_date: int = Field(default=0, alias="uploadDate")
+        completion_date: int = Field(default=0, alias="completionDate")
+        links: list[Any] = Field(default_factory=list)
+        hash: str | None = None
+        type: str | None = None
+        notified: bool | None = None
+        version: int | None = None
+        processing_perc: int | None = Field(default=None, alias="processingPerc")
 
     class MagnetErrorInfo(BaseModel):
-        id: str
+        id: str | int = ""
         error: AllDebridErrorDetail
 
     magnets: list[MagnetInfo | MagnetErrorInfo]
 
+    @field_validator("magnets", mode="before")
+    @classmethod
+    def _ensure_list(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return [cast(dict[str, Any], value)]
+        return value
+
 
 class AllDebridMagnetFilesResponse(BaseModel):
-    """Represents file trees and links returned by AllDebrid's magnet/files API."""
+    """Represents file trees and links returned by AllDebrid's dedicated magnet/files API."""
 
     class MagnetFiles(BaseModel):
         id: int
-        files: list[AllDebridFile | AllDebridDirectory]
+        files: list[Any] = Field(default_factory=list)
+
+        @field_validator("files", mode="before")
+        @classmethod
+        def _validate_files(cls, v: Any) -> list[Any]:
+            if isinstance(v, list):
+                files_list = cast(list[Any], v)
+                return [parse_alldebrid_entry(item) for item in files_list]
+            return []
 
     class MagnetErrorInfo(BaseModel):
-        id: str
+        id: str | int = ""
         error: AllDebridErrorDetail
 
     magnets: list[MagnetFiles | MagnetErrorInfo]
 
+    @field_validator("magnets", mode="before")
+    @classmethod
+    def _ensure_list(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return [cast(dict[str, Any], value)]
+        return value
 
-class AllDebridError(Exception):
+
+class AllDebridPinGetResponse(BaseModel):
+    """Represents PIN get response from AllDebrid OAuth device flow."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    pin: str
+    check: str
+    expires_in: int = Field(default=600, alias="expiresIn")
+    user_url: str = Field(alias="userUrl")
+    base_url: str | None = Field(default=None, alias="baseUrl")
+    check_url: str | None = Field(default=None, alias="checkUrl")
+
+
+class AllDebridPinCheckResponse(BaseModel):
+    """Represents PIN check response from AllDebrid OAuth device flow."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    activated: bool = False
+    expires_in: int | None = Field(default=None, alias="expiresIn")
+    apikey: str | None = None
+
+
+class AllDebridError(ProviderError):
     """Base exception for AllDebrid related errors."""
+
+    def __init__(
+        self,
+        message: str | None = None,
+        code: str | None = None,
+        raw_error: Any = None,
+        status_code: int | None = None,
+    ) -> None:
+        msg = message or code or "AllDebrid error"
+        super().__init__(
+            msg,
+            provider_name="AllDebrid",
+            raw_error=raw_error
+            or ({"code": code, "message": message} if code else None),
+            status_code=status_code,
+        )
+        self.code = code
+
+
+def _extract_retry_after(response: Any) -> float | None:
+    """Extract retry-after seconds from response headers."""
+    headers = getattr(response, "headers", {}) or {}
+    val = headers.get("Retry-After") or headers.get("retry-after")
+    if val:
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def _maybe_backoff(response: Any) -> None:
+    """
+    Check if we should back off based on response status and rate limit headers.
+    Parses Retry-After and X-RateLimit-* headers to dynamically log rate limits.
+    """
+    headers = getattr(response, "headers", {}) or {}
+
+    retry_after = headers.get("Retry-After") or headers.get("retry-after")
+    ratelimit_limit = headers.get("X-RateLimit-Limit") or headers.get(
+        "x-ratelimit-limit"
+    )
+    ratelimit_remaining = headers.get("X-RateLimit-Remaining") or headers.get(
+        "x-ratelimit-remaining"
+    )
+    ratelimit_reset = headers.get("X-RateLimit-Reset") or headers.get(
+        "x-ratelimit-reset"
+    )
+
+    retry_seconds: float | None = None
+    if retry_after:
+        try:
+            retry_seconds = float(retry_after)
+        except (ValueError, TypeError):
+            pass
+
+    status_code = getattr(response, "status_code", 200)
+    if status_code == 429:
+        if retry_seconds is not None:
+            logger.warning(
+                f"AllDebrid rate limit hit (429), Retry-After={retry_seconds:.1f}s, "
+                f"Reset={ratelimit_reset}, Limit={ratelimit_limit}"
+            )
+        else:
+            logger.warning(
+                f"AllDebrid rate limit hit (429), Reset={ratelimit_reset}, Limit={ratelimit_limit}"
+            )
+    elif ratelimit_remaining is not None:
+        try:
+            if int(ratelimit_remaining) <= 0:
+                logger.warning(
+                    f"AllDebrid rate limit quota exhausted (Remaining={ratelimit_remaining}, Reset={ratelimit_reset})"
+                )
+        except (ValueError, TypeError):
+            pass
+
+
+def _error_from_detail(
+    error: AllDebridErrorDetail,
+    status_code: int | None = None,
+    retry_after: float | None = None,
+) -> Exception:
+    """Map provider error detail codes to typed availability and normalized ProviderError subclasses."""
+
+    code_upper = error.code.upper()
+
+    if code_upper in {"MAGNET_NO_SERVER", "NO_SERVER"}:
+        return DebridVpnBlockedError(error.message)
+
+    if code_upper in {
+        "AUTH_MISSING_APIKEY",
+        "AUTH_BAD_APIKEY",
+        "AUTH_USER_BANNED",
+        "AUTH_USER_NOT_PREMIUM",
+        "PIN_EXPIRED",
+        "PIN_INVALID",
+        "PIN_ALREADY_AUTHENTIFIED",
+    }:
+        return ProviderAuthError(
+            message=f"AllDebrid auth failed: {error.message}",
+            provider_name="AllDebrid",
+            status_code=status_code or 401,
+            raw_error={"code": error.code, "message": error.message},
+        )
+
+    if code_upper in {
+        "FREE_TRIAL_LIMIT_REACHED",
+        "MAGNET_TOO_MANY",
+        "MAGNET_MUST_BE_PREMIUM",
+        "LINK_TOO_MANY_DOWNLOADS",
+        "MAGNET_TOO_LARGE",
+    }:
+        return ProviderQuotaExceededError(
+            message=f"AllDebrid quota exceeded: {error.message}",
+            provider_name="AllDebrid",
+            status_code=status_code,
+            raw_error={"code": error.code, "message": error.message},
+        )
+
+    if code_upper in {"RATE_LIMIT_EXCEEDED", "TOO_MANY_REQUESTS"}:
+        return ProviderRateLimitError(
+            message=f"AllDebrid rate limit exceeded: {error.message}",
+            provider_name="AllDebrid",
+            retry_after_seconds=retry_after,
+            status_code=status_code or 429,
+            raw_error={"code": error.code, "message": error.message},
+        )
+
+    if code_upper in {"SERVICE_UNAVAILABLE", "MAINTENANCE", "SERVER_MAINTENANCE"}:
+        return ProviderUnavailableError(
+            message=f"AllDebrid service unavailable: {error.message}",
+            provider_name="AllDebrid",
+            status_code=status_code or 503,
+            raw_error={"code": error.code, "message": error.message},
+        )
+
+    return AllDebridError(
+        message=error.message,
+        code=error.code,
+        status_code=status_code,
+        raw_error={"code": error.code, "message": error.message},
+    )
 
 
 class AllDebridAPI:
@@ -174,15 +548,87 @@ class AllDebridAPI:
 
         self.session.headers.update({"Authorization": f"Bearer {api_key}"})
 
+    def get_pin(self) -> AllDebridPinGetResponse:
+        """Fetch a new PIN code for OAuth device flow."""
+        response = self.session.get("v4/pin/get")
+        _maybe_backoff(response)
+
+        try:
+            payload = response.json()
+        except Exception:
+            payload = None
+
+        if isinstance(payload, dict):
+            try:
+                data = (
+                    AllDebridResponse[AllDebridPinGetResponse]
+                    .model_validate({"data": payload})
+                    .data
+                )
+                if isinstance(data, AllDebridErrorResponse):
+                    raise _error_from_detail(
+                        data.error,
+                        status_code=response.status_code,
+                        retry_after=_extract_retry_after(response),
+                    )
+                return data.data
+            except ValidationError:
+                pass
+
+        if not response.ok:
+            raise normalize_provider_error(
+                provider_name="AllDebrid",
+                status_code=response.status_code,
+                message=f"Failed to get PIN: HTTP {response.status_code}",
+                retry_after=_extract_retry_after(response),
+            )
+        raise AllDebridError(f"Unexpected response getting PIN: {response.text}")
+
+    def check_pin(self, check: str, pin: str) -> AllDebridPinCheckResponse:
+        """Check PIN authentication status."""
+        response = self.session.get("v4/pin/check", params={"check": check, "pin": pin})
+        _maybe_backoff(response)
+
+        try:
+            payload = response.json()
+        except Exception:
+            payload = None
+
+        if isinstance(payload, dict):
+            try:
+                data = (
+                    AllDebridResponse[AllDebridPinCheckResponse]
+                    .model_validate({"data": payload})
+                    .data
+                )
+                if isinstance(data, AllDebridErrorResponse):
+                    raise _error_from_detail(
+                        data.error,
+                        status_code=response.status_code,
+                        retry_after=_extract_retry_after(response),
+                    )
+                return data.data
+            except ValidationError:
+                pass
+
+        if not response.ok:
+            raise normalize_provider_error(
+                provider_name="AllDebrid",
+                status_code=response.status_code,
+                message=f"Failed to check PIN: HTTP {response.status_code}",
+                retry_after=_extract_retry_after(response),
+            )
+        raise AllDebridError(f"Unexpected response checking PIN: {response.text}")
+
 
 class AllDebridDownloader(DownloaderBase):
     """
-    AllDebrid downloader with lean exception handling.
+    AllDebrid downloader with lean exception handling aligned to AllDebrid v4.1 contracts.
 
     Notes on failure & breaker behavior:
     - Network/transport failures are retried by SmartSession, then counted against the per-domain
       CircuitBreaker; once OPEN, SmartSession raises CircuitBreakerOpen before the request.
-    - HTTP status codes are not exceptions; we check response.ok and map to messages via _handle_error(...).
+    - HTTP status codes and error envelopes are mapped to normalized ProviderError subclasses.
     """
 
     def __init__(self) -> None:
@@ -254,6 +700,16 @@ class AllDebridDownloader(DownloaderBase):
 
         status = response.status_code
 
+        # Attempt to parse structured error detail from response body
+        try:
+            raw_json = response.json()
+            if isinstance(raw_json, dict):
+                data = AllDebridResponse[None].model_validate({"data": raw_json}).data
+                if isinstance(data, AllDebridErrorResponse):
+                    return f"{data.error.code}: {data.error.message}"
+        except Exception:
+            pass
+
         match status:
             case 400:
                 return "Bad request"
@@ -268,25 +724,64 @@ class AllDebridDownloader(DownloaderBase):
             case _ if status >= 500:
                 return "AllDebrid server error"
             case _:
-                data = (
-                    AllDebridResponse[None]
-                    .model_validate({"data": response.json()})
-                    .data
-                )
-
-                # AllDebrid returns errors in data.error.message format
-                if isinstance(data, AllDebridErrorResponse):
-                    return data.error.message
-
                 return f"HTTP {status}"
 
     def _maybe_backoff(self, response: SmartResponse) -> None:
-        """
-        Check if we should back off based on response.
-        """
+        """Check if we should back off based on response status and rate limit headers."""
+        _maybe_backoff(response)
 
-        if response.status_code == 429:
-            logger.warning("AllDebrid rate limit hit, backing off")
+    @staticmethod
+    def _extract_retry_after(response: SmartResponse) -> float | None:
+        """Extract retry-after seconds from response headers."""
+        return _extract_retry_after(response)
+
+    def _error_from_detail(
+        self,
+        error: AllDebridErrorDetail,
+        status_code: int | None = None,
+        retry_after: float | None = None,
+    ) -> Exception:
+        """Map provider error detail codes to typed availability and normalized ProviderError subclasses."""
+        return _error_from_detail(
+            error, status_code=status_code, retry_after=retry_after
+        )
+
+    def _error_from_response(self, response: SmartResponse) -> Exception:
+        """Extract typed error from response body or classify by HTTP status."""
+        try:
+            raw_json = response.json()
+            if isinstance(raw_json, dict):
+                data = AllDebridResponse[None].model_validate({"data": raw_json}).data
+                if isinstance(data, AllDebridErrorResponse):
+                    return self._error_from_detail(data.error, response.status_code)
+        except (ValueError, ValidationError):
+            pass
+
+        return normalize_provider_error(
+            provider_name="AllDebrid",
+            status_code=response.status_code,
+            message=self._handle_error(response),
+            retry_after=self._extract_retry_after(response),
+        )
+
+    def _availability_error(self, response: SmartResponse) -> Exception:
+        """Classify a failed availability response before surfacing it upstream."""
+
+        try:
+            raw_json = response.json()
+            if isinstance(raw_json, dict):
+                data = AllDebridResponse[None].model_validate({"data": raw_json}).data
+                if isinstance(data, AllDebridErrorResponse):
+                    return self._error_from_detail(data.error, response.status_code)
+        except (ValueError, ValidationError):
+            pass
+
+        return normalize_provider_error(
+            provider_name="AllDebrid",
+            status_code=response.status_code,
+            message=self._handle_error(response),
+            retry_after=self._extract_retry_after(response),
+        )
 
     def get_instant_availability(
         self,
@@ -340,7 +835,7 @@ class AllDebridDownloader(DownloaderBase):
                     pass
 
             raise
-        except DebridVpnBlockedError:
+        except (DebridVpnBlockedError, ProviderAuthError):
             if torrent_id:
                 try:
                     self.delete_torrent(torrent_id)
@@ -348,7 +843,7 @@ class AllDebridDownloader(DownloaderBase):
                     pass
 
             raise
-        except AllDebridError as e:
+        except (AllDebridError, ProviderError) as e:
             logger.warning(f"Availability check failed [{infohash}]: {e}")
 
             if torrent_id:
@@ -404,7 +899,7 @@ class AllDebridDownloader(DownloaderBase):
         if info.status != "Ready":
             return None, f"Not instantly available (status={info.status})", None
 
-        # Get files from the magnet/files endpoint
+        # Get files from the dedicated magnet/files endpoint
         files_data = self._get_magnet_files(torrent_id)
 
         if not files_data:
@@ -413,7 +908,6 @@ class AllDebridDownloader(DownloaderBase):
         files = list[DebridFile]()
 
         # Process files recursively from the nested structure
-        # files_data is a list of file objects with 'n', 's', 'l', and optionally 'e' fields
         self._extract_files_recursive(files_data, item_type, files, infohash)
 
         if not files:
@@ -503,6 +997,8 @@ class AllDebridDownloader(DownloaderBase):
 
         Raises:
             CircuitBreakerOpen: If the per-domain breaker is OPEN.
+            DebridVpnBlockedError: If VPN/IP is blocked.
+            ProviderAuthError: If authentication failed.
             AllDebridError: If the API returns a failing status.
         """
 
@@ -524,7 +1020,6 @@ class AllDebridDownloader(DownloaderBase):
         if not response.ok:
             raise self._availability_error(response)
 
-        # AllDebrid API returns {status: "success", data: {magnets: [{id: ...}]}}
         try:
             data = (
                 AllDebridResponse[AllDebridMagnet]
@@ -535,7 +1030,7 @@ class AllDebridDownloader(DownloaderBase):
             raise AllDebridError(f"Invalid response format from AllDebrid: {e}")
 
         if isinstance(data, AllDebridErrorResponse):
-            raise self._error_from_detail(data.error)
+            raise self._error_from_detail(data.error, response.status_code)
 
         magnets = data.data.magnets
 
@@ -551,32 +1046,6 @@ class AllDebridDownloader(DownloaderBase):
 
         return int(magnet_id)
 
-    def _availability_error(
-        self, response: SmartResponse
-    ) -> AllDebridError | DebridVpnBlockedError:
-        """Classify a failed availability response before surfacing it upstream."""
-
-        try:
-            data = (
-                AllDebridResponse[None].model_validate({"data": response.json()}).data
-            )
-            if isinstance(data, AllDebridErrorResponse):
-                return self._error_from_detail(data.error)
-        except (ValueError, ValidationError):
-            pass
-
-        return AllDebridError(self._handle_error(response))
-
-    def _error_from_detail(
-        self, error: AllDebridErrorDetail
-    ) -> AllDebridError | DebridVpnBlockedError:
-        """Map provider error detail codes to typed availability errors."""
-
-        if error.code.upper() in {"MAGNET_NO_SERVER", "NO_SERVER"}:
-            return DebridVpnBlockedError(error.message)
-
-        return AllDebridError(error.message)
-
     def select_files(self, torrent_id: int | str, file_ids: list[int]) -> None:
         """
         Select which files to download from the magnet.
@@ -589,15 +1058,13 @@ class AllDebridDownloader(DownloaderBase):
         self,
         magnet_id: int,
     ) -> list[AllDebridFile | AllDebridDirectory] | None:
-        """Get file entries and download links for a magnet."""
+        """Get file entries and download links for a magnet from dedicated magnet/files endpoint."""
 
         try:
             api = self.api
             if api is None:
                 raise AllDebridError("AllDebrid API client has not been initialized")
 
-            # AllDebrid v4.1 moved file trees and leaf download links from
-            # magnet/status to this dedicated endpoint.
             response = api.session.post(
                 "v4/magnet/files",
                 data={"id": [magnet_id]},
@@ -627,6 +1094,25 @@ class AllDebridDownloader(DownloaderBase):
             logger.debug(f"Error getting magnet files: {e}")
             return None
 
+    @staticmethod
+    def _map_status_code(code: int) -> str:
+        """Map AllDebrid numeric statusCode to human-readable status string."""
+        mapping: dict[int, str] = {
+            AllDebridMagnetStatusCode.IN_QUEUE.value: "In Queue",
+            AllDebridMagnetStatusCode.DOWNLOADING.value: "Downloading",
+            AllDebridMagnetStatusCode.COMPRESSING.value: "Compressing",
+            AllDebridMagnetStatusCode.UPLOADING.value: "Uploading",
+            AllDebridMagnetStatusCode.READY.value: "Ready",
+            AllDebridMagnetStatusCode.UPLOAD_FAILED.value: "Upload Failed",
+            AllDebridMagnetStatusCode.ERROR.value: "Error",
+            AllDebridMagnetStatusCode.BAD_TORRENT.value: "Bad Torrent",
+            AllDebridMagnetStatusCode.NOT_FOUND.value: "Not Found",
+            AllDebridMagnetStatusCode.DELETED.value: "Deleted",
+            AllDebridMagnetStatusCode.SERVER_MAINTENANCE.value: "Maintenance",
+            AllDebridMagnetStatusCode.PAUSED.value: "Paused",
+        }
+        return mapping.get(code, f"Status_{code}")
+
     def get_torrent_info(self, torrent_id: int | str) -> TorrentInfo:
         """
         Get information about a specific magnet using its ID.
@@ -646,7 +1132,6 @@ class AllDebridDownloader(DownloaderBase):
         if api is None:
             raise AllDebridError("AllDebrid API client has not been initialized")
 
-        # AllDebrid API expects ID as string
         response = api.session.post(
             "v4.1/magnet/status",
             data={
@@ -657,7 +1142,7 @@ class AllDebridDownloader(DownloaderBase):
         self._maybe_backoff(response)
 
         if not response.ok:
-            raise AllDebridError(self._handle_error(response))
+            raise self._error_from_response(response)
 
         data = (
             AllDebridResponse[AllDebridMagnetStatusResponse]
@@ -666,44 +1151,57 @@ class AllDebridDownloader(DownloaderBase):
         )
 
         if isinstance(data, AllDebridErrorResponse):
-            raise AllDebridError(
-                f"Invalid response format from AllDebrid: {data.error.message}"
-            )
+            raise self._error_from_detail(data.error, response.status_code)
 
         magnets = data.data.magnets
 
         if not magnets:
             raise AllDebridError(f"Magnet {torrent_id} not found")
 
-        # Handle both list and single SimpleNamespace object
         [magnet_data] = magnets
 
         if isinstance(magnet_data, AllDebridMagnetStatusResponse.MagnetErrorInfo):
-            raise AllDebridError(
-                f"Error getting magnet info: {magnet_data.error.message}"
-            )
+            raise self._error_from_detail(magnet_data.error)
 
-        # Map AllDebrid status codes to status strings
-        status = magnet_data.status
+        # Map status string or fallback to numeric statusCode mapping
+        status = magnet_data.status or self._map_status_code(magnet_data.status_code)
+
+        # Progress calculation
+        if magnet_data.status_code == AllDebridMagnetStatusCode.READY:
+            progress = 100.0
+        elif (
+            magnet_data.status_code == AllDebridMagnetStatusCode.DOWNLOADING
+            and magnet_data.size > 0
+            and magnet_data.downloaded > 0
+        ):
+            progress = round((magnet_data.downloaded / magnet_data.size) * 100.0, 2)
+        else:
+            progress = 0.0
 
         # Parse timestamps
         upload_date = magnet_data.upload_date
         completion_date = magnet_data.completion_date
 
-        created_at = datetime.fromtimestamp(upload_date) if upload_date else None
+        created_at = (
+            datetime.fromtimestamp(upload_date, tz=timezone.utc)
+            if upload_date
+            else None
+        )
         completed_at = (
-            datetime.fromtimestamp(completion_date) if completion_date else None
+            datetime.fromtimestamp(completion_date, tz=timezone.utc)
+            if completion_date
+            else None
         )
 
         return TorrentInfo(
             id=torrent_id,
             name=magnet_data.filename,
             status=status,
-            infohash=None,  # AllDebrid doesn't return infohash in status
+            infohash=magnet_data.hash,
             bytes=magnet_data.size,
             created_at=created_at,
             completed_at=completed_at,
-            progress=100.0 if magnet_data.status_code == 4 else 0.0,
+            progress=progress,
             files={},  # Files are retrieved separately via magnet/files
             links=[],
         )
@@ -721,7 +1219,6 @@ class AllDebridDownloader(DownloaderBase):
         if api is None:
             raise AllDebridError("AllDebrid API client has not been initialized")
 
-        # AllDebrid API expects ID as string
         response = api.session.post(
             url="v4/magnet/delete",
             data={
@@ -732,7 +1229,7 @@ class AllDebridDownloader(DownloaderBase):
         self._maybe_backoff(response)
 
         if not response.ok:
-            raise AllDebridError(self._handle_error(response))
+            raise self._error_from_response(response)
 
     def unrestrict_link(self, link: str) -> UnrestrictedLink | None:
         """
@@ -852,3 +1349,15 @@ class AllDebridDownloader(DownloaderBase):
         except Exception as e:
             logger.error(f"Error getting AllDebrid user info: {e}")
             return None
+
+    def get_pin(self) -> AllDebridPinGetResponse:
+        """Fetch a new PIN code for OAuth device flow."""
+        if not self.api:
+            raise AllDebridError("AllDebrid API client has not been initialized")
+        return self.api.get_pin()
+
+    def check_pin(self, check: str, pin: str) -> AllDebridPinCheckResponse:
+        """Check PIN authentication status."""
+        if not self.api:
+            raise AllDebridError("AllDebrid API client has not been initialized")
+        return self.api.check_pin(check=check, pin=pin)

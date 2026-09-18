@@ -162,7 +162,13 @@ def test_get_operation_detail_and_retry(api_client):
 
     # Retry the failed operation
     from program.services.streaming.prom_cache_metrics import REGISTRY
-    before_retries = REGISTRY.get_sample_value("riven_outbox_retry_requests_total", {"status": "success"}) or 0.0
+
+    before_retries = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_retry_requests_total", {"status": "success"}
+        )
+        or 0.0
+    )
 
     with patch("routers.secure.operations.notify_outbox_dispatcher") as mock_notify:
         resp_retry = client.post(
@@ -175,7 +181,12 @@ def test_get_operation_detail_and_retry(api_client):
         assert retry_data["operation"]["status"] == "pending"
         mock_notify.assert_called_once()
 
-    after_retries = REGISTRY.get_sample_value("riven_outbox_retry_requests_total", {"status": "success"}) or 0.0
+    after_retries = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_retry_requests_total", {"status": "success"}
+        )
+        or 0.0
+    )
     assert after_retries == before_retries + 1.0
 
     # Verify DB state updated
@@ -205,7 +216,10 @@ def test_retry_requires_platform_admin_and_preserves_unauthorized_state(api_clie
         op_id = op.id
 
     expected_state = ("failed", 4, "failed-worker", "failed-claim-token")
-    for headers, expected_status in (({}, 401), (_signed_bff_headers("library:read"), 403)):
+    for headers, expected_status in (
+        ({}, 401),
+        (_signed_bff_headers("library:read"), 403),
+    ):
         response = client.post(
             f"/api/v1/operations/timeline/{op_id}/retry", headers=headers
         )
@@ -224,7 +238,13 @@ def test_retry_requires_platform_admin_and_preserves_unauthorized_state(api_clie
 def test_admin_retry_preserves_atomic_failed_state_guard(api_client):
     client, session_factory = api_client
     from program.services.streaming.prom_cache_metrics import REGISTRY
-    before_rejected = REGISTRY.get_sample_value("riven_outbox_retry_requests_total", {"status": "rejected"}) or 0.0
+
+    before_rejected = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_retry_requests_total", {"status": "rejected"}
+        )
+        or 0.0
+    )
 
     for operation_status in ("pending", "processing", "completed"):
         with session_factory() as session:
@@ -236,8 +256,12 @@ def test_admin_retry_preserves_atomic_failed_state_guard(api_client):
             )
             op.status = operation_status
             op.attempt_count = 2
-            op.worker_id = "processing-worker" if operation_status == "processing" else None
-            op.claim_token = "processing-claim" if operation_status == "processing" else None
+            op.worker_id = (
+                "processing-worker" if operation_status == "processing" else None
+            )
+            op.claim_token = (
+                "processing-claim" if operation_status == "processing" else None
+            )
             session.commit()
             op_id = op.id
 
@@ -258,5 +282,10 @@ def test_admin_retry_preserves_atomic_failed_state_guard(api_client):
                 "processing-claim" if operation_status == "processing" else None
             )
 
-    after_rejected = REGISTRY.get_sample_value("riven_outbox_retry_requests_total", {"status": "rejected"}) or 0.0
+    after_rejected = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_retry_requests_total", {"status": "rejected"}
+        )
+        or 0.0
+    )
     assert after_rejected == before_rejected + 3.0

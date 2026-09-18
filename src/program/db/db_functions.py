@@ -471,9 +471,7 @@ def run_thread_with_db_item(
 
                     # Execute service within the settings context if overrides exist
                     overrides = event.overrides or {}
-                    logger.trace(
-                        f"{_svc} item={event.item_id}: next(fn()) START"
-                    )
+                    logger.trace(f"{_svc} item={event.item_id}: next(fn()) START")
                     _t2 = time.monotonic()
 
                     with settings_manager.override(**overrides):

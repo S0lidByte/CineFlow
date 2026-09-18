@@ -84,7 +84,9 @@ class TestSQLiteOutboxConcurrency:
     """Certifies atomic claiming and strict fencing on file-backed SQLite in WAL mode."""
 
     @staticmethod
-    def _race_claims(session_factory, *, workers: int, limit: int) -> list[tuple[str, str, str]]:
+    def _race_claims(
+        session_factory, *, workers: int, limit: int
+    ) -> list[tuple[str, str, str]]:
         barrier = threading.Barrier(workers)
 
         def claim(worker_number: int) -> list[tuple[str, str, str]]:
@@ -97,14 +99,18 @@ class TestSQLiteOutboxConcurrency:
                     limit=limit,
                     lease_duration_seconds=60,
                 )
-                results = [(op.id, worker_id, op.claim_token or "") for op in operations]
+                results = [
+                    (op.id, worker_id, op.claim_token or "") for op in operations
+                ]
                 session.commit()
                 return results
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
             return [
                 claim_result
-                for future in [executor.submit(claim, index) for index in range(workers)]
+                for future in [
+                    executor.submit(claim, index) for index in range(workers)
+                ]
                 for claim_result in future.result()
             ]
 
@@ -136,7 +142,9 @@ class TestSQLiteOutboxConcurrency:
         assert claims[0][0] == operation_id
         assert claims[0][2]
 
-    def test_governed_03_ten_workers_n_items_claim_each_at_most_once(self, sqlite_file_db):
+    def test_governed_03_ten_workers_n_items_claim_each_at_most_once(
+        self, sqlite_file_db
+    ):
         """Governed scenario 3: 10 workers claim N items without duplicate ownership."""
         _, session_factory = sqlite_file_db
         operation_count = 50
@@ -160,25 +168,38 @@ class TestSQLiteOutboxConcurrency:
         base_time = datetime.now(UTC)
         with session_factory() as session:
             op_3 = enqueue_operation(
-                session, "debrid", {"task": 3}, scheduled_at=base_time - timedelta(seconds=10)
+                session,
+                "debrid",
+                {"task": 3},
+                scheduled_at=base_time - timedelta(seconds=10),
             )
             op_1 = enqueue_operation(
-                session, "debrid", {"task": 1}, scheduled_at=base_time - timedelta(seconds=30)
+                session,
+                "debrid",
+                {"task": 1},
+                scheduled_at=base_time - timedelta(seconds=30),
             )
             op_2 = enqueue_operation(
-                session, "debrid", {"task": 2}, scheduled_at=base_time - timedelta(seconds=20)
+                session,
+                "debrid",
+                {"task": 2},
+                scheduled_at=base_time - timedelta(seconds=20),
             )
             session.commit()
             id1, id2, id3 = op_1.id, op_2.id, op_3.id
 
         with session_factory() as session:
-            claimed = claim_due_operations(session, worker_id="worker-fifo", limit=10, lease_duration_seconds=60)
+            claimed = claim_due_operations(
+                session, worker_id="worker-fifo", limit=10, lease_duration_seconds=60
+            )
             session.commit()
             claimed_ids = [c.id for c in claimed]
 
         assert claimed_ids == [id1, id2, id3]
 
-    def test_additional_optimistic_concurrency_lock_contention_wal(self, sqlite_file_db):
+    def test_additional_optimistic_concurrency_lock_contention_wal(
+        self, sqlite_file_db
+    ):
         """Scenario 3: Concurrent claim and complete operations proceed without DB lock errors."""
         _, session_factory = sqlite_file_db
         num_ops = 40
@@ -205,7 +226,10 @@ class TestSQLiteOutboxConcurrency:
                     for op in claimed:
                         # complete right away
                         res = complete_operation(
-                            session, op.id, worker_id=worker_id, claim_token=op.claim_token
+                            session,
+                            op.id,
+                            worker_id=worker_id,
+                            claim_token=op.claim_token,
                         )
                         session.commit()
                         if res is not None:
@@ -218,8 +242,16 @@ class TestSQLiteOutboxConcurrency:
                 f.result()
 
         with session_factory() as session:
-            remaining = session.query(OperationLedger).filter(OperationLedger.status == "pending").count()
-            completed_in_db = session.query(OperationLedger).filter(OperationLedger.status == "completed").count()
+            remaining = (
+                session.query(OperationLedger)
+                .filter(OperationLedger.status == "pending")
+                .count()
+            )
+            completed_in_db = (
+                session.query(OperationLedger)
+                .filter(OperationLedger.status == "completed")
+                .count()
+            )
 
         assert completed_in_db == completed_count
         assert completed_in_db + remaining == num_ops
@@ -281,7 +313,10 @@ class TestSQLiteOutboxConcurrency:
         # Worker 2 attempts claim; must get nothing
         with session_factory() as session:
             claimed_w2 = claim_due_operations(
-                session, worker_id="worker-interloper", limit=10, lease_duration_seconds=60
+                session,
+                worker_id="worker-interloper",
+                limit=10,
+                lease_duration_seconds=60,
             )
             session.commit()
             assert len(claimed_w2) == 0
@@ -306,15 +341,21 @@ class TestSQLiteOutboxConcurrency:
 
         with session_factory() as session:
             # 1. Wrong worker, right token
-            res1 = complete_operation(session, op_id, worker_id="worker-fake", claim_token=real_token)
+            res1 = complete_operation(
+                session, op_id, worker_id="worker-fake", claim_token=real_token
+            )
             assert res1 is None
 
             # 2. Right worker, wrong token
-            res2 = complete_operation(session, op_id, worker_id="worker-real", claim_token="stale-uuid-token")
+            res2 = complete_operation(
+                session, op_id, worker_id="worker-real", claim_token="stale-uuid-token"
+            )
             assert res2 is None
 
             # 3. Right worker, right token -> Success
-            res3 = complete_operation(session, op_id, worker_id="worker-real", claim_token=real_token)
+            res3 = complete_operation(
+                session, op_id, worker_id="worker-real", claim_token=real_token
+            )
             session.commit()
             assert res3 is not None
             assert res3.status == "completed"
@@ -330,7 +371,10 @@ class TestSQLiteOutboxConcurrency:
 
         with session_factory() as session:
             claimed = claim_due_operations(
-                session, worker_id="worker-downloader", limit=1, lease_duration_seconds=60
+                session,
+                worker_id="worker-downloader",
+                limit=1,
+                lease_duration_seconds=60,
             )
             session.commit()
             token = claimed[0].claim_token
@@ -380,7 +424,11 @@ class TestSQLiteOutboxConcurrency:
 
         with session_factory() as session:
             renewed = renew_lease(
-                session, op_id, worker_id="worker-long", claim_token=token, extension_seconds=120
+                session,
+                op_id,
+                worker_id="worker-long",
+                claim_token=token,
+                extension_seconds=120,
             )
             session.commit()
             assert renewed is True
@@ -424,7 +472,11 @@ class TestSQLiteOutboxConcurrency:
         # Worker 1 attempts to renew using old token and worker_id -> MUST FAIL
         with session_factory() as session:
             renew_result = renew_lease(
-                session, op_id, worker_id="worker-slow", claim_token=w1_token, extension_seconds=60
+                session,
+                op_id,
+                worker_id="worker-slow",
+                claim_token=w1_token,
+                extension_seconds=60,
             )
             session.commit()
             assert renew_result is False
@@ -541,7 +593,11 @@ class TestSQLiteOutboxConcurrency:
                 f.result()
 
         with session_factory() as session:
-            failed_records = session.query(OperationLedger).filter(OperationLedger.status == "failed").all()
+            failed_records = (
+                session.query(OperationLedger)
+                .filter(OperationLedger.status == "failed")
+                .all()
+            )
             assert len(failed_records) == num_terminal_ops
             for rec in failed_records:
                 assert rec.error_classification == "PermanentCorruptionError"

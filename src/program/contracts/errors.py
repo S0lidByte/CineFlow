@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 
 class ProviderError(Exception):
@@ -27,6 +27,18 @@ class ProviderError(Exception):
     def __str__(self) -> str:
         provider_prefix = f"[{self.provider_name}] " if self.provider_name else ""
         return f"{provider_prefix}{self.message}"
+
+    @property
+    def provider_code(self) -> str | None:
+        """Extract canonical provider error code if present in raw_error."""
+        if isinstance(self.raw_error, dict):
+            raw_dict: dict[Any, Any] = cast(dict[Any, Any], self.raw_error)
+            code: Any = raw_dict.get("code") or raw_dict.get("error")
+            if code is not None:
+                return str(cast(object, code))
+        elif isinstance(self.raw_error, str):
+            return self.raw_error
+        return None
 
 
 class ProviderAuthError(ProviderError):
@@ -69,6 +81,11 @@ class ProviderRateLimitError(ProviderError):
             raw_error=raw_error,
         )
         self.retry_after_seconds = retry_after_seconds
+
+    @property
+    def retry_after(self) -> float | None:
+        """Alias for retry_after_seconds."""
+        return self.retry_after_seconds
 
 
 class ProviderNetworkError(ProviderError):
@@ -218,7 +235,9 @@ def normalize_provider_error(
                     headers = resp.headers
                     retry_header = None
                     if hasattr(headers, "get"):
-                        retry_header = headers.get("Retry-After") or headers.get("retry-after")
+                        retry_header = headers.get("Retry-After") or headers.get(
+                            "retry-after"
+                        )
                     if retry_header is not None:
                         effective_retry_after = float(retry_header)
                 except (ValueError, TypeError, Exception):

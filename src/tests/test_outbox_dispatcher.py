@@ -104,12 +104,14 @@ def test_dispatcher_executes_registered_handler(test_db_session):
     done_event = threading.Event()
 
     def my_handler(ledger: OperationLedger, payload: dict[str, Any]):
-        handled_events.append({
-            "id": ledger.id,
-            "type": ledger.operation_type,
-            "payload": payload,
-            "correlation_id": get_correlation_id(),
-        })
+        handled_events.append(
+            {
+                "id": ledger.id,
+                "type": ledger.operation_type,
+                "payload": payload,
+                "correlation_id": get_correlation_id(),
+            }
+        )
         done_event.set()
 
     dispatcher = OutboxDispatcher(
@@ -261,7 +263,9 @@ def test_dispatcher_publishes_canonical_sse_items_and_isolates_listener_failures
     def capture_sse(_channel: str, message: str) -> None:
         emitted_messages.append(json.loads(message))
 
-    monkeypatch.setattr("program.contracts.dispatcher.sse_manager.publish_event", capture_sse)
+    monkeypatch.setattr(
+        "program.contracts.dispatcher.sse_manager.publish_event", capture_sse
+    )
 
     dispatcher = OutboxDispatcher(
         worker_id="test-worker-canonical-sse",
@@ -272,7 +276,9 @@ def test_dispatcher_publishes_canonical_sse_items_and_isolates_listener_failures
     dispatcher.register_lifecycle_listener(
         lambda _event: (_ for _ in ()).throw(RuntimeError("observer failure"))
     )
-    dispatcher.register_handler("item.canonical_sse", lambda _ledger, _payload: completed.set())
+    dispatcher.register_handler(
+        "item.canonical_sse", lambda _ledger, _payload: completed.set()
+    )
     dispatcher.start()
 
     try:
@@ -291,7 +297,8 @@ def test_dispatcher_publishes_canonical_sse_items_and_isolates_listener_failures
 
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline and not any(
-            message.get("event_type") == "operation_completed" for message in emitted_messages
+            message.get("event_type") == "operation_completed"
+            for message in emitted_messages
         ):
             time.sleep(0.02)
 

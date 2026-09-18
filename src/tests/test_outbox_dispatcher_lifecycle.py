@@ -166,11 +166,13 @@ def test_dispatcher_publishes_all_five_lifecycle_transitions(test_db_session):
     def handle_retry(_op, _p):
         retry_handled.set()
         from program.contracts.errors import ProviderNetworkError
+
         raise ProviderNetworkError("Transient network glitch")
 
     def handle_permanent(_op, _p):
         permanent_handled.set()
         from program.contracts.errors import ProviderAuthError
+
         raise ProviderAuthError("Fatal authentication failure")
 
     dispatcher.register_handler("item.lifecycle_success", handle_success)
@@ -181,7 +183,9 @@ def test_dispatcher_publishes_all_five_lifecycle_transitions(test_db_session):
     try:
         # A. Enqueue Success Op
         with TestingSession() as session:
-            op1 = enqueue_operation(session, "item.lifecycle_success", {"secret": "pass1"})
+            op1 = enqueue_operation(
+                session, "item.lifecycle_success", {"secret": "pass1"}
+            )
             session.commit()
             op1_id = op1.id
 
@@ -189,7 +193,9 @@ def test_dispatcher_publishes_all_five_lifecycle_transitions(test_db_session):
 
         # B. Enqueue Transient Retry Op
         with TestingSession() as session:
-            op2 = enqueue_operation(session, "item.lifecycle_retry", {"secret": "pass2"})
+            op2 = enqueue_operation(
+                session, "item.lifecycle_retry", {"secret": "pass2"}
+            )
             session.commit()
             op2_id = op2.id
 
@@ -290,4 +296,3 @@ def test_slow_failing_listeners_are_asynchronous_and_isolated(test_db_session):
 
     finally:
         dispatcher.stop(wait=True)
-

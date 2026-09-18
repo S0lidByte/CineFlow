@@ -62,7 +62,9 @@ def heartbeat_db() -> Iterator[tuple[sessionmaker[Session], Callable[[], Any]]]:
 
 def _enqueue(testing_session: sessionmaker[Session], operation_type: str) -> str:
     with testing_session() as session:
-        operation = enqueue_operation(session, operation_type=operation_type, payload={})
+        operation = enqueue_operation(
+            session, operation_type=operation_type, payload={}
+        )
         session.commit()
         return operation.id
 
@@ -76,7 +78,9 @@ def _wait_until(predicate: Callable[[], bool], timeout: float = 5.0) -> bool:
     return predicate()
 
 
-def _dispatcher(session_context: Callable[[], Any], *, worker_id: str = "heartbeat-worker") -> OutboxDispatcher:
+def _dispatcher(
+    session_context: Callable[[], Any], *, worker_id: str = "heartbeat-worker"
+) -> OutboxDispatcher:
     return OutboxDispatcher(
         worker_id=worker_id,
         max_workers=2,
@@ -89,7 +93,9 @@ def _dispatcher(session_context: Callable[[], Any], *, worker_id: str = "heartbe
 def test_heartbeat_interval_is_one_third_of_lease_duration(heartbeat_db) -> None:
     """The governed heartbeat interval is exactly one third of the configured lease."""
     _, session_context = heartbeat_db
-    dispatcher = OutboxDispatcher(lease_duration_seconds=9, db_session_cm=session_context)
+    dispatcher = OutboxDispatcher(
+        lease_duration_seconds=9, db_session_cm=session_context
+    )
 
     assert dispatcher._heartbeat_interval_seconds == 3.0
 
@@ -121,7 +127,9 @@ def test_long_running_operation_renews_its_fenced_lease(heartbeat_db) -> None:
         dispatcher.stop(wait=True)
 
 
-def test_heartbeat_uses_claim_worker_and_token_fencing(heartbeat_db, monkeypatch) -> None:
+def test_heartbeat_uses_claim_worker_and_token_fencing(
+    heartbeat_db, monkeypatch
+) -> None:
     """Every renewal passes the owning worker ID and claim token unchanged."""
     testing_session, session_context = heartbeat_db
     renewal_calls: list[tuple[str, str, str, int]] = []
@@ -130,12 +138,22 @@ def test_heartbeat_uses_claim_worker_and_token_fencing(heartbeat_db, monkeypatch
     release = threading.Event()
     dispatcher = _dispatcher(session_context, worker_id="fenced-heartbeat-worker")
 
-    def recording_renewal(session, operation_id, worker_id, claim_token, *, extension_seconds=300):
+    def recording_renewal(
+        session, operation_id, worker_id, claim_token, *, extension_seconds=300
+    ):
         renewal_calls.append((operation_id, worker_id, claim_token, extension_seconds))
-        return original(session, operation_id, worker_id, claim_token, extension_seconds=extension_seconds)
+        return original(
+            session,
+            operation_id,
+            worker_id,
+            claim_token,
+            extension_seconds=extension_seconds,
+        )
 
     monkeypatch.setattr(dispatcher_module, "renew_lease", recording_renewal)
-    dispatcher.register_handler("heartbeat.fenced", lambda _op, _payload: (started.set(), release.wait(5.0)))
+    dispatcher.register_handler(
+        "heartbeat.fenced", lambda _op, _payload: (started.set(), release.wait(5.0))
+    )
     operation_id = _enqueue(testing_session, "heartbeat.fenced")
     dispatcher.start()
     try:
@@ -173,7 +191,9 @@ def test_normal_completion_stops_heartbeat(heartbeat_db, monkeypatch) -> None:
     dispatcher.start()
     try:
         assert done.wait(timeout=5.0)
-        assert _wait_until(lambda: _status_is(testing_session, operation_id, "completed"))
+        assert _wait_until(
+            lambda: _status_is(testing_session, operation_id, "completed")
+        )
         time.sleep(0.5)
         assert renewals == []
         assert dispatcher._lease_heartbeats == {}
@@ -198,7 +218,9 @@ def test_failure_stops_heartbeat(heartbeat_db) -> None:
         dispatcher.stop(wait=True)
 
 
-def test_lost_ownership_stops_renewing_without_unfenced_writes(heartbeat_db, monkeypatch) -> None:
+def test_lost_ownership_stops_renewing_without_unfenced_writes(
+    heartbeat_db, monkeypatch
+) -> None:
     """A failed fenced renewal is terminal for that heartbeat and causes no extra mutations."""
     testing_session, session_context = heartbeat_db
     started = threading.Event()
@@ -212,7 +234,9 @@ def test_lost_ownership_stops_renewing_without_unfenced_writes(heartbeat_db, mon
         return False
 
     monkeypatch.setattr(dispatcher_module, "renew_lease", denied_renewal)
-    dispatcher.register_handler("heartbeat.lost", lambda _op, _payload: (started.set(), release.wait(5.0)))
+    dispatcher.register_handler(
+        "heartbeat.lost", lambda _op, _payload: (started.set(), release.wait(5.0))
+    )
     _enqueue(testing_session, "heartbeat.lost")
     dispatcher.start()
     try:
@@ -239,7 +263,9 @@ def test_renewal_exception_stops_heartbeat(heartbeat_db, monkeypatch) -> None:
         raise RuntimeError("database unavailable")
 
     monkeypatch.setattr(dispatcher_module, "renew_lease", exploding_renewal)
-    dispatcher.register_handler("heartbeat.exception", lambda _op, _payload: (started.set(), release.wait(5.0)))
+    dispatcher.register_handler(
+        "heartbeat.exception", lambda _op, _payload: (started.set(), release.wait(5.0))
+    )
     _enqueue(testing_session, "heartbeat.exception")
     dispatcher.start()
     try:
@@ -258,7 +284,9 @@ def test_shutdown_stops_and_joins_active_heartbeats(heartbeat_db) -> None:
     started = threading.Event()
     dispatcher = _dispatcher(session_context)
 
-    def shutdown_aware_handler(_operation: OperationLedger, _payload: dict[str, Any]) -> None:
+    def shutdown_aware_handler(
+        _operation: OperationLedger, _payload: dict[str, Any]
+    ) -> None:
         started.set()
         while not dispatcher._stop_event.wait(timeout=0.01):
             pass
@@ -275,7 +303,9 @@ def test_shutdown_stops_and_joins_active_heartbeats(heartbeat_db) -> None:
         dispatcher.stop(wait=True)
 
 
-def test_concurrent_operations_receive_independent_heartbeats(heartbeat_db, monkeypatch) -> None:
+def test_concurrent_operations_receive_independent_heartbeats(
+    heartbeat_db, monkeypatch
+) -> None:
     """Two long-running operations each receive independent fenced renewals."""
     testing_session, session_context = heartbeat_db
     started = threading.Event()
@@ -284,9 +314,17 @@ def test_concurrent_operations_receive_independent_heartbeats(heartbeat_db, monk
     original = dispatcher_module.renew_lease
     dispatcher = _dispatcher(session_context)
 
-    def recording_renewal(session, operation_id, worker_id, claim_token, *, extension_seconds=300):
+    def recording_renewal(
+        session, operation_id, worker_id, claim_token, *, extension_seconds=300
+    ):
         renewed_ids.add(operation_id)
-        return original(session, operation_id, worker_id, claim_token, extension_seconds=extension_seconds)
+        return original(
+            session,
+            operation_id,
+            worker_id,
+            claim_token,
+            extension_seconds=extension_seconds,
+        )
 
     monkeypatch.setattr(dispatcher_module, "renew_lease", recording_renewal)
     active_handlers = 0
@@ -324,15 +362,22 @@ def test_dispatcher_without_claims_creates_no_heartbeat(heartbeat_db) -> None:
 
 
 def _lease_expiry_after(
-    testing_session: sessionmaker[Session], operation_id: str, previous_expiry: datetime | None
+    testing_session: sessionmaker[Session],
+    operation_id: str,
+    previous_expiry: datetime | None,
 ) -> bool:
     with testing_session() as session:
         operation = session.get(OperationLedger, operation_id)
         assert operation is not None
-        return operation.lease_expires_at is not None and operation.lease_expires_at > previous_expiry
+        return (
+            operation.lease_expires_at is not None
+            and operation.lease_expires_at > previous_expiry
+        )
 
 
-def _status_is(testing_session: sessionmaker[Session], operation_id: str, status: str) -> bool:
+def _status_is(
+    testing_session: sessionmaker[Session], operation_id: str, status: str
+) -> bool:
     with testing_session() as session:
         operation = session.get(OperationLedger, operation_id)
         return operation is not None and operation.status == status

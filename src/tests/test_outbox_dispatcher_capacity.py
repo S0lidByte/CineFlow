@@ -131,7 +131,9 @@ def test_capacity_throttling_claims_exact_available_slots(test_db_session):
     with dispatcher._leases_lock:
         dispatcher._active_leases.update({"op-1", "op-2"})
 
-    with patch.object(dispatcher_module, "claim_due_operations", return_value=[]) as mock_claim:
+    with patch.object(
+        dispatcher_module, "claim_due_operations", return_value=[]
+    ) as mock_claim:
         dispatcher._dispatch_due_operations()
         mock_claim.assert_called_once()
         _, kwargs = mock_claim.call_args
@@ -150,7 +152,9 @@ def test_capacity_throttling_claims_all_when_idle(test_db_session):
     )
     dispatcher._executor = MagicMock()
 
-    with patch.object(dispatcher_module, "claim_due_operations", return_value=[]) as mock_claim:
+    with patch.object(
+        dispatcher_module, "claim_due_operations", return_value=[]
+    ) as mock_claim:
         dispatcher._dispatch_due_operations()
         mock_claim.assert_called_once()
         _, kwargs = mock_claim.call_args
@@ -200,8 +204,12 @@ def test_capacity_throttling_end_to_end_concurrency_bounding(test_db_session):
 
     try:
         finished = all_processed_event.wait(timeout=10.0)
-        assert finished, f"Timed out waiting for operations to process. Count={processed_count}"
-        assert max_concurrent_observed <= 2, f"Observed {max_concurrent_observed} concurrent workers > max_workers=2!"
+        assert finished, (
+            f"Timed out waiting for operations to process. Count={processed_count}"
+        )
+        assert max_concurrent_observed <= 2, (
+            f"Observed {max_concurrent_observed} concurrent workers > max_workers=2!"
+        )
         assert processed_count == 10
     finally:
         dispatcher.stop(wait=True)
@@ -257,7 +265,9 @@ def test_capacity_throttling_slot_replenishment(test_db_session):
             time.sleep(0.02)
 
         with started_lock:
-            assert len(started_ops) == 2, f"Expected 2 started operations, got {len(started_ops)}"
+            assert len(started_ops) == 2, (
+                f"Expected 2 started operations, got {len(started_ops)}"
+            )
 
         # Active leases should be 2, matching max_workers
         with dispatcher._leases_lock:
@@ -306,7 +316,9 @@ def test_capacity_throttling_thread_safe_leases_lock_synchronization(test_db_ses
     assert "test-op" in dispatcher._active_leases
 
 
-def test_capacity_throttling_does_not_mutate_leases_before_successful_claim(test_db_session):
+def test_capacity_throttling_does_not_mutate_leases_before_successful_claim(
+    test_db_session,
+):
     """Verify that _active_leases is only populated after operations are claimed from the database."""
     TestingSession, _test_session = test_db_session
 
@@ -337,7 +349,9 @@ def test_capacity_throttling_with_failing_claims_handles_cleanly(test_db_session
     )
     dispatcher._executor = MagicMock()
 
-    with patch.object(dispatcher_module, "claim_due_operations", side_effect=RuntimeError("DB error")):
+    with patch.object(
+        dispatcher_module, "claim_due_operations", side_effect=RuntimeError("DB error")
+    ):
         dispatcher._dispatch_due_operations()
 
     with dispatcher._leases_lock:

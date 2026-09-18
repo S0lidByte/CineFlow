@@ -54,11 +54,15 @@ def _prepare_previous_revision(cfg: Config, db_url: str):
 
 
 def _index_names(engine: sa.Engine) -> set[str]:
-    return {str(index["name"]) for index in inspect(engine).get_indexes("OperationLedger")}
+    return {
+        str(index["name"]) for index in inspect(engine).get_indexes("OperationLedger")
+    }
 
 
 def _column_names(engine: sa.Engine) -> set[str]:
-    return {str(column["name"]) for column in inspect(engine).get_columns("OperationLedger")}
+    return {
+        str(column["name"]) for column in inspect(engine).get_columns("OperationLedger")
+    }
 
 
 def _sqlite_index_sql(engine: sa.Engine, name: str) -> str:
@@ -72,14 +76,18 @@ def _sqlite_index_sql(engine: sa.Engine, name: str) -> str:
 
 
 class TestOperationLedgerMigrationIntegrity:
-    def test_repair_migration_restores_missing_claim_token_schema(self, alembic_config, temp_db_file):
+    def test_repair_migration_restores_missing_claim_token_schema(
+        self, alembic_config, temp_db_file
+    ):
         """Repair a falsely stamped prior head without dropping existing ledger data."""
         db_url = f"sqlite:///{temp_db_file}"
         engine = _prepare_previous_revision(alembic_config, db_url)
 
         with engine.begin() as connection:
             connection.execute(text("DROP INDEX ix_OperationLedger_claim_token"))
-            connection.execute(text("ALTER TABLE OperationLedger DROP COLUMN claim_token"))
+            connection.execute(
+                text("ALTER TABLE OperationLedger DROP COLUMN claim_token")
+            )
 
         command.stamp(alembic_config, "f6a1b2c3d4e5")
         command.upgrade(alembic_config, "head")
@@ -120,9 +128,9 @@ class TestOperationLedgerMigrationIntegrity:
         assert _sqlite_index_sql(engine, "ix_OperationLedger_created_at_desc").endswith(
             "(created_at DESC)"
         )
-        assert _sqlite_index_sql(engine, "ix_OperationLedger_status_created_at").endswith(
-            "(status, created_at DESC)"
-        )
+        assert _sqlite_index_sql(
+            engine, "ix_OperationLedger_status_created_at"
+        ).endswith("(status, created_at DESC)")
 
     def test_downgrade_and_reupgrade_cycle(self, alembic_config, temp_db_file):
         """Verify clean rollback to e5f6a1b2c3d4 and idempotent re-upgrade to f6a1b2c3d4e5."""
@@ -155,7 +163,9 @@ class TestOperationLedgerMigrationIntegrity:
         assert "ix_OperationLedger_claim" in reupgraded_indexes
         assert "ix_OperationLedger_lease" in reupgraded_indexes
 
-    def test_populated_database_migration_and_query_plans(self, alembic_config, temp_db_file):
+    def test_populated_database_migration_and_query_plans(
+        self, alembic_config, temp_db_file
+    ):
         """Verify data preservation across upgrade/downgrade and timeline index query execution."""
         db_url = f"sqlite:///{temp_db_file}"
         engine = _prepare_previous_revision(alembic_config, db_url)
@@ -189,7 +199,9 @@ class TestOperationLedgerMigrationIntegrity:
             assert count == 15
 
             # Test timeline query (ordered by created_at DESC)
-            timeline_query = select(OperationLedger).order_by(OperationLedger.created_at.desc())
+            timeline_query = select(OperationLedger).order_by(
+                OperationLedger.created_at.desc()
+            )
             records = session.scalars(timeline_query).all()
             assert len(records) == 15
             # Verify descending order
@@ -210,16 +222,22 @@ class TestOperationLedgerMigrationIntegrity:
         # 4. Verify EXPLAIN QUERY PLAN uses indexes on SQLite
         with engine.connect() as conn:
             plan_timeline = conn.execute(
-                text("EXPLAIN QUERY PLAN SELECT id FROM OperationLedger ORDER BY created_at DESC")
+                text(
+                    "EXPLAIN QUERY PLAN SELECT id FROM OperationLedger ORDER BY created_at DESC"
+                )
             ).fetchall()
             plan_timeline_str = " ".join(str(row) for row in plan_timeline)
             # Should mention SCAN or SEARCH using ix_OperationLedger_created_at_desc
             assert "ix_OperationLedger_created_at_desc" in plan_timeline_str
 
             plan_status_timeline = conn.execute(
-                text("EXPLAIN QUERY PLAN SELECT id FROM OperationLedger WHERE status = 'pending' ORDER BY created_at DESC")
+                text(
+                    "EXPLAIN QUERY PLAN SELECT id FROM OperationLedger WHERE status = 'pending' ORDER BY created_at DESC"
+                )
             ).fetchall()
-            plan_status_timeline_str = " ".join(str(row) for row in plan_status_timeline)
+            plan_status_timeline_str = " ".join(
+                str(row) for row in plan_status_timeline
+            )
             # Should mention ix_OperationLedger_status_created_at
             assert "ix_OperationLedger_status_created_at" in plan_status_timeline_str
 

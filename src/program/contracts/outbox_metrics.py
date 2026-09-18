@@ -65,7 +65,9 @@ OUTBOX_LISTENER_FAILURES_TOTAL = Counter(
 def record_claim(operation_type: str, count: int = 1) -> None:
     """Increment the total count of claimed operations for a given operation type."""
     try:
-        OUTBOX_CLAIMED_TOTAL.labels(operation_type=operation_type or "unknown").inc(count)
+        OUTBOX_CLAIMED_TOTAL.labels(operation_type=operation_type or "unknown").inc(
+            count
+        )
     except Exception as exc:
         logger.debug(f"Failed to record outbox claim metric: {exc}")
 

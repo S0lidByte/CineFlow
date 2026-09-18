@@ -27,23 +27,57 @@ def upgrade() -> None:
         sa.Column("media_item_id", sa.Integer(), nullable=True),
         sa.Column("operation_type", sa.String(length=64), nullable=False),
         sa.Column("schema_version", sa.Integer(), server_default="1", nullable=False),
-        sa.Column("status", sa.String(length=32), server_default="pending", nullable=False),
+        sa.Column(
+            "status", sa.String(length=32), server_default="pending", nullable=False
+        ),
         sa.Column("attempt_count", sa.Integer(), server_default="0", nullable=False),
         sa.Column("idempotency_key", sa.String(length=256), nullable=True),
-        sa.Column("scheduled_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "scheduled_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.Column("lease_expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("error_classification", sa.String(length=64), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("payload", sa.JSON(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("idempotency_key"),
     )
-    op.create_index("ix_OperationLedger_media_item_id", "OperationLedger", ["media_item_id"], unique=False)
-    op.create_index("ix_OperationLedger_status", "OperationLedger", ["status"], unique=False)
-    op.create_index("ix_OperationLedger_scheduled_at", "OperationLedger", ["scheduled_at"], unique=False)
-    op.create_index("ix_OperationLedger_lease_expires_at", "OperationLedger", ["lease_expires_at"], unique=False)
+    op.create_index(
+        "ix_OperationLedger_media_item_id",
+        "OperationLedger",
+        ["media_item_id"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_OperationLedger_status", "OperationLedger", ["status"], unique=False
+    )
+    op.create_index(
+        "ix_OperationLedger_scheduled_at",
+        "OperationLedger",
+        ["scheduled_at"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_OperationLedger_lease_expires_at",
+        "OperationLedger",
+        ["lease_expires_at"],
+        unique=False,
+    )
 
 
 def downgrade() -> None:

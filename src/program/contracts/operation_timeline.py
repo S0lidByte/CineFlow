@@ -38,8 +38,12 @@ def serialize_operation_timeline_item(operation: OperationLedger) -> dict[str, A
         "started_at": _serialize_datetime(operation.started_at),
         "completed_at": _serialize_datetime(operation.completed_at),
         "error_classification": operation.error_classification,
-        "error_message": redact_text(operation.error_message) if operation.error_message else None,
-        "payload": redact_sensitive_data(operation.payload) if operation.payload else None,
+        "error_message": redact_text(operation.error_message)
+        if operation.error_message
+        else None,
+        "payload": redact_sensitive_data(operation.payload)
+        if operation.payload
+        else None,
         "created_at": _serialize_datetime(operation.created_at),
         "updated_at": _serialize_datetime(operation.updated_at),
     }

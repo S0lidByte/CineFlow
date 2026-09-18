@@ -75,17 +75,25 @@ def test_db_session():
 def test_outbox_metrics_recorders_direct_invocation():
     """Verify direct metric helper functions execute without exception and update registry values."""
     op_type = f"test_op_{uuid.uuid4().hex[:6]}"
-    before_claims = REGISTRY.get_sample_value(
-        "riven_outbox_claimed_total", {"operation_type": op_type}
-    ) or 0.0
+    before_claims = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_claimed_total", {"operation_type": op_type}
+        )
+        or 0.0
+    )
     metrics.record_claim(op_type, 2)
-    after_claims = REGISTRY.get_sample_value(
-        "riven_outbox_claimed_total", {"operation_type": op_type}
-    ) or 0.0
+    after_claims = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_claimed_total", {"operation_type": op_type}
+        )
+        or 0.0
+    )
     assert after_claims == before_claims + 2.0
 
     metrics.record_claim_latency(0.042)
-    sample_count = REGISTRY.get_sample_value("riven_outbox_claim_latency_seconds_count") or 0.0
+    sample_count = (
+        REGISTRY.get_sample_value("riven_outbox_claim_latency_seconds_count") or 0.0
+    )
     assert sample_count > 0.0
 
     metrics.set_active_leases(7)
@@ -95,43 +103,67 @@ def test_outbox_metrics_recorders_direct_invocation():
     metrics.set_active_leases(0)
     assert REGISTRY.get_sample_value("riven_outbox_active_leases") == 0.0
 
-    before_renew = REGISTRY.get_sample_value(
-        "riven_outbox_lease_renewals_total", {"result": "success"}
-    ) or 0.0
+    before_renew = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_lease_renewals_total", {"result": "success"}
+        )
+        or 0.0
+    )
     metrics.record_lease_renewal("success")
-    after_renew = REGISTRY.get_sample_value(
-        "riven_outbox_lease_renewals_total", {"result": "success"}
-    ) or 0.0
+    after_renew = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_lease_renewals_total", {"result": "success"}
+        )
+        or 0.0
+    )
     assert after_renew == before_renew + 1.0
 
-    before_stale = REGISTRY.get_sample_value(
-        "riven_outbox_stale_rejections_total", {"stage": "complete"}
-    ) or 0.0
+    before_stale = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_stale_rejections_total", {"stage": "complete"}
+        )
+        or 0.0
+    )
     metrics.record_stale_rejection("complete")
-    after_stale = REGISTRY.get_sample_value(
-        "riven_outbox_stale_rejections_total", {"stage": "complete"}
-    ) or 0.0
+    after_stale = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_stale_rejections_total", {"stage": "complete"}
+        )
+        or 0.0
+    )
     assert after_stale == before_stale + 1.0
 
-    before_retry = REGISTRY.get_sample_value(
-        "riven_outbox_retry_requests_total", {"status": "success"}
-    ) or 0.0
+    before_retry = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_retry_requests_total", {"status": "success"}
+        )
+        or 0.0
+    )
     metrics.record_retry_request("success")
-    after_retry = REGISTRY.get_sample_value(
-        "riven_outbox_retry_requests_total", {"status": "success"}
-    ) or 0.0
+    after_retry = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_retry_requests_total", {"status": "success"}
+        )
+        or 0.0
+    )
     assert after_retry == before_retry + 1.0
 
     metrics.set_listener_queue_depth(3)
     assert REGISTRY.get_sample_value("riven_outbox_listener_queue_depth") == 3.0
 
-    before_listener_fail = REGISTRY.get_sample_value(
-        "riven_outbox_listener_failures_total", {"event_type": "operation_started"}
-    ) or 0.0
+    before_listener_fail = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_listener_failures_total", {"event_type": "operation_started"}
+        )
+        or 0.0
+    )
     metrics.record_listener_failure("operation_started")
-    after_listener_fail = REGISTRY.get_sample_value(
-        "riven_outbox_listener_failures_total", {"event_type": "operation_started"}
-    ) or 0.0
+    after_listener_fail = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_listener_failures_total", {"event_type": "operation_started"}
+        )
+        or 0.0
+    )
     assert after_listener_fail == before_listener_fail + 1.0
 
 
@@ -145,9 +177,12 @@ def test_outbox_dispatcher_instruments_claims_and_active_leases(test_db_session)
         enqueue_operation(session, operation_type=op_type, payload={"item": 2})
         session.commit()
 
-    before_claims = REGISTRY.get_sample_value(
-        "riven_outbox_claimed_total", {"operation_type": op_type}
-    ) or 0.0
+    before_claims = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_claimed_total", {"operation_type": op_type}
+        )
+        or 0.0
+    )
 
     dispatcher = OutboxDispatcher(
         max_workers=2,
@@ -168,15 +203,20 @@ def test_outbox_dispatcher_instruments_claims_and_active_leases(test_db_session)
 
     dispatcher.start()
     try:
-        assert completed_events.wait(timeout=5.0), "Timed out waiting for outbox operations"
+        assert completed_events.wait(timeout=5.0), (
+            "Timed out waiting for outbox operations"
+        )
         # Allow cleanup of leases
         time.sleep(0.3)
     finally:
         dispatcher.stop(wait=True)
 
-    after_claims = REGISTRY.get_sample_value(
-        "riven_outbox_claimed_total", {"operation_type": op_type}
-    ) or 0.0
+    after_claims = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_claimed_total", {"operation_type": op_type}
+        )
+        or 0.0
+    )
     assert after_claims == before_claims + 2.0
     assert REGISTRY.get_sample_value("riven_outbox_active_leases") == 0.0
 
@@ -190,9 +230,12 @@ def test_outbox_dispatcher_instruments_heartbeat_renewal_metrics(test_db_session
         enqueue_operation(session, operation_type=op_type, payload={"work": "long"})
         session.commit()
 
-    before_renewals = REGISTRY.get_sample_value(
-        "riven_outbox_lease_renewals_total", {"result": "success"}
-    ) or 0.0
+    before_renewals = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_lease_renewals_total", {"result": "success"}
+        )
+        or 0.0
+    )
 
     dispatcher = OutboxDispatcher(
         max_workers=1,
@@ -217,9 +260,12 @@ def test_outbox_dispatcher_instruments_heartbeat_renewal_metrics(test_db_session
     finally:
         dispatcher.stop(wait=True)
 
-    after_renewals = REGISTRY.get_sample_value(
-        "riven_outbox_lease_renewals_total", {"result": "success"}
-    ) or 0.0
+    after_renewals = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_lease_renewals_total", {"result": "success"}
+        )
+        or 0.0
+    )
     assert after_renewals > before_renewals
 
 
@@ -229,13 +275,18 @@ def test_outbox_dispatcher_instruments_stale_rejection_metrics(test_db_session):
 
     op_type = f"stale_metric_{uuid.uuid4().hex[:6]}"
     with session_cm() as session:
-        op = enqueue_operation(session, operation_type=op_type, payload={"corrupt": True})
+        op = enqueue_operation(
+            session, operation_type=op_type, payload={"corrupt": True}
+        )
         session.commit()
         op_id = op.id
 
-    before_stale = REGISTRY.get_sample_value(
-        "riven_outbox_stale_rejections_total", {"stage": "complete"}
-    ) or 0.0
+    before_stale = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_stale_rejections_total", {"stage": "complete"}
+        )
+        or 0.0
+    )
 
     dispatcher = OutboxDispatcher(
         max_workers=1,
@@ -264,18 +315,24 @@ def test_outbox_dispatcher_instruments_stale_rejection_metrics(test_db_session):
     finally:
         dispatcher.stop(wait=True)
 
-    after_stale = REGISTRY.get_sample_value(
-        "riven_outbox_stale_rejections_total", {"stage": "complete"}
-    ) or 0.0
+    after_stale = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_stale_rejections_total", {"stage": "complete"}
+        )
+        or 0.0
+    )
     assert after_stale == before_stale + 1.0
 
 
 def test_outbox_lifecycle_listener_failure_records_metric():
     """Verify that an exception in an isolated lifecycle listener increments listener failure metric."""
     event_type = f"test_ev_{uuid.uuid4().hex[:6]}"
-    before_fails = REGISTRY.get_sample_value(
-        "riven_outbox_listener_failures_total", {"event_type": event_type}
-    ) or 0.0
+    before_fails = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_listener_failures_total", {"event_type": event_type}
+        )
+        or 0.0
+    )
 
     def _broken_listener(event):
         raise RuntimeError("Intentional isolated listener explosion")
@@ -286,9 +343,12 @@ def test_outbox_lifecycle_listener_failure_records_metric():
     )
     _invoke_listener_safely(_broken_listener, event, event.operation_id)
 
-    after_fails = REGISTRY.get_sample_value(
-        "riven_outbox_listener_failures_total", {"event_type": event_type}
-    ) or 0.0
+    after_fails = (
+        REGISTRY.get_sample_value(
+            "riven_outbox_listener_failures_total", {"event_type": event_type}
+        )
+        or 0.0
+    )
     assert after_fails == before_fails + 1.0
 
 
@@ -319,34 +379,67 @@ def test_render_metrics_includes_all_outbox_metrics():
     ]
 
     for m in expected_metrics:
-        assert m in body, f"Expected metric '{m}' was not found in render_metrics() output"
+        assert m in body, (
+            f"Expected metric '{m}' was not found in render_metrics() output"
+        )
 
 
 def test_outbox_metrics_fail_safety_never_raises():
     """Verify that recorder functions gracefully swallow unexpected collector exceptions."""
     from unittest.mock import patch
 
-    with patch.object(metrics.OUTBOX_CLAIMED_TOTAL, "labels", side_effect=RuntimeError("Prometheus error")):
+    with patch.object(
+        metrics.OUTBOX_CLAIMED_TOTAL,
+        "labels",
+        side_effect=RuntimeError("Prometheus error"),
+    ):
         metrics.record_claim("any_op")  # Should not raise
 
-    with patch.object(metrics.OUTBOX_CLAIM_LATENCY_SECONDS, "observe", side_effect=RuntimeError("Prometheus error")):
+    with patch.object(
+        metrics.OUTBOX_CLAIM_LATENCY_SECONDS,
+        "observe",
+        side_effect=RuntimeError("Prometheus error"),
+    ):
         metrics.record_claim_latency(0.1)  # Should not raise
 
-    with patch.object(metrics.OUTBOX_ACTIVE_LEASES, "set", side_effect=RuntimeError("Prometheus error")):
+    with patch.object(
+        metrics.OUTBOX_ACTIVE_LEASES,
+        "set",
+        side_effect=RuntimeError("Prometheus error"),
+    ):
         metrics.set_active_leases(5)  # Should not raise
 
-    with patch.object(metrics.OUTBOX_LEASE_RENEWALS_TOTAL, "labels", side_effect=RuntimeError("Prometheus error")):
+    with patch.object(
+        metrics.OUTBOX_LEASE_RENEWALS_TOTAL,
+        "labels",
+        side_effect=RuntimeError("Prometheus error"),
+    ):
         metrics.record_lease_renewal("success")  # Should not raise
 
-    with patch.object(metrics.OUTBOX_STALE_REJECTIONS_TOTAL, "labels", side_effect=RuntimeError("Prometheus error")):
+    with patch.object(
+        metrics.OUTBOX_STALE_REJECTIONS_TOTAL,
+        "labels",
+        side_effect=RuntimeError("Prometheus error"),
+    ):
         metrics.record_stale_rejection("complete")  # Should not raise
 
-    with patch.object(metrics.OUTBOX_RETRY_REQUESTS_TOTAL, "labels", side_effect=RuntimeError("Prometheus error")):
+    with patch.object(
+        metrics.OUTBOX_RETRY_REQUESTS_TOTAL,
+        "labels",
+        side_effect=RuntimeError("Prometheus error"),
+    ):
         metrics.record_retry_request("success")  # Should not raise
 
-    with patch.object(metrics.OUTBOX_LISTENER_QUEUE_DEPTH, "set", side_effect=RuntimeError("Prometheus error")):
+    with patch.object(
+        metrics.OUTBOX_LISTENER_QUEUE_DEPTH,
+        "set",
+        side_effect=RuntimeError("Prometheus error"),
+    ):
         metrics.set_listener_queue_depth(1)  # Should not raise
 
-    with patch.object(metrics.OUTBOX_LISTENER_FAILURES_TOTAL, "labels", side_effect=RuntimeError("Prometheus error")):
+    with patch.object(
+        metrics.OUTBOX_LISTENER_FAILURES_TOTAL,
+        "labels",
+        side_effect=RuntimeError("Prometheus error"),
+    ):
         metrics.record_listener_failure("test")  # Should not raise
-

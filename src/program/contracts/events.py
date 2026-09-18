@@ -98,7 +98,11 @@ class OperationEvent:
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=lambda: cast(dict[str, Any], {}))
 
-    def mark_completed(self, status: OperationStatus = OperationStatus.SUCCESS, error: str | None = None) -> None:
+    def mark_completed(
+        self,
+        status: OperationStatus = OperationStatus.SUCCESS,
+        error: str | None = None,
+    ) -> None:
         """Mark the event completed and calculate elapsed duration if applicable."""
         self.status = status
         self.error = error

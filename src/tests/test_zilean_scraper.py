@@ -20,12 +20,13 @@ BASE32_HASH = base64.b32encode(bytes.fromhex(HEX_HASH)).decode("ascii")
 
 
 def _scraper_without_network(monkeypatch, **cfg_overrides) -> Zilean:
-    config = ZileanConfig(
-        enabled=True,
-        url="https://zilean.example/",
-        timeout=10,
-        **cfg_overrides,
-    )
+    cfg_dict = {
+        "enabled": True,
+        "url": "https://zilean.example/",
+        "timeout": 10,
+    }
+    cfg_dict.update(cfg_overrides)
+    config = ZileanConfig(**cfg_dict)
     monkeypatch.setattr(settings_manager.settings.scraping, "zilean", config)
     monkeypatch.setattr(Zilean, "validate", lambda self: True)
     monkeypatch.setattr(
@@ -258,3 +259,236 @@ def test_run_typed_http_error_non_429_does_not_raise_rate_limit(monkeypatch):
 
     result = scraper.run(Movie({"title": "Film"}))
     assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# Provider Protocol & Conformance Tests (Phase 4.3 TASK-003 Pilot)
+# ---------------------------------------------------------------------------
+
+
+def test_zilean_conforms_to_scraper_protocol_via_harness(monkeypatch):
+    """Verify that the real Zilean scraper instance satisfies ScraperProviderProtocol."""
+    from program.contracts import (
+        ProviderCapability,
+        ProviderCategory,
+        ProviderProtocol,
+        ScraperProviderProtocol,
+    )
+    from tests.test_provider_conformance import (
+        assert_conforms_to_provider_protocol,
+        assert_conforms_to_scraper_protocol,
+    )
+
+    scraper = _scraper_without_network(monkeypatch)
+    assert isinstance(scraper, ProviderProtocol)
+    assert isinstance(scraper, ScraperProviderProtocol)
+    assert_conforms_to_provider_protocol(scraper)
+    assert_conforms_to_scraper_protocol(scraper)
+
+    manifest = scraper.manifest
+    assert manifest.id == "zilean"
+    assert manifest.name == "Zilean"
+    assert manifest.category == ProviderCategory.SCRAPER
+    assert ProviderCapability.TORRENT_SCRAPE in manifest.capabilities
+    assert manifest.website == "https://github.com/iParr/zilean"
+
+    # Confirm no credentials leak into manifest
+    assert "token" not in manifest.model_dump()
+    assert "api_key" not in manifest.model_dump()
+
+
+def test_zilean_is_enabled_reflects_config(monkeypatch):
+    """is_enabled property must accurately reflect settings.scraping.zilean.enabled."""
+    scraper = _scraper_without_network(monkeypatch, enabled=True)
+    assert scraper.is_enabled is True
+
+    scraper.settings.enabled = False
+    assert scraper.is_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_zilean_probe_health_success(monkeypatch):
+    """probe_health must return HEALTHY when /healthchecks/ping returns 200."""
+    from program.contracts import ProviderHealthStatus
+
+    scraper = _scraper_without_network(monkeypatch)
+    scraper.session.get = MagicMock(
+        return_value=_response(status_code=200, payload="OK")
+    )
+
+    health = await scraper.probe_health()
+    assert health.status == ProviderHealthStatus.HEALTHY
+    assert health.latency_ms >= 0.0
+    assert "Connected" in health.message
+    assert health.details.get("status_code") == 200
+
+
+@pytest.mark.asyncio
+async def test_zilean_probe_health_unconfigured_url(monkeypatch):
+    """probe_health must return UNHEALTHY immediately if URL is empty."""
+    from program.contracts import ProviderHealthStatus
+
+    scraper = _scraper_without_network(monkeypatch, url="")
+    health = await scraper.probe_health()
+    assert health.status == ProviderHealthStatus.UNHEALTHY
+    assert health.latency_ms == 0.0
+    assert "not configured" in health.message
+
+
+@pytest.mark.asyncio
+async def test_zilean_probe_health_server_error_degraded(monkeypatch):
+    """probe_health must return DEGRADED when server responds with 500+."""
+    from program.contracts import ProviderHealthStatus
+
+    scraper = _scraper_without_network(monkeypatch)
+    scraper.session.get = MagicMock(return_value=_response(status_code=503))
+
+    health = await scraper.probe_health()
+    assert health.status == ProviderHealthStatus.DEGRADED
+    assert "HTTP 503" in health.message
+
+
+@pytest.mark.asyncio
+async def test_zilean_probe_health_connection_error_unhealthy(monkeypatch):
+    """probe_health must return UNHEALTHY with normalized error on connection drop."""
+    import requests
+
+    from program.contracts import ProviderHealthStatus
+
+    scraper = _scraper_without_network(monkeypatch)
+    scraper.session.get = MagicMock(
+        side_effect=requests.ConnectionError("Connection refused")
+    )
+
+    health = await scraper.probe_health()
+    assert health.status == ProviderHealthStatus.UNHEALTHY
+    assert health.latency_ms == 0.0
+    assert (
+        "Connection refused" in health.message
+        or "ProviderNetworkError" in health.message
+    )
+
+
+@pytest.mark.asyncio
+async def test_zilean_search_maps_to_scrape_candidates(monkeypatch):
+    """search() must map Zilean DMM response into canonical ScrapeCandidate objects."""
+    from program.contracts import ScrapeRequest
+
+    scraper = _scraper_without_network(monkeypatch)
+    payload = [
+        {
+            "raw_title": "Reacher.S01E01.1080p.Web-DL",
+            "info_hash": BASE32_HASH,  # Base32 input
+            "size": 1500000000,
+            "seeders": 42,
+            "indexer": "dmm",
+        },
+        {
+            "raw_title": "Reacher.S01E01.2160p.HDR",
+            "info_hash": HEX_HASH.upper(),  # Uppercase hex input
+            "size_bytes": 4500000000,
+            "seeds": 100,
+        },
+        {"raw_title": "Invalid.No.Hash", "info_hash": "bad-hash"},
+        {"raw_title": "", "info_hash": HEX_HASH},
+        "not-a-dict",
+    ]
+    scraper.session.get = MagicMock(return_value=_response(payload=payload))
+
+    req = ScrapeRequest(query="Reacher", season=1, episode=1)
+    candidates = await scraper.search(req)
+
+    assert len(candidates) == 2
+    c1 = candidates[0]
+    assert c1.raw_title == "Reacher.S01E01.1080p.Web-DL"
+    assert c1.info_hash == HEX_HASH.lower()
+    assert c1.indexer == "dmm"
+    assert c1.size_bytes == 1500000000
+    assert c1.seeders == 42
+    assert c1.source == "zilean"
+
+    c2 = candidates[1]
+    assert c2.raw_title == "Reacher.S01E01.2160p.HDR"
+    assert c2.info_hash == HEX_HASH.lower()
+    assert c2.indexer == "dmm"
+    assert c2.size_bytes == 4500000000
+    assert c2.seeders == 100
+    assert c2.source == "zilean"
+
+
+@pytest.mark.asyncio
+async def test_zilean_search_error_propagation_429(monkeypatch):
+    """search() must raise ProviderRateLimitError on 429 status."""
+    from program.contracts import ProviderRateLimitError, ScrapeRequest
+
+    scraper = _scraper_without_network(monkeypatch)
+    scraper.session.get = MagicMock(
+        return_value=_response(status_code=429, retry_after="45")
+    )
+
+    req = ScrapeRequest(query="Reacher")
+    with pytest.raises(ProviderRateLimitError) as exc_info:
+        await scraper.search(req)
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.retry_after_seconds == 45.0
+    assert exc_info.value.is_transient is True
+
+
+@pytest.mark.asyncio
+async def test_zilean_search_error_propagation_500(monkeypatch):
+    """search() must raise ProviderUnavailableError on 500 status."""
+    from program.contracts import ProviderUnavailableError, ScrapeRequest
+
+    scraper = _scraper_without_network(monkeypatch)
+    scraper.session.get = MagicMock(return_value=_response(status_code=500))
+
+    req = ScrapeRequest(query="Reacher")
+    with pytest.raises(ProviderUnavailableError) as exc_info:
+        await scraper.search(req)
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.is_transient is True
+
+
+# ---------------------------------------------------------------------------
+# Phase 8: End-to-End Pipeline & RTN Non-Regression Tests
+# ---------------------------------------------------------------------------
+
+
+def test_zilean_legacy_pipeline_rtn_parsing_and_ranking_flow(monkeypatch):
+    """Verify Zilean raw output feeds parse_results -> RTN -> ranked Streams."""
+    from program.media.item import Movie
+    from program.services.scrapers.shared import parse_results
+
+    scraper = _scraper_without_network(monkeypatch)
+    raw_payload = [
+        {
+            "raw_title": "Fight.Club.1999.1080p.BluRay.x264-SPARKS",
+            "info_hash": "0123456789abcdef0123456789abcdef01234567",
+        },
+        {
+            "raw_title": "Fight.Club.1999.CAM.XviD-LOWQUALITY",
+            "info_hash": "1123456789abcdef0123456789abcdef01234567",
+        },
+    ]
+    scraper.session.get = MagicMock(return_value=_response(payload=raw_payload))
+
+    movie = Movie({"title": "Fight Club", "year": 1999})
+
+    # Step 1: Legacy scrape() returns dict[str, str] mapping infohash -> raw_title
+    raw_results = scraper.scrape(movie)
+    assert len(raw_results) == 2
+    assert "0123456789abcdef0123456789abcdef01234567" in raw_results
+    assert "1123456789abcdef0123456789abcdef01234567" in raw_results
+
+    # Step 2: parse_results passes to RTN for parsing, resolution, and ranking
+    parsed_streams = parse_results(movie, raw_results, log_msg=False)
+
+    # Step 3: Verify streams are created and ranked by RTN
+    assert len(parsed_streams) > 0
+    # BluRay 1080p release must rank higher / produce a valid parsed stream
+    top_stream = next(iter(parsed_streams.values()))
+    assert top_stream.parsed_data is not None
+    assert top_stream.raw_title == "Fight.Club.1999.1080p.BluRay.x264-SPARKS"
+    assert top_stream.infohash == "0123456789abcdef0123456789abcdef01234567"

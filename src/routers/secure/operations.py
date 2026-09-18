@@ -72,11 +72,24 @@ def _to_redacted_item(op: OperationLedger) -> OperationTimelineItem:
     response_model=OperationTimelineListResponse,
 )
 async def list_operation_timeline(
-    status: Annotated[str | None, Query(description="Filter by operation status (pending, processing, completed, failed)")] = None,
-    operation_type: Annotated[str | None, Query(description="Filter by operation type")] = None,
-    correlation_id: Annotated[str | None, Query(description="Filter by correlation ID")] = None,
-    media_item_id: Annotated[int | None, Query(description="Filter by media item ID")] = None,
-    limit: Annotated[int, Query(ge=1, le=200, description="Max number of items to return")] = 50,
+    status: Annotated[
+        str | None,
+        Query(
+            description="Filter by operation status (pending, processing, completed, failed)"
+        ),
+    ] = None,
+    operation_type: Annotated[
+        str | None, Query(description="Filter by operation type")
+    ] = None,
+    correlation_id: Annotated[
+        str | None, Query(description="Filter by correlation ID")
+    ] = None,
+    media_item_id: Annotated[
+        int | None, Query(description="Filter by media item ID")
+    ] = None,
+    limit: Annotated[
+        int, Query(ge=1, le=200, description="Max number of items to return")
+    ] = 50,
     offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> OperationTimelineListResponse:
     """List historical and active operations with redaction and filtering."""
@@ -89,18 +102,30 @@ async def list_operation_timeline(
             count_query = count_query.filter(OperationLedger.status == status)
         if operation_type:
             query = query.filter(OperationLedger.operation_type == operation_type)
-            count_query = count_query.filter(OperationLedger.operation_type == operation_type)
+            count_query = count_query.filter(
+                OperationLedger.operation_type == operation_type
+            )
         if correlation_id:
             query = query.filter(OperationLedger.correlation_id == correlation_id)
-            count_query = count_query.filter(OperationLedger.correlation_id == correlation_id)
+            count_query = count_query.filter(
+                OperationLedger.correlation_id == correlation_id
+            )
         if media_item_id is not None:
             query = query.filter(OperationLedger.media_item_id == media_item_id)
-            count_query = count_query.filter(OperationLedger.media_item_id == media_item_id)
+            count_query = count_query.filter(
+                OperationLedger.media_item_id == media_item_id
+            )
 
         total = session.execute(count_query).scalar() or 0
-        records = session.execute(
-            query.order_by(OperationLedger.created_at.desc()).limit(limit).offset(offset)
-        ).scalars().all()
+        records = (
+            session.execute(
+                query.order_by(OperationLedger.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            .scalars()
+            .all()
+        )
 
         items = [_to_redacted_item(rec) for rec in records]
         return OperationTimelineListResponse(
@@ -129,7 +154,9 @@ async def stream_operation_timeline() -> StreamingResponse:
     response_model=OperationTimelineItem,
 )
 async def get_operation_timeline_item(
-    operation_id: Annotated[str, Path(description="The UUID of the operation to retrieve")],
+    operation_id: Annotated[
+        str, Path(description="The UUID of the operation to retrieve")
+    ],
 ) -> OperationTimelineItem:
     """Get details for a single operation ledger item."""
     with db_session() as session:
@@ -146,7 +173,9 @@ async def get_operation_timeline_item(
     dependencies=[Depends(require_role("platform:admin"))],
 )
 async def retry_operation_timeline_item(
-    operation_id: Annotated[str, Path(description="The UUID of the operation to retry")],
+    operation_id: Annotated[
+        str, Path(description="The UUID of the operation to retry")
+    ],
 ) -> OperationRetryResponse:
     """Re-schedule a failed or dead-lettered operation for immediate retry."""
     with db_session() as session:
@@ -198,7 +227,9 @@ async def retry_operation_timeline_item(
         notify_outbox_dispatcher()
         from program.contracts.dispatcher import publish_outbox_lifecycle_event
 
-        publish_outbox_lifecycle_event("operation_retrying", _to_redacted_item(retried).model_dump(mode="json"))
+        publish_outbox_lifecycle_event(
+            "operation_retrying", _to_redacted_item(retried).model_dump(mode="json")
+        )
 
         return OperationRetryResponse(
             success=True,

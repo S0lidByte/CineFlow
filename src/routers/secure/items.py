@@ -746,7 +746,9 @@ async def get_item(
             item = session.execute(query).unique().scalar_one_or_none()
 
             if not item:
-                logger.debug(f"Item not found in database: id={id!r} media_type={media_type!r}")
+                logger.debug(
+                    f"Item not found in database: id={id!r} media_type={media_type!r}"
+                )
                 raise HTTPException(status_code=404, detail="Item not found")
 
             if extended:

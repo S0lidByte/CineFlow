@@ -20,13 +20,38 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("OperationLedger", sa.Column("worker_id", sa.String(length=64), nullable=True))
-    op.add_column("OperationLedger", sa.Column("claim_token", sa.String(length=36), nullable=True))
-    op.add_column("OperationLedger", sa.Column("started_at", sa.DateTime(timezone=True), nullable=True))
-    op.add_column("OperationLedger", sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True))
-    op.create_index("ix_OperationLedger_claim_token", "OperationLedger", ["claim_token"], unique=False)
-    op.create_index("ix_OperationLedger_claim", "OperationLedger", ["status", "scheduled_at"], unique=False)
-    op.create_index("ix_OperationLedger_lease", "OperationLedger", ["status", "lease_expires_at"], unique=False)
+    op.add_column(
+        "OperationLedger", sa.Column("worker_id", sa.String(length=64), nullable=True)
+    )
+    op.add_column(
+        "OperationLedger", sa.Column("claim_token", sa.String(length=36), nullable=True)
+    )
+    op.add_column(
+        "OperationLedger",
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+    )
+    op.add_column(
+        "OperationLedger",
+        sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+    )
+    op.create_index(
+        "ix_OperationLedger_claim_token",
+        "OperationLedger",
+        ["claim_token"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_OperationLedger_claim",
+        "OperationLedger",
+        ["status", "scheduled_at"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_OperationLedger_lease",
+        "OperationLedger",
+        ["status", "lease_expires_at"],
+        unique=False,
+    )
 
 
 def downgrade() -> None:
@@ -37,4 +62,3 @@ def downgrade() -> None:
     op.drop_column("OperationLedger", "started_at")
     op.drop_column("OperationLedger", "claim_token")
     op.drop_column("OperationLedger", "worker_id")
-

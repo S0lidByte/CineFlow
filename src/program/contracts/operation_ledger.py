@@ -31,8 +31,14 @@ class OperationLedger(Base):
     __table_args__ = (
         sqlalchemy.Index("ix_OperationLedger_claim", "status", "scheduled_at"),
         sqlalchemy.Index("ix_OperationLedger_lease", "status", "lease_expires_at"),
-        sqlalchemy.Index("ix_OperationLedger_created_at_desc", sqlalchemy.text("created_at DESC")),
-        sqlalchemy.Index("ix_OperationLedger_status_created_at", "status", sqlalchemy.text("created_at DESC")),
+        sqlalchemy.Index(
+            "ix_OperationLedger_created_at_desc", sqlalchemy.text("created_at DESC")
+        ),
+        sqlalchemy.Index(
+            "ix_OperationLedger_status_created_at",
+            "status",
+            sqlalchemy.text("created_at DESC"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(sqlalchemy.String(36), primary_key=True)
@@ -47,7 +53,11 @@ class OperationLedger(Base):
         sqlalchemy.Integer, nullable=False, default=1, server_default="1"
     )
     status: Mapped[str] = mapped_column(
-        sqlalchemy.String(32), nullable=False, default="pending", server_default="pending", index=True
+        sqlalchemy.String(32),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+        index=True,
     )
     attempt_count: Mapped[int] = mapped_column(
         sqlalchemy.Integer, nullable=False, default=0, server_default="0"
@@ -56,14 +66,15 @@ class OperationLedger(Base):
         sqlalchemy.String(256), nullable=True, unique=True
     )
     scheduled_at: Mapped[datetime] = mapped_column(
-        sqlalchemy.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC), index=True
+        sqlalchemy.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        index=True,
     )
     lease_expires_at: Mapped[datetime | None] = mapped_column(
         sqlalchemy.DateTime(timezone=True), nullable=True, index=True
     )
-    worker_id: Mapped[str | None] = mapped_column(
-        sqlalchemy.String(64), nullable=True
-    )
+    worker_id: Mapped[str | None] = mapped_column(sqlalchemy.String(64), nullable=True)
     claim_token: Mapped[str | None] = mapped_column(
         sqlalchemy.String(36), nullable=True, index=True
     )
@@ -73,11 +84,17 @@ class OperationLedger(Base):
     completed_at: Mapped[datetime | None] = mapped_column(
         sqlalchemy.DateTime(timezone=True), nullable=True
     )
-    error_classification: Mapped[str | None] = mapped_column(sqlalchemy.String(64), nullable=True)
+    error_classification: Mapped[str | None] = mapped_column(
+        sqlalchemy.String(64), nullable=True
+    )
     error_message: Mapped[str | None] = mapped_column(sqlalchemy.Text, nullable=True)
-    payload: Mapped[dict[str, Any] | None] = mapped_column(sqlalchemy.JSON, nullable=True)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(
+        sqlalchemy.JSON, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
-        sqlalchemy.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+        sqlalchemy.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
     )
     updated_at: Mapped[datetime] = mapped_column(
         sqlalchemy.DateTime(timezone=True),
@@ -106,7 +123,9 @@ def enqueue_operation(
     """
     if idempotency_key:
         existing = session.execute(
-            select(OperationLedger).filter(OperationLedger.idempotency_key == idempotency_key)
+            select(OperationLedger).filter(
+                OperationLedger.idempotency_key == idempotency_key
+            )
         ).scalar_one_or_none()
         if existing is not None:
             return existing
@@ -392,4 +411,3 @@ def renew_lease(
         session.flush()
         return True
     return False
-

@@ -46,7 +46,9 @@ def test_subdl_download_failure_logging_does_not_leak_url(caplog):
 
 def test_media_stream_network_trace_redaction():
     """Verify that redact_text strips query params / tokens from network trace payloads."""
-    raw_trace_info = "GET https://real-debrid.com/d/ABCXYZ123?token=mock_auth_token_value HTTP/1.1"
+    raw_trace_info = (
+        "GET https://real-debrid.com/d/ABCXYZ123?token=mock_auth_token_value HTTP/1.1"
+    )
     safe_info = redact_text(raw_trace_info)
 
     assert "mock_auth_token_value" not in safe_info

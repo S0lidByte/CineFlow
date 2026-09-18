@@ -32,11 +32,15 @@ SENSITIVE_VALUE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     # Bearer tokens in headers/text
     re.compile(r"(?i)\b(bearer\s+)([a-zA-Z0-9_\-\.]{16,})\b"),
     # Standard query params or key=val text or key: val text
-    re.compile(r"(?i)([?&]?\b(?:api[_-]?key|apikey|token|auth[_-]?token|secret|password)\s*[:= ]\s*)([a-zA-Z0-9_\-\.]{12,})"),
+    re.compile(
+        r"(?i)([?&]?\b(?:api[_-]?key|apikey|token|auth[_-]?token|secret|password)\s*[:= ]\s*)([a-zA-Z0-9_\-\.]{12,})"
+    ),
     # Generic API key patterns in auth headers
     re.compile(r"(?i)(x-api-key\s*:\s*)([a-zA-Z0-9_\-\.]{12,})"),
     # Standard prefixed tokens (e.g. secret_*, sk_live_*, ghp_*, token_*)
-    re.compile(r"(?i)\b((?:secret|sk_live|sk_test|ghp|gho|token)_[a-zA-Z0-9_\-]{8,})\b"),
+    re.compile(
+        r"(?i)\b((?:secret|sk_live|sk_test|ghp|gho|token)_[a-zA-Z0-9_\-]{8,})\b"
+    ),
 )
 
 REDACTED_SUBSTITUTE: Final[str] = "[REDACTED]"
@@ -94,6 +98,7 @@ def redact_sensitive_data(data: Any, max_depth: int = 5) -> Any:
     resources. A container beyond the configured depth, or one that participates in
     an active reference cycle, is replaced wholesale rather than returned unredacted.
     """
+
     def _redact(value: Any, remaining_depth: int, active_containers: set[int]) -> Any:
         if isinstance(value, str):
             return redact_text(value)
@@ -119,7 +124,9 @@ def redact_sensitive_data(data: Any, max_depth: int = 5) -> Any:
             return redacted_dict
 
         seq_data = cast(Iterable[Any], value)
-        redacted_items = [_redact(item, remaining_depth - 1, next_active) for item in seq_data]
+        redacted_items = [
+            _redact(item, remaining_depth - 1, next_active) for item in seq_data
+        ]
         if isinstance(value, tuple):
             return tuple(redacted_items)
         if isinstance(value, set):

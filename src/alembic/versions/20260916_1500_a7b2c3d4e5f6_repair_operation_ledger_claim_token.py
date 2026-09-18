@@ -37,7 +37,9 @@ def _ledger_indexes() -> set[str]:
 def upgrade() -> None:
     """Repair databases stamped at the prior head without the fencing token."""
     if _COLUMN_NAME not in _ledger_columns():
-        op.add_column(_TABLE_NAME, sa.Column(_COLUMN_NAME, sa.String(length=36), nullable=True))
+        op.add_column(
+            _TABLE_NAME, sa.Column(_COLUMN_NAME, sa.String(length=36), nullable=True)
+        )
 
     if _INDEX_NAME not in _ledger_indexes():
         op.create_index(_INDEX_NAME, _TABLE_NAME, [_COLUMN_NAME], unique=False)
@@ -45,5 +47,3 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Repair migration downgrade is a no-op because claim_token is owned by e5f6a1b2c3d4."""
-
-
