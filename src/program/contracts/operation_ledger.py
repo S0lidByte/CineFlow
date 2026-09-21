@@ -411,3 +411,26 @@ def renew_lease(
         session.flush()
         return True
     return False
+
+
+def get_active_outbox_item_ids(
+    session: Session,
+    operation_type: str = "retry_library_item",
+) -> set[int]:
+    """
+    Return MediaItem IDs associated with pending or processing outbox operations.
+
+    Used for candidate exclusion prior to enqueuing new durable retry operations.
+    Note: The authoritative duplicate-prevention mechanism is the UNIQUE
+    constraint on OperationLedger.idempotency_key.
+    """
+    stmt = (
+        select(OperationLedger.media_item_id)
+        .filter(
+            OperationLedger.operation_type == operation_type,
+            OperationLedger.status.in_(["pending", "processing", "in_progress"]),
+            OperationLedger.media_item_id.is_not(None),
+        )
+    )
+    result = session.execute(stmt).scalars().all()
+    return {item_id for item_id in result if item_id is not None}
