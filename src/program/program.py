@@ -5,11 +5,13 @@ import time
 from dataclasses import dataclass
 from queue import Empty
 from tracemalloc import Snapshot
+from typing import Any
 
 from sqlalchemy import func, select, text
 
 from program.apis import bootstrap_apis
 from program.contracts.dispatcher import OutboxDispatcher
+from program.contracts.operation_ledger import OperationLedger
 from program.core.runner import Runner
 from program.db import db_functions
 from program.db.db import (
@@ -22,6 +24,7 @@ from program.db.db import (
 from program.managers.event_manager import EventManager
 from program.media.filesystem_entry import FilesystemEntry
 from program.media.item import Episode, MediaItem, Movie, Season, Show
+from program.media.state import States
 from program.scheduling import ProgramScheduler
 from program.services.content import (
     Listrr,
@@ -106,6 +109,9 @@ class Program(threading.Thread):
         self.em = EventManager()
         self.scheduler_manager = ProgramScheduler(self)
         self.outbox_dispatcher = OutboxDispatcher(self)
+        self.outbox_dispatcher.register_handler(
+            "retry_library_item", self._handle_retry_library_item
+        )
 
         if self.enable_trace:
             import tracemalloc
@@ -566,6 +572,71 @@ class Program(threading.Thread):
                             self.em.submit_job(next_service, self, event)
             except Exception:
                 logger.exception("Unhandled exception in main event loop; continuing")
+
+    def _handle_retry_library_item(
+        self, op: OperationLedger, payload: dict[str, Any]
+    ) -> None:
+        """
+        Durable outbox worker handler for 'retry_library_item' operations.
+
+        Validates media item existence and state eligibility before re-entering
+        the canonical EventManager processing pipeline.
+        """
+        raw_item_id = payload.get("item_id")
+        item_id = raw_item_id if isinstance(raw_item_id, int) else op.media_item_id
+        if not item_id:
+            logger.warning(
+                f"RetryLibrary outbox operation {op.id} missing valid item_id in payload: {payload}"
+            )
+            return
+
+        with db_session() as session:
+            item = session.get(MediaItem, item_id)
+            if not item:
+                logger.info(
+                    f"RetryLibrary: MediaItem ID {item_id} no longer exists, skipping retry."
+                )
+                return
+
+            if item.type not in ("movie", "show"):
+                logger.info(
+                    f"RetryLibrary: MediaItem {item.log_string} is type '{item.type}' (not movie/show), skipping retry."
+                )
+                return
+
+            if item.last_state in (
+                States.Completed,
+                States.Unreleased,
+                States.Paused,
+                States.Failed,
+            ):
+                logger.info(
+                    f"RetryLibrary: MediaItem {item.log_string} is in non-retryable state '{item.last_state}', skipping retry."
+                )
+                return
+
+            if item.is_parent_blocked():
+                logger.info(
+                    f"RetryLibrary: MediaItem {item.log_string} is parent blocked, skipping retry."
+                )
+                return
+
+        active_em_ids = self.em.get_active_item_ids()
+        if item_id in active_em_ids:
+            logger.info(
+                f"RetryLibrary: MediaItem ID {item_id} is already active in EventManager queue/running, skipping duplicate event."
+            )
+            return
+
+        queued = self.em.add_event(Event(emitted_by="RetryLibrary", item_id=item_id))
+        if queued:
+            logger.info(
+                f"RetryLibrary: Successfully enqueued event for MediaItem ID {item_id} via EventManager"
+            )
+        else:
+            logger.info(
+                f"RetryLibrary: EventManager skipped/deduped retry event for MediaItem ID {item_id}"
+            )
 
     def stop(self):
         if not self.initialized:

@@ -8,7 +8,7 @@ for content services and item-specific schedules.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, TypedDict
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -17,6 +17,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from program.apis.tvdb_api import SeriesRelease
+from program.contracts.dispatcher import notify_outbox_dispatcher
+from program.contracts.operation_ledger import (
+    enqueue_operation,
+    get_active_outbox_item_ids,
+)
 from program.db import db_functions
 from program.db.db import db_session, vacuum_and_analyze_index_maintenance
 from program.media.item import Episode, MediaItem, Movie, Show
@@ -159,47 +164,95 @@ class ProgramScheduler:
             )
 
     def _retry_library(self) -> None:
-        """Retry incomplete library items in bounded batches to avoid queue storms."""
+        """
+        Discover incomplete library items and enqueue them as durable outbox operations.
 
+        Migrated to durable transactional outbox: enqueues 'retry_library_item' operations
+        with windowed idempotency keys to ensure at-most-once execution per retry window.
+        """
         import time
 
         started = time.perf_counter()
         batch_size = settings_manager.settings.retry_library_batch_size
-        active_ids = self.program.em.get_active_item_ids()
-        queue_before = self.program.em.queue_depth()
+        retry_interval = max(1, settings_manager.settings.retry_interval)
+        em_active_ids = self.program.em.get_active_item_ids()
 
-        item_ids = db_functions.retry_library(
-            limit=batch_size,
-            exclude_ids=active_ids,
-        )
+        now_utc = datetime.now(UTC)
+        window_epoch = int(now_utc.timestamp() // retry_interval)
 
         enqueued = 0
         skipped = 0
-        for item_id in item_ids:
-            if self.program.em.add_event(
-                Event(emitted_by="RetryLibrary", item_id=item_id)
-            ):
-                enqueued += 1
+
+        with db_session() as session:
+            outbox_active_ids = get_active_outbox_item_ids(
+                session, "retry_library_item"
+            )
+            excluded_ids = em_active_ids | outbox_active_ids
+
+            candidate_ids = db_functions.retry_library(
+                session=session,
+                limit=batch_size,
+                exclude_ids=excluded_ids,
+            )
+
+            if candidate_ids:
+                items_query = session.execute(
+                    select(MediaItem).where(MediaItem.id.in_(candidate_ids))
+                ).scalars().all()
+                items_by_id = {item.id: item for item in items_query}
+
+                for item_id in candidate_ids:
+                    item = items_by_id.get(item_id)
+                    title = getattr(item, "title", None) if item else None
+                    item_type = getattr(item, "type", None) if item else None
+
+                    payload = {
+                        "item_id": item_id,
+                        "title": title or f"Item {item_id}",
+                        "type": item_type or "unknown",
+                        "reason": "scheduled_retry",
+                    }
+                    idempotency_key = f"retry_library_item:{item_id}:{window_epoch}"
+
+                    op = enqueue_operation(
+                        session=session,
+                        operation_type="retry_library_item",
+                        payload=payload,
+                        media_item_id=item_id,
+                        idempotency_key=idempotency_key,
+                        scheduled_at=now_utc,
+                    )
+                    if op.status == "pending" and op.attempt_count == 0:
+                        enqueued += 1
+                    else:
+                        skipped += 1
+
+                session.commit()
+
+        if enqueued > 0:
+            if getattr(self.program, "outbox_dispatcher", None):
+                try:
+                    self.program.outbox_dispatcher.notify()
+                except Exception:
+                    pass
             else:
-                skipped += 1
+                notify_outbox_dispatcher()
 
         elapsed_ms = (time.perf_counter() - started) * 1000
-        queue_after = self.program.em.queue_depth()
 
-        if item_ids:
+        if candidate_ids:
             logger.log(
                 "PROGRAM",
-                f"RetryLibrary batch: candidates={len(item_ids)} enqueued={enqueued} "
-                f"skipped={skipped} excluded_active={len(active_ids)} "
-                f"queue={queue_before}->{queue_after} batch_size={batch_size} "
-                f"elapsed_ms={elapsed_ms:.1f}",
+                f"RetryLibrary outbox batch: candidates={len(candidate_ids)} enqueued={enqueued} "
+                f"skipped={skipped} excluded_active={len(excluded_ids)} "
+                f"batch_size={batch_size} elapsed_ms={elapsed_ms:.1f}",
             )
         else:
             logger.log(
                 "NOT_FOUND",
                 f"No items required retrying "
-                f"(excluded_active={len(active_ids)} batch_size={batch_size} "
-                f"elapsed_ms={elapsed_ms:.1f})",
+                f"(excluded_active={len(em_active_ids)} outbox_active={len(outbox_active_ids)} "
+                f"batch_size={batch_size} elapsed_ms={elapsed_ms:.1f})",
             )
 
     def _get_pending_scheduled_tasks(self, session: Session) -> Sequence[ScheduledTask]:

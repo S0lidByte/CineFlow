@@ -12,37 +12,81 @@ from program.scheduling.scheduler import ProgramScheduler
 
 
 class TestRetryLibraryBatch:
+    @patch("program.scheduling.scheduler.enqueue_operation")
+    @patch("program.scheduling.scheduler.get_active_outbox_item_ids")
     @patch("program.scheduling.scheduler.db_functions.retry_library")
     @patch("program.scheduling.scheduler.settings_manager")
+    @patch("program.scheduling.scheduler.db_session")
     def test_scheduler_passes_batch_limit_and_excludes_active(
-        self, mock_settings, mock_retry_library
+        self,
+        mock_db_session,
+        mock_settings,
+        mock_retry_library,
+        mock_get_active_outbox,
+        mock_enqueue_op,
     ):
+        mock_session = MagicMock()
+
+        @contextmanager
+        def _mock_session_cm():
+            yield mock_session
+
+        mock_db_session.side_effect = _mock_session_cm
         mock_settings.settings.retry_library_batch_size = 25
+        mock_settings.settings.retry_interval = 600
+        mock_get_active_outbox.return_value = {200}
         mock_retry_library.return_value = [10, 11, 12]
+
+        mock_op = MagicMock()
+        mock_op.status = "pending"
+        mock_op.attempt_count = 0
+        mock_enqueue_op.return_value = mock_op
 
         program = MagicMock()
         program.em.get_active_item_ids.return_value = {99, 100}
-        program.em.queue_depth.side_effect = [2, 5]
-        program.em.add_event.side_effect = [True, False, True]
+        program.em.queue_depth.return_value = 2
 
         scheduler = ProgramScheduler(program)
         scheduler._retry_library()
 
         mock_retry_library.assert_called_once_with(
+            session=mock_session,
             limit=25,
-            exclude_ids={99, 100},
+            exclude_ids={99, 100, 200},
         )
-        assert program.em.add_event.call_count == 3
+        assert mock_enqueue_op.call_count == 3
         enqueued_item_ids = [
-            call.args[0].item_id for call in program.em.add_event.call_args_list
+            call.kwargs["media_item_id"] for call in mock_enqueue_op.call_args_list
         ]
         assert enqueued_item_ids == [10, 11, 12]
-        assert program.em.queue_depth.call_count == 2
+        mock_session.commit.assert_called_once()
+        program.outbox_dispatcher.notify.assert_called_once()
 
+    @patch("program.scheduling.scheduler.notify_outbox_dispatcher")
+    @patch("program.scheduling.scheduler.enqueue_operation")
+    @patch("program.scheduling.scheduler.get_active_outbox_item_ids")
     @patch("program.scheduling.scheduler.db_functions.retry_library")
     @patch("program.scheduling.scheduler.settings_manager")
-    def test_scheduler_handles_empty_batch(self, mock_settings, mock_retry_library):
+    @patch("program.scheduling.scheduler.db_session")
+    def test_scheduler_handles_empty_batch(
+        self,
+        mock_db_session,
+        mock_settings,
+        mock_retry_library,
+        mock_get_active_outbox,
+        mock_enqueue_op,
+        mock_notify_dispatcher,
+    ):
+        mock_session = MagicMock()
+
+        @contextmanager
+        def _mock_session_cm():
+            yield mock_session
+
+        mock_db_session.side_effect = _mock_session_cm
         mock_settings.settings.retry_library_batch_size = 50
+        mock_settings.settings.retry_interval = 600
+        mock_get_active_outbox.return_value = set()
         mock_retry_library.return_value = []
 
         program = MagicMock()
@@ -52,7 +96,8 @@ class TestRetryLibraryBatch:
         scheduler = ProgramScheduler(program)
         scheduler._retry_library()
 
-        program.em.add_event.assert_not_called()
+        mock_enqueue_op.assert_not_called()
+        mock_notify_dispatcher.assert_not_called()
 
 
 class TestEventManagerActiveIds:
