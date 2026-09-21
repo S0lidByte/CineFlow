@@ -196,9 +196,13 @@ class ProgramScheduler:
             )
 
             if candidate_ids:
-                items_query = session.execute(
-                    select(MediaItem).where(MediaItem.id.in_(candidate_ids))
-                ).scalars().all()
+                items_query = (
+                    session.execute(
+                        select(MediaItem).where(MediaItem.id.in_(candidate_ids))
+                    )
+                    .scalars()
+                    .all()
+                )
                 items_by_id = {item.id: item for item in items_query}
 
                 for item_id in candidate_ids:

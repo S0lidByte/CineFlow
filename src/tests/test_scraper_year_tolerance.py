@@ -26,7 +26,9 @@ def test_extract_year_various_types():
     """Verify year extraction across datetime, MediaItem, int, and missing."""
     assert _extract_year(datetime(2015, 6, 1)) == 2015
 
-    movie = Movie({"title": "Inception", "year": 2010, "aired_at": datetime(2010, 7, 16)})
+    movie = Movie(
+        {"title": "Inception", "year": 2010, "aired_at": datetime(2010, 7, 16)}
+    )
     assert _extract_year(movie) == 2010
 
     show = Show({"title": "Breaking Bad", "aired_at": datetime(2008, 1, 20)})
@@ -60,7 +62,9 @@ def test_check_item_year_multi_season_show():
     2. The season's own air year (+- 1)
     """
     # Show premiered in 2008 (Breaking Bad)
-    show = Show({"title": "Breaking Bad", "year": 2008, "aired_at": datetime(2008, 1, 20)})
+    show = Show(
+        {"title": "Breaking Bad", "year": 2008, "aired_at": datetime(2008, 1, 20)}
+    )
 
     # Season 4 aired in 2011
     season4 = Season({"number": 4, "year": 2011, "aired_at": datetime(2011, 7, 17)})
@@ -84,7 +88,9 @@ def test_check_item_year_multi_season_show():
 
 def test_check_item_year_episode():
     """Verify episode checks both episode/season air year and root show premiere year."""
-    show = Show({"title": "Better Call Saul", "year": 2015, "aired_at": datetime(2015, 2, 8)})
+    show = Show(
+        {"title": "Better Call Saul", "year": 2015, "aired_at": datetime(2015, 2, 8)}
+    )
     season3 = Season({"number": 3, "year": 2017, "aired_at": datetime(2017, 4, 10)})
     season3.parent = show
     episode5 = Episode({"number": 5, "year": 2017, "aired_at": datetime(2017, 5, 8)})
@@ -113,12 +119,17 @@ def test_resolve_scrape_aliases_synthesizes_variants():
     xx_aliases = aliases.get("xx", [])
 
     assert any("SHIELD" in a for a in xx_aliases)
-    assert any("Marvels Agents of S H I E L D" in a or "Marvels Agents of SHIELD" in a for a in xx_aliases)
+    assert any(
+        "Marvels Agents of S H I E L D" in a or "Marvels Agents of SHIELD" in a
+        for a in xx_aliases
+    )
 
 
 def test_parse_results_with_multi_season_year_tolerance():
     """Verify end-to-end parse_results accepts a season torrent tagged with the root show's premiere year."""
-    show = Show({"title": "Breaking Bad", "year": 2008, "aired_at": datetime(2008, 1, 20)})
+    show = Show(
+        {"title": "Breaking Bad", "year": 2008, "aired_at": datetime(2008, 1, 20)}
+    )
     season4 = Season({"number": 4, "year": 2011, "aired_at": datetime(2011, 7, 17)})
     season4.parent = show
 

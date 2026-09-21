@@ -3,7 +3,9 @@ import json
 import logging
 import math
 import mimetypes
+import re
 import subprocess
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Annotated
 
@@ -31,6 +33,27 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
     prefix="/stream",
     tags=["stream"],
+)
+
+DEFAULT_STREAM_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+_HEADER_NAME_REGEX = re.compile(r"^[A-Za-z0-9_-]+$")
+_DISALLOWED_FFMPEG_FORWARD_HEADERS = frozenset(
+    {
+        "authorization",
+        "connection",
+        "host",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+        "x-api-key",
+    }
 )
 
 
@@ -119,6 +142,35 @@ def _build_forward_headers(request: Request) -> dict[str, str]:
     if "range" in request.headers:
         headers["Range"] = request.headers["range"]
     return headers
+
+
+def sanitize_header_value(value: str) -> str:
+    """Remove line breaks so a value cannot inject extra HTTP headers."""
+    return value.replace("\r", "").replace("\n", "")
+
+
+def build_ffmpeg_headers(headers: Mapping[str, str] | None = None) -> str:
+    """Build a safe libavformat HTTP header block for CDN input requests.
+
+    FFmpeg expects CRLF-delimited header lines and this value must be passed with
+    ``-headers`` immediately before the relevant ``-i`` URL. Only non-sensitive,
+    end-to-end request headers can be forwarded.
+    """
+    forwarded_headers: dict[str, str] = {"User-Agent": DEFAULT_STREAM_USER_AGENT}
+
+    for name, value in (headers or {}).items():
+        normalized_name = name.lower()
+        if (
+            not _HEADER_NAME_REGEX.fullmatch(name)
+            or normalized_name in _DISALLOWED_FFMPEG_FORWARD_HEADERS
+        ):
+            continue
+
+        sanitized_value = sanitize_header_value(value)
+        if sanitized_value:
+            forwarded_headers[name] = sanitized_value
+
+    return "".join(f"{name}: {value}\r\n" for name, value in forwarded_headers.items())
 
 
 def _extract_response_headers(
@@ -224,7 +276,7 @@ async def _cleanup_ffmpeg_process(process: asyncio.subprocess.Process) -> None:
         await process.wait()
 
 
-def _get_video_duration(path: str) -> float:
+def _get_video_duration(path: str, headers: Mapping[str, str] | None = None) -> float:
     try:
         result = subprocess.run(
             [
@@ -235,6 +287,9 @@ def _get_video_duration(path: str) -> float:
                 "format=duration",
                 "-of",
                 "default=noprint_wrappers=1:nokey=1",
+                "-headers",
+                build_ffmpeg_headers(headers),
+                "-i",
                 path,
             ],
             check=False,
@@ -254,6 +309,7 @@ def _get_video_duration(path: str) -> float:
 @router.get("/hls/{item_id}/index.m3u8")
 async def get_hls_playlist(
     item_id: int,
+    request: Request,
     # Default to None = Keep Original
     pix_fmt: str | None = None,
     video_profile: str | None = Query(None, alias="profile"),
@@ -267,7 +323,7 @@ async def get_hls_playlist(
         resolution=resolution,
     )
     url, _provider, _filename = _get_media_info(item_id)
-    duration = _get_video_duration(url)
+    duration = _get_video_duration(url, request.headers)
 
     segment_duration = 12
     if duration == 0:
@@ -315,6 +371,7 @@ async def get_hls_playlist(
 async def get_hls_segment(
     item_id: int,
     seq: int,
+    request: Request,
     pix_fmt: str | None = None,
     video_profile: str | None = Query(None, alias="profile"),
     level: str | None = None,
@@ -340,6 +397,8 @@ async def get_hls_segment(
         str(start_time),
         "-t",
         str(segment_duration),
+        "-headers",
+        build_ffmpeg_headers(request.headers),
         "-i",
         url,
     ]

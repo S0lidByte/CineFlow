@@ -87,9 +87,15 @@ def test_db(monkeypatch):
     monkeypatch.setattr("program.program.db_session", _test_session)
     monkeypatch.setattr("program.scheduling.scheduler.db_session", _test_session)
     monkeypatch.setattr("program.managers.event_manager.db_session", _test_session)
-    monkeypatch.setattr("program.contracts.operation_ledger.db_session", _test_session, raising=False)
-    monkeypatch.setattr("program.contracts.dispatcher.db_session", _test_session, raising=False)
-    monkeypatch.setattr("program.db.db_functions.db_session", _test_session, raising=False)
+    monkeypatch.setattr(
+        "program.contracts.operation_ledger.db_session", _test_session, raising=False
+    )
+    monkeypatch.setattr(
+        "program.contracts.dispatcher.db_session", _test_session, raising=False
+    )
+    monkeypatch.setattr(
+        "program.db.db_functions.db_session", _test_session, raising=False
+    )
 
     try:
         yield TestingSession, _test_session
@@ -209,7 +215,11 @@ def test_candidate_selection_eligibility(test_db):
         assert len(candidates) == 3
 
         # Verify ordering: newest requested_at first (movie_newest, movie_eligible, show_eligible)
-        assert list(candidates) == [movie_newest.id, movie_eligible.id, show_eligible.id]
+        assert list(candidates) == [
+            movie_newest.id,
+            movie_eligible.id,
+            show_eligible.id,
+        ]
 
         # Verify batch limit
         limited_candidates = db_functions.retry_library(session=session, limit=2)
@@ -294,7 +304,9 @@ def test_active_exclusions(test_db):
         excluded_ids = em_active_ids | outbox_active_ids
         assert excluded_ids == {movie1.id, movie2.id, movie3.id}
 
-        candidates = db_functions.retry_library(session=session, exclude_ids=excluded_ids)
+        candidates = db_functions.retry_library(
+            session=session, exclude_ids=excluded_ids
+        )
         # Items 4, 5, 6 are eligible
         assert set(candidates) == {movie4.id, movie5.id, movie6.id}
 
@@ -336,9 +348,15 @@ def test_windowed_idempotency_duplicate_prevention(test_db):
         assert op1.id == op2.id
 
         # Verify DB has exactly 1 row
-        count = session.execute(
-            select(OperationLedger).filter(OperationLedger.idempotency_key == idempotency_key)
-        ).scalars().all()
+        count = (
+            session.execute(
+                select(OperationLedger).filter(
+                    OperationLedger.idempotency_key == idempotency_key
+                )
+            )
+            .scalars()
+            .all()
+        )
         assert len(count) == 1
 
 
@@ -377,9 +395,15 @@ def test_concurrent_enqueue_idempotency(test_db):
     # Verify at least one succeeded and exactly 1 operation exists in DB
     session = TestingSession()
     try:
-        rows = session.execute(
-            select(OperationLedger).filter(OperationLedger.idempotency_key == idempotency_key)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(OperationLedger).filter(
+                    OperationLedger.idempotency_key == idempotency_key
+                )
+            )
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1
         assert rows[0].media_item_id == 999
     finally:
@@ -421,7 +445,9 @@ def test_dispatcher_execution_and_handler_reentry(test_db, monkeypatch):
     )
 
     # Attach the real handler logic to program and register it with dispatcher
-    def _handle_retry_library_item(op: OperationLedger, payload: dict[str, Any]) -> None:
+    def _handle_retry_library_item(
+        op: OperationLedger, payload: dict[str, Any]
+    ) -> None:
         Program._handle_retry_library_item(program, op, payload)
 
     dispatcher.register_handler("retry_library_item", _handle_retry_library_item)
@@ -496,13 +522,23 @@ def test_handler_stale_deleted_and_terminal_items(test_db):
         id_active = movie_active.id
 
     # 1. Deleted item (item_id 999999 does not exist)
-    op_deleted = OperationLedger(id="op-1", correlation_id="c1", media_item_id=999999, operation_type="retry_library_item")
+    op_deleted = OperationLedger(
+        id="op-1",
+        correlation_id="c1",
+        media_item_id=999999,
+        operation_type="retry_library_item",
+    )
     Program._handle_retry_library_item(program, op_deleted, {"item_id": 999999})
     assert len(program.em._queued_events) == 0
 
     # 2. Terminal items (Completed, Paused, Failed)
     for term_id in [id_completed, id_paused, id_failed]:
-        op_term = OperationLedger(id=f"op-{term_id}", correlation_id="c1", media_item_id=term_id, operation_type="retry_library_item")
+        op_term = OperationLedger(
+            id=f"op-{term_id}",
+            correlation_id="c1",
+            media_item_id=term_id,
+            operation_type="retry_library_item",
+        )
         Program._handle_retry_library_item(program, op_term, {"item_id": term_id})
         assert len(program.em._queued_events) == 0
 
@@ -510,7 +546,12 @@ def test_handler_stale_deleted_and_terminal_items(test_db):
     program.em.add_event(Event(emitted_by="Existing", item_id=id_active))
     assert len(program.em._queued_events) == 1
 
-    op_active = OperationLedger(id=f"op-{id_active}", correlation_id="c1", media_item_id=id_active, operation_type="retry_library_item")
+    op_active = OperationLedger(
+        id=f"op-{id_active}",
+        correlation_id="c1",
+        media_item_id=id_active,
+        operation_type="retry_library_item",
+    )
     Program._handle_retry_library_item(program, op_active, {"item_id": id_active})
     # Count should remain 1 (no duplicate queued)
     assert len(program.em._queued_events) == 1
@@ -561,7 +602,11 @@ def test_transient_error_handling_and_backoff(test_db):
         while time.time() < deadline:
             with db_session_cm() as session:
                 rec = session.get(OperationLedger, op_id)
-                if rec and rec.attempt_count >= 1 and rec.error_classification == "ProviderRateLimitError":
+                if (
+                    rec
+                    and rec.attempt_count >= 1
+                    and rec.error_classification == "ProviderRateLimitError"
+                ):
                     break
             time.sleep(0.05)
 
@@ -672,9 +717,15 @@ def test_scheduler_retry_library_enqueues_durable_operations(test_db, monkeypatc
 
     # Verify operations were enqueued in database
     with db_session_cm() as session:
-        ops = session.execute(
-            select(OperationLedger).filter(OperationLedger.operation_type == "retry_library_item")
-        ).scalars().all()
+        ops = (
+            session.execute(
+                select(OperationLedger).filter(
+                    OperationLedger.operation_type == "retry_library_item"
+                )
+            )
+            .scalars()
+            .all()
+        )
 
         assert len(ops) == 2
         op_item_ids = {op.media_item_id for op in ops}
@@ -688,8 +739,13 @@ def test_scheduler_retry_library_enqueues_durable_operations(test_db, monkeypatc
     scheduler._retry_library()
 
     with db_session_cm() as session:
-        ops_after = session.execute(
-            select(OperationLedger).filter(OperationLedger.operation_type == "retry_library_item")
-        ).scalars().all()
+        ops_after = (
+            session.execute(
+                select(OperationLedger).filter(
+                    OperationLedger.operation_type == "retry_library_item"
+                )
+            )
+            .scalars()
+            .all()
+        )
         assert len(ops_after) == 2
-
