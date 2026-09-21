@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.36.0](https://github.com/S0lidByte/CineFlow/compare/v1.35.0...v1.36.0) (2026-09-21)
+
+
+### Features
+
+* **scheduler:** outbox-powered periodic auto-retry dispatcher ([59bde07](https://github.com/S0lidByte/CineFlow/commit/59bde071a58df46c505c53bd674a9ed65615d63c))
+
 ## [1.35.0](https://github.com/S0lidByte/CineFlow/compare/v1.34.2...v1.35.0) (2026-09-18)
 
 
