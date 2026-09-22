@@ -1538,10 +1538,15 @@ async def auto_scrape(
                 logger.warning("No matching seasons found in DB for requested numbers")
                 raise HTTPException(status_code=404, detail="No matching seasons found")
 
-            # 1. Update states first (Unpause selected, Pause unselected)
+            # 1. Update states first (Unpause/reset selected, Pause unselected)
             for season in seasons_to_scrape:
                 if season.last_state == States.Paused:
                     logger.info(f"Unpausing season {season.number}")
+                    season.last_state = States.Unknown
+                    session.merge(season)
+                elif season.last_state == States.Failed:
+                    logger.info(f"Resetting failed season {season.number}")
+                    season.failed_attempts = 0
                     season.last_state = States.Unknown
                     session.merge(season)
 
@@ -1562,7 +1567,7 @@ async def auto_scrape(
                         status_code=404, detail="No matching episodes found"
                     )
 
-                # Unpause the selected episodes. For whole-season requests, every episode
+                # Unpause or reset the selected episodes. For whole-season requests, every episode
                 # in the selected season remains eligible.
                 for episode in season.episodes:
                     if (
@@ -1571,6 +1576,11 @@ async def auto_scrape(
                     ):
                         if episode.last_state == States.Paused:
                             restore_state_after_pause(episode)
+                            session.merge(episode)
+                        elif episode.last_state == States.Failed:
+                            logger.info(f"Resetting failed episode {episode.number}")
+                            episode.failed_attempts = 0
+                            episode.last_state = States.Unknown
                             session.merge(episode)
                     elif episode.state not in (
                         States.Downloaded,
