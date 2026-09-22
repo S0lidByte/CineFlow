@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.36.1](https://github.com/S0lidByte/CineFlow/compare/v1.36.0...v1.36.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* **stream:** forward sanitized headers to ffmpeg and ffprobe for cdn streams ([13866f3](https://github.com/S0lidByte/CineFlow/commit/13866f3c1af91486dfea8ad7956c30c80116779a))
+
 ## [1.36.0](https://github.com/S0lidByte/CineFlow/compare/v1.35.0...v1.36.0) (2026-09-21)
 
 
