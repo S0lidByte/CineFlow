@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.36.2](https://github.com/S0lidByte/CineFlow/compare/v1.36.1...v1.36.2) (2026-09-22)
+
+
+### Bug Fixes
+
+* **scrape:** reset failed attempts and unpause state when auto-scraping requested seasons ([90976e6](https://github.com/S0lidByte/CineFlow/commit/90976e6b109005cb974c284021dd8ae1e18d15dc))
+
 ## [1.36.1](https://github.com/S0lidByte/CineFlow/compare/v1.36.0...v1.36.1) (2026-09-21)
 
 
