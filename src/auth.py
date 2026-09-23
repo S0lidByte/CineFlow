@@ -46,7 +46,11 @@ def api_key_matches(provided: str | None) -> bool:
 def _bff_api_key_matches(provided: str | None) -> bool:
     """Constant-time compare against the BFF-only backend credential."""
 
-    expected = os.getenv("BFF_API_KEY", "")
+    expected = (
+        os.getenv("CINEFLOW_BFF_API_KEY")
+        or os.getenv("BFF_API_KEY")
+        or os.getenv("RIVEN_BFF_API_KEY", "")
+    )
     if not provided or not expected:
         return False
     return hmac.compare_digest(provided, expected)

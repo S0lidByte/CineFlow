@@ -13,12 +13,51 @@ from program.settings.models import AppModel, Observable
 from program.utils import data_dir_path
 
 
+def _resolve_settings_filename() -> str:
+    """Resolve the settings filename with CineFlow precedence:
+    1. CINEFLOW_SETTINGS_FILENAME env var
+    2. SETTINGS_FILENAME env var (deprecated fallback)
+    3. data_dir_path / 'cineflow.json' if it exists on disk
+    4. data_dir_path / 'settings.json' if it exists on disk
+    5. Default to 'settings.json'
+    """
+    cineflow_env = os.environ.get("CINEFLOW_SETTINGS_FILENAME")
+    if cineflow_env and cineflow_env.strip():
+        return cineflow_env.strip()
+
+    settings_env = os.environ.get("SETTINGS_FILENAME")
+    if settings_env and settings_env.strip():
+        logger.debug(
+            "SETTINGS_FILENAME environment variable is deprecated; prefer CINEFLOW_SETTINGS_FILENAME"
+        )
+        return settings_env.strip()
+
+    if (data_dir_path / "cineflow.json").exists():
+        return "cineflow.json"
+    if (data_dir_path / "settings.json").exists():
+        return "settings.json"
+
+    return "settings.json"
+
+
+def is_force_env_enabled() -> bool:
+    """Check if environment variable overriding is forced, with CineFlow precedence."""
+    cineflow_force = os.environ.get("CINEFLOW_FORCE_ENV")
+    if cineflow_force is not None:
+        return cineflow_force.strip().lower() == "true"
+    riven_force = os.environ.get("RIVEN_FORCE_ENV")
+    if riven_force is not None:
+        logger.debug("RIVEN_FORCE_ENV is deprecated; prefer CINEFLOW_FORCE_ENV")
+        return riven_force.strip().lower() == "true"
+    return False
+
+
 class SettingsManager:
     """Class that handles settings, ensuring they are validated against a Pydantic schema."""
 
     def __init__(self):
         self.observers = list[Callable[[], Any]]()
-        self.filename = os.environ.get("SETTINGS_FILENAME", "settings.json")
+        self.filename = _resolve_settings_filename()
         self.settings_file = data_dir_path / self.filename
         self._overrides_ctx: contextvars.ContextVar[dict[str, Any] | None] = (
             contextvars.ContextVar("settings_overrides", default=None)
@@ -36,7 +75,8 @@ class SettingsManager:
             self.settings = AppModel.model_validate(
                 self.check_environment(
                     self.settings.model_dump(),
-                    "RIVEN",
+                    prefix="CINEFLOW",
+                    fallback_prefix="RIVEN",
                 )
             )
 
@@ -59,24 +99,45 @@ class SettingsManager:
     def check_environment(
         self,
         settings: dict[str, Any],
-        prefix: str = "",
+        prefix: str = "CINEFLOW",
         separator: str = "_",
+        fallback_prefix: str = "RIVEN",
     ):
         checked_settings = dict[str, Any]()
 
         for key, value in settings.items():
             if isinstance(value, dict):
+                sub_prefix = f"{prefix}{separator}{key}" if prefix else key
+                sub_fallback = (
+                    f"{fallback_prefix}{separator}{key}" if fallback_prefix else key
+                )
                 sub_checked_settings = self.check_environment(
                     settings=cast(dict[str, Any], value),
-                    prefix=f"{prefix}{separator}{key}",
+                    prefix=sub_prefix,
+                    separator=separator,
+                    fallback_prefix=sub_fallback,
                 )
                 checked_settings[key] = sub_checked_settings
             else:
-                environment_variable = f"{prefix}_{key}".upper()
+                primary_var = f"{prefix}_{key}".upper() if prefix else key.upper()
+                fallback_var = (
+                    f"{fallback_prefix}_{key}".upper() if fallback_prefix else None
+                )
 
-                if os.getenv(environment_variable, None):
-                    new_value = os.getenv(environment_variable)
+                new_value = None
+                env_source = None
 
+                if os.getenv(primary_var) is not None:
+                    new_value = os.getenv(primary_var)
+                    env_source = primary_var
+                elif fallback_var and os.getenv(fallback_var) is not None:
+                    new_value = os.getenv(fallback_var)
+                    env_source = fallback_var
+                    logger.debug(
+                        f"Deprecated environment variable {fallback_var} detected; prefer {primary_var}"
+                    )
+
+                if env_source is not None:
                     if new_value is None:
                         checked_settings[key] = value
                     elif isinstance(value, bool):
@@ -91,7 +152,7 @@ class SettingsManager:
                         checked_settings[key] = json.loads(new_value)
                     elif isinstance(value, list):
                         logger.error(
-                            f"Environment variable {environment_variable} for list type must be a JSON array string. Got {new_value}."
+                            f"Environment variable {env_source} for list type must be a JSON array string. Got {new_value}."
                         )
                     else:
                         checked_settings[key] = new_value
@@ -117,13 +178,11 @@ class SettingsManager:
                 with open(self.settings_file, "r", encoding="utf-8") as file:
                     settings_dict = json.loads(file.read())
 
-                    if (
-                        settings_dict
-                        and os.environ.get("RIVEN_FORCE_ENV", "false").lower() == "true"
-                    ):
+                    if settings_dict and is_force_env_enabled():
                         settings_dict = self.check_environment(
                             settings_dict,
-                            "RIVEN",
+                            prefix="CINEFLOW",
+                            fallback_prefix="RIVEN",
                         )
 
             self.settings = AppModel.model_validate(settings_dict)

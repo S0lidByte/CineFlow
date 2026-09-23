@@ -30,8 +30,13 @@ def setup_logger(
 
     # Helper function to get log settings from environment or use default
     def get_log_settings(name: str, default_color: str, default_icon: str):
-        color = os.getenv(f"RIVEN_LOGGER_{name}_FG", default_color)
-        icon = os.getenv(f"RIVEN_LOGGER_{name}_ICON", default_icon)
+        color = os.getenv(f"CINEFLOW_LOGGER_{name}_FG")
+        if color is None:
+            color = os.getenv(f"RIVEN_LOGGER_{name}_FG", default_color)
+
+        icon = os.getenv(f"CINEFLOW_LOGGER_{name}_ICON")
+        if icon is None:
+            icon = os.getenv(f"RIVEN_LOGGER_{name}_ICON", default_icon)
 
         return f"<fg #{color if color != '' else default_color}>", (
             icon if icon != "" else default_icon

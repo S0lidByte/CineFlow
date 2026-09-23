@@ -169,24 +169,31 @@ def vacuum_and_analyze_index_maintenance() -> None:
 def db_reset_allowed() -> bool:
     """Return True when an explicit env flag permits destructive DB reset."""
 
-    return os.getenv("RIVEN_ALLOW_DB_RESET", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-    )
+    cineflow_flag = os.getenv("CINEFLOW_ALLOW_DB_RESET")
+    if cineflow_flag is not None:
+        return cineflow_flag.strip().lower() in ("1", "true", "yes")
+
+    riven_flag = os.getenv("RIVEN_ALLOW_DB_RESET")
+    if riven_flag is not None:
+        logger.debug(
+            "RIVEN_ALLOW_DB_RESET is deprecated; prefer CINEFLOW_ALLOW_DB_RESET"
+        )
+        return riven_flag.strip().lower() in ("1", "true", "yes")
+
+    return False
 
 
 def reset_database():
     """Reset the database by dropping and recreating the public schema.
 
-    Requires ``RIVEN_ALLOW_DB_RESET=1`` (or true/yes) to proceed. This prevents
+    Requires ``CINEFLOW_ALLOW_DB_RESET=1`` (or ``RIVEN_ALLOW_DB_RESET=1``) to proceed. This prevents
     accidental data loss when an unfamiliar alembic revision is detected.
     """
 
     if not db_reset_allowed():
         logger.error(
             "Database reset blocked: unfamiliar alembic revision would DROP SCHEMA. "
-            "Set RIVEN_ALLOW_DB_RESET=1 to allow a one-time destructive upgrade."
+            "Set CINEFLOW_ALLOW_DB_RESET=1 (or RIVEN_ALLOW_DB_RESET=1) to allow a one-time destructive upgrade."
         )
         return False
 

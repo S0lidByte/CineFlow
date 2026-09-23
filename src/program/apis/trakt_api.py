@@ -73,13 +73,15 @@ class TraktAPI:
         Preference order matches what operators configure in Settings:
         1. ``content.trakt.api_key`` (UI "Api Key" — must be Client ID)
         2. ``content.trakt.oauth.oauth_client_id``
-        3. ``TRAKT_API_CLIENT_ID`` env
+        3. ``CINEFLOW_TRAKT_API_CLIENT_ID`` / ``TRAKT_API_CLIENT_ID`` / ``RIVEN_TRAKT_API_CLIENT_ID`` env
         4. baked-in legacy default
         """
         for candidate in (
             (settings.api_key or "").strip(),
             (settings.oauth.oauth_client_id or "").strip(),
+            (os.environ.get("CINEFLOW_TRAKT_API_CLIENT_ID") or "").strip(),
             (os.environ.get("TRAKT_API_CLIENT_ID") or "").strip(),
+            (os.environ.get("RIVEN_TRAKT_API_CLIENT_ID") or "").strip(),
         ):
             if candidate:
                 return candidate
