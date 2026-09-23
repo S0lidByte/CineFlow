@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.38.0](https://github.com/S0lidByte/CineFlow/compare/v1.37.0...v1.38.0) (2026-09-23)
+
+
+### Features
+
+* **config:** support CINEFLOW_* environment variables and dual settings resolution (REBRAND-001) ([4b543b3](https://github.com/S0lidByte/CineFlow/commit/4b543b39615f5ee1fcffa4b74dc30ca5e2e18662))
+* **items:** add deterministic keyset cursor pagination with backward compatibility ([eafdeec](https://github.com/S0lidByte/CineFlow/commit/eafdeecad4fa262c06665ebc7edfe465273c9752))
+
+
+### Bug Fixes
+
+* **scraping:** accept future broadcast years for multi-season TV series ([4e065aa](https://github.com/S0lidByte/CineFlow/commit/4e065aa6c057ddd9d396770fc42110fbadb356b4))
+
 ## [1.37.0](https://github.com/S0lidByte/CineFlow/compare/v1.36.2...v1.37.0) (2026-09-23)
 
 
