@@ -1,7 +1,9 @@
+import base64
 import hashlib
+import json
 import os
 from collections.abc import Callable, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Annotated, Any, Literal, Self, cast
 
@@ -280,8 +282,10 @@ class ItemsResponse(BaseModel):
     ]
     page: Annotated[
         int,
-        Field(description="Current page number"),
-    ]
+        Field(
+            description="Current page number (null or inferred in pure cursor pagination)"
+        ),
+    ] = 1
     limit: Annotated[
         int,
         Field(description="Number of items per page"),
@@ -294,6 +298,71 @@ class ItemsResponse(BaseModel):
         int,
         Field(description="Total number of pages"),
     ]
+    next_cursor: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Opaque cursor to fetch the next page of results",
+        ),
+    ] = None
+    prev_cursor: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Opaque cursor to fetch the previous page of results",
+        ),
+    ] = None
+    has_more: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="Indicates whether more items exist beyond the current cursor",
+        ),
+    ] = False
+
+
+def _encode_cursor(sort_key: str, sort_value: Any, item_id: int) -> str:
+    """Encode keyset attributes into a safe base64 opaque cursor token."""
+    if isinstance(sort_value, datetime):
+        val_str = sort_value.isoformat()
+    elif sort_value is None:
+        val_str = ""
+    else:
+        val_str = str(sort_value)
+
+    payload = {
+        "k": sort_key,
+        "v": val_str,
+        "id": item_id,
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _decode_cursor(cursor_str: str) -> dict[str, Any]:
+    """Decode and validate a base64 opaque cursor token."""
+    try:
+        raw = base64.urlsafe_b64decode(cursor_str.encode("ascii"))
+        payload: Any = json.loads(raw.decode("utf-8"))
+        if (
+            not isinstance(payload, dict)
+            or "k" not in payload
+            or "v" not in payload
+            or "id" not in payload
+        ):
+            raise ValueError("Malformed cursor payload")
+        result: dict[str, Any] = cast(dict[str, Any], payload)
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid pagination cursor: {e}",
+        ) from e
+
+
+class DirectionEnum(str, Enum):
+    NEXT = "next"
+    PREV = "prev"
 
 
 class StatesFilter(str, Enum):
@@ -303,7 +372,7 @@ class StatesFilter(str, Enum):
 @router.get(
     "",
     summary="Search Media Items",
-    description="Fetch media items with optional filters and pagination",
+    description="Fetch media items with optional filters, offset pagination, or high-performance cursor pagination",
     operation_id="get_items",
     response_model=ItemsResponse,
 )
@@ -318,10 +387,22 @@ async def get_items(
     page: Annotated[
         int,
         Query(
-            description="Page number",
+            description="Page number (used for offset pagination when cursor is not provided)",
             ge=1,
         ),
     ] = 1,
+    cursor: Annotated[
+        str | None,
+        Query(
+            description="Opaque cursor token for keyset pagination",
+        ),
+    ] = None,
+    direction: Annotated[
+        DirectionEnum,
+        Query(
+            description="Pagination traversal direction ('next' or 'prev')",
+        ),
+    ] = DirectionEnum.NEXT,
     type: Annotated[
         list[MediaTypeEnum] | None,
         Query(description="Filter by media type(s)"),
@@ -409,6 +490,7 @@ async def get_items(
         elif media_types:
             query = query.where(MediaItem.type.in_(media_types))
 
+    primary_sort = SortOrderEnum.DATE_DESC
     if sort:
         # Verify we don't have multiple sorts of the same type
         sort_types = set[str]()
@@ -423,55 +505,158 @@ async def get_items(
                 )
 
             sort_types.add(sort_type)
+        primary_sort = sort[0]
 
-        for sort_criterion in sort:
-            if sort_criterion == SortOrderEnum.TITLE_ASC:
-                query = query.order_by(MediaItem.title.asc())
-            elif sort_criterion == SortOrderEnum.TITLE_DESC:
-                query = query.order_by(MediaItem.title.desc())
-            elif sort_criterion == SortOrderEnum.DATE_ASC:
-                query = query.order_by(MediaItem.requested_at.asc())
-            elif sort_criterion == SortOrderEnum.DATE_DESC:
-                query = query.order_by(MediaItem.requested_at.desc())
+    # Keyset order column definition
+    # Sort order determine order clauses and comparison operator for cursor
+    is_date_sort = primary_sort in (SortOrderEnum.DATE_ASC, SortOrderEnum.DATE_DESC)
+    is_descending = primary_sort in (SortOrderEnum.DATE_DESC, SortOrderEnum.TITLE_DESC)
+    sort_key = "date" if is_date_sort else "title"
 
+    # Base query for counting before cursor predicates are attached
+    count_query = query
+
+    if cursor is not None:
+        cursor_data = _decode_cursor(cursor)
+        c_k = cursor_data.get("k")
+        c_v = cursor_data.get("v")
+        c_id = cursor_data.get("id")
+
+        if c_k != sort_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cursor sort key '{c_k}' does not match requested sort '{sort_key}'",
+            )
+
+        if is_date_sort:
+            try:
+                parsed_dt = (
+                    datetime.fromisoformat(c_v)
+                    if c_v
+                    else datetime.min.replace(tzinfo=UTC)
+                )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid date cursor value: {e}",
+                ) from e
+
+            # Forward (next) with DESC order: item.requested_at < c_dt OR (item.requested_at == c_dt AND item.id < c_id)
+            # Backward (prev) with DESC order: item.requested_at > c_dt OR (item.requested_at == c_dt AND item.id > c_id)
+            # Forward (next) with ASC order: item.requested_at > c_dt OR (item.requested_at == c_dt AND item.id > c_id)
+            # Backward (prev) with ASC order: item.requested_at < c_dt OR (item.requested_at == c_dt AND item.id < c_id)
+            forward_condition = (
+                is_descending if direction == DirectionEnum.NEXT else not is_descending
+            )
+            if forward_condition:
+                query = query.where(
+                    (MediaItem.requested_at < parsed_dt)
+                    | ((MediaItem.requested_at == parsed_dt) & (MediaItem.id < c_id))
+                )
+            else:
+                query = query.where(
+                    (MediaItem.requested_at > parsed_dt)
+                    | ((MediaItem.requested_at == parsed_dt) & (MediaItem.id > c_id))
+                )
+        else:
+            title_val = str(c_v or "")
+            forward_condition = (
+                is_descending if direction == DirectionEnum.NEXT else not is_descending
+            )
+            if forward_condition:
+                query = query.where(
+                    (MediaItem.title < title_val)
+                    | ((MediaItem.title == title_val) & (MediaItem.id < c_id))
+                )
+            else:
+                query = query.where(
+                    (MediaItem.title > title_val)
+                    | ((MediaItem.title == title_val) & (MediaItem.id > c_id))
+                )
+
+    # Apply ordering with primary key tiebreaker
+    effective_desc = (
+        is_descending if direction == DirectionEnum.NEXT else not is_descending
+    )
+    if is_date_sort:
+        if effective_desc:
+            query = query.order_by(MediaItem.requested_at.desc(), MediaItem.id.desc())
+        else:
+            query = query.order_by(MediaItem.requested_at.asc(), MediaItem.id.asc())
+    elif effective_desc:
+        query = query.order_by(MediaItem.title.desc(), MediaItem.id.desc())
     else:
-        query = query.order_by(MediaItem.requested_at.desc())
+        query = query.order_by(MediaItem.title.asc(), MediaItem.id.asc())
 
     with db_session() as session:
-        # Cache the count query for 5 seconds to avoid expensive double round-trips on every page
-        # Use a safe hash of the query string representation as cache key
-        # (literal_binds=True crashes on bound parameter lists)
-        cache_key = hashlib.sha256(str(query.whereclause).encode()).hexdigest()
+        cache_key = hashlib.sha256(str(count_query.whereclause).encode()).hexdigest()
 
         if cache_key in _get_items_count_cache:
             total_items = _get_items_count_cache[cache_key]
         else:
             total_items = int(
                 session.execute(
-                    select(func.count()).select_from(query.subquery())
+                    select(func.count()).select_from(count_query.subquery())
                 ).scalar_one()
             )
             _get_items_count_cache[cache_key] = total_items
 
-        items = (
-            session.execute(query.offset((page - 1) * limit).limit(limit))
-            .unique()
-            .scalars()
-            .all()
-        )
+        total_pages = (total_items + limit - 1) // limit if limit > 0 else 1
 
-        total_pages = (total_items + limit - 1) // limit
+        raw_items: Sequence[MediaItem]
+        if cursor is not None or limit > 0:
+            # Fetch limit + 1 items to determine if has_more is true
+            fetch_limit = limit + 1
+            if cursor is None:
+                # Standard offset pagination fallback
+                offset_val = (page - 1) * limit
+                raw_items = (
+                    session.execute(query.offset(offset_val).limit(fetch_limit))
+                    .unique()
+                    .scalars()
+                    .all()
+                )
+            else:
+                raw_items = (
+                    session.execute(query.limit(fetch_limit)).unique().scalars().all()
+                )
+        else:
+            raw_items = []
+
+        has_more = len(raw_items) > limit
+        result_items: list[MediaItem] = list(raw_items[:limit])
+
+        # If we fetched backwards for PREV direction, reverse the slice back to standard order
+        if direction == DirectionEnum.PREV and cursor is not None:
+            result_items.reverse()
+
+        next_cursor = None
+        prev_cursor = None
+
+        if result_items:
+            first_item = result_items[0]
+            last_item = result_items[-1]
+
+            first_val = first_item.requested_at if is_date_sort else first_item.title
+            last_val = last_item.requested_at if is_date_sort else last_item.title
+
+            prev_cursor = _encode_cursor(sort_key, first_val, first_item.id)
+            if has_more or cursor is not None:
+                next_cursor = _encode_cursor(sort_key, last_val, last_item.id)
 
         return ItemsResponse(
             success=True,
             items=[
                 item.to_extended_dict() if extended else item.to_dict()
-                for item in items
+                for item in result_items
             ],
             page=page,
             limit=limit,
             total_items=total_items,
             total_pages=total_pages,
+            next_cursor=next_cursor if has_more else None,
+            prev_cursor=prev_cursor if cursor is not None else None,
+            has_more=has_more,
         )
 
 
