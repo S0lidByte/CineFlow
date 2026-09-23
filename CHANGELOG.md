@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.37.0](https://github.com/S0lidByte/CineFlow/compare/v1.36.2...v1.37.0) (2026-09-23)
+
+
+### Features
+
+* **telemetry:** implement in-memory playback telemetry collector, VFS lifecycle hooks, and REST/SSE endpoints ([1520db4](https://github.com/S0lidByte/CineFlow/commit/1520db458ecfa3a39ac633f21c6592f72bf0a09f))
+
 ## [1.36.2](https://github.com/S0lidByte/CineFlow/compare/v1.36.1...v1.36.2) (2026-09-22)
 
 
