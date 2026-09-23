@@ -1074,10 +1074,23 @@ class MediaStream:
 
                 match read_type:
                     case "cache_hit":
-                        return await self._read_cached_or_fallback(
+                        data = await self._read_cached_or_fallback(
                             start=request_start,
                             end=request_end,
                         )
+                        try:
+                            from program.services.streaming.telemetry import (
+                                playback_telemetry_collector,
+                            )
+
+                            playback_telemetry_collector.record_stream_read(
+                                stream_id=f"{self.file_metadata.path}:{self.fh}",
+                                nbytes=len(data),
+                                from_cache=True,
+                            )
+                        except Exception:
+                            pass
+                        return data
                     case "header_scan":
                         return await self.scan_header(
                             read_position=request_start,
@@ -1102,7 +1115,20 @@ class MediaStream:
                     case "body_read":
                         self.session_statistics.body_read_count += 1
                         self.session_statistics.last_body_read_timestamp = monotonic()
-                        return await self.read_bytes(chunk_range=read_range)
+                        data = await self.read_bytes(chunk_range=read_range)
+                        try:
+                            from program.services.streaming.telemetry import (
+                                playback_telemetry_collector,
+                            )
+
+                            playback_telemetry_collector.record_stream_read(
+                                stream_id=f"{self.file_metadata.path}:{self.fh}",
+                                nbytes=len(data),
+                                from_cache=False,
+                            )
+                        except Exception:
+                            pass
+                        return data
                     case _:
                         # This should never happen due to prior validation
                         raise RuntimeError("Unknown read type")
@@ -1765,6 +1791,21 @@ class MediaStream:
                         f"Refreshed URL from provider for {self.file_metadata.original_filename}"
                     )
                     self.target_url.value = fresh_url
+                    try:
+                        from program.services.streaming.telemetry import (
+                            playback_telemetry_collector,
+                        )
+
+                        playback_telemetry_collector.record_cdn_refresh(
+                            stream_id=f"{self.file_metadata.path}:{self.fh}",
+                            title=self.file_metadata.path.split("/")[-1],
+                            details={
+                                "provider": self.provider,
+                                "original_filename": self.file_metadata.original_filename,
+                            },
+                        )
+                    except Exception:
+                        pass
                     return True
 
             return False

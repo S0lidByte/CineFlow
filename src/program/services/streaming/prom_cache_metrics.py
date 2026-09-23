@@ -57,10 +57,22 @@ def record_hit(nbytes: int = 0) -> None:
     HITS.inc()
     if nbytes > 0:
         BYTES_FROM_CACHE.inc(nbytes)
+    try:
+        from program.services.streaming.telemetry import playback_telemetry_collector
+
+        playback_telemetry_collector.record_cache_hit(nbytes=nbytes)
+    except Exception:
+        pass
 
 
 def record_miss() -> None:
     MISSES.inc()
+    try:
+        from program.services.streaming.telemetry import playback_telemetry_collector
+
+        playback_telemetry_collector.record_cache_miss()
+    except Exception:
+        pass
 
 
 def record_bytes_written(nbytes: int) -> None:

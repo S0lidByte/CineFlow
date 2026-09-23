@@ -2464,6 +2464,17 @@ class RivenVFS(pyfuse3.Operations):
 
                     if active_stream:
                         await active_stream.close()
+                        try:
+                            from program.services.streaming.telemetry import (
+                                playback_telemetry_collector,
+                            )
+
+                            playback_telemetry_collector.register_stream_complete(
+                                stream_id=f"{path}:{fh}",
+                                title=Path(path).name,
+                            )
+                        except Exception:
+                            pass
 
             logger.trace(f"release: fh={fh} path={path}")
         except pyfuse3.FUSEError:
@@ -2608,6 +2619,19 @@ class RivenVFS(pyfuse3.Operations):
                 require_mount_http_pool=True,
             )
             self._active_stream_count = len(self._active_streams)
+
+            try:
+                from program.services.streaming.telemetry import (
+                    playback_telemetry_collector,
+                )
+
+                playback_telemetry_collector.register_stream_start(
+                    stream_id=f"{path}:{fh}",
+                    title=Path(path).name,
+                    provider=entry_info.provider,
+                )
+            except Exception:
+                pass
 
         return self._active_streams[stream_key]
 

@@ -13,6 +13,7 @@ from routers.secure.database import router as database_router
 from routers.secure.default import router as default_router
 from routers.secure.items import router as items_router
 from routers.secure.operations import router as operations_router
+from routers.secure.playback_telemetry import router as playback_telemetry_router
 from routers.secure.ranking import router as ranking_router
 from routers.secure.scrape import router as scrape_router
 from routers.secure.settings import router as settings_router
@@ -45,6 +46,9 @@ app_router.include_router(
 )
 app_router.include_router(
     operations_router, dependencies=[Depends(require_role("library:read"))]
+)
+app_router.include_router(
+    playback_telemetry_router, dependencies=[Depends(require_role("library:read"))]
 )
 app_router.include_router(
     ranking_router, dependencies=[Depends(require_role("settings:write"))]

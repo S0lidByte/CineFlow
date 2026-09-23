@@ -94,6 +94,15 @@ class Metrics:
             from program.services.streaming import prom_cache_metrics as prom
 
             prom.record_hit(nbytes)
+        else:
+            try:
+                from program.services.streaming.telemetry import (
+                    playback_telemetry_collector,
+                )
+
+                playback_telemetry_collector.record_cache_hit(nbytes=nbytes)
+            except Exception:
+                pass
 
     def record_miss(self) -> None:
         with self.lock:
@@ -102,6 +111,15 @@ class Metrics:
             from program.services.streaming import prom_cache_metrics as prom
 
             prom.record_miss()
+        else:
+            try:
+                from program.services.streaming.telemetry import (
+                    playback_telemetry_collector,
+                )
+
+                playback_telemetry_collector.record_cache_miss()
+            except Exception:
+                pass
 
     def record_bytes_written(self, nbytes: int) -> None:
         with self.lock:
