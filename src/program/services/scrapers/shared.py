@@ -1009,8 +1009,11 @@ def _check_item_year(
     """Check if the torrent's parsed year matches any candidate year in the item's hierarchy.
 
     Faithfully reproduces upstream Riven-TS year tolerance:
-    - Movies and Shows evaluate candidate years for item.year (or aired_at.year) ± 1.
-    - Seasons and Episodes evaluate candidate years for item.year ± 1 AND top_parent.year ± 1.
+    - Movies evaluate candidate years strictly for item.year (or aired_at.year) ± 1.
+    - Shows, Seasons, and Episodes evaluate candidate years for item.year ± 1 AND top_parent.year ± 1.
+    - For multi-year TV series (seasons > 1, episodes, or items without per-season year metadata),
+      releases dated on or after the series premiere year - 1 are accepted. Releases dated strictly
+      prior to the series premiere - 1 are rejected (e.g. older movie releases matching the same name).
     - Missing year metadata on item or torrent does not reject.
     """
     if not data.year:
@@ -1032,18 +1035,57 @@ def _check_item_year(
         item_or_aired_at, "type", None
     ) in ("season", "episode")
 
-    if is_hierarchical:
-        top_parent = getattr(item_or_aired_at, "top_parent", None)
-        if top_parent is not None and top_parent is not item_or_aired_at:
-            top_year = _extract_year(top_parent)
-            if top_year:
-                for y in get_year_candidates(top_year):
-                    candidate_years.add(y)
+    top_parent = (
+        getattr(item_or_aired_at, "top_parent", None) if is_hierarchical else None
+    )
+    top_year = (
+        _extract_year(top_parent)
+        if (top_parent is not None and top_parent is not item_or_aired_at)
+        else None
+    )
+
+    if top_year:
+        for y in get_year_candidates(top_year):
+            candidate_years.add(y)
+
+    # Movies must strictly match candidate years
+    if (
+        isinstance(item_or_aired_at, Movie)
+        or getattr(item_or_aired_at, "type", None) == "movie"
+    ):
+        if not candidate_years:
+            return True
+        return data.year in candidate_years
+
+    # Direct candidate hit for TV items (Show, Season, Episode)
+    if candidate_years and data.year in candidate_years:
+        return True
+
+    # For TV items where specific item_year is unknown, or for TV Show level scrapes:
+    # Any release year >= (effective_show_year - 1) is a valid broadcast / pack year.
+    # Releases older than (effective_show_year - 1) are rejected (e.g. 2012 movie for a 2022 show).
+    effective_show_year = top_year or (
+        item_year
+        if (
+            isinstance(item_or_aired_at, Show)
+            or getattr(item_or_aired_at, "type", None) == "show"
+        )
+        else None
+    )
+    if effective_show_year:
+        if data.year < (effective_show_year - 1):
+            return False
+        if (
+            not item_year
+            or isinstance(item_or_aired_at, Show)
+            or getattr(item_or_aired_at, "type", None) == "show"
+        ):
+            return True
 
     if not candidate_years:
         return True
 
-    return data.year in candidate_years
+    return False
 
 
 def _get_item_country(item: MediaItem) -> str | None:

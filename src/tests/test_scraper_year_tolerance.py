@@ -86,6 +86,29 @@ def test_check_item_year_multi_season_show():
     assert _check_item_year(season4, ParsedData(raw_title="", year=2005)) is False
 
 
+def test_check_item_year_future_season_without_season_year():
+    """Verify multi-season show with unknown season year accepts future season release years >= premiere - 1."""
+    # Reacher premiered in 2022
+    show = Show({"title": "Reacher", "year": 2022, "aired_at": datetime(2022, 2, 4)})
+
+    # Season 4 without explicit year metadata
+    season4 = Season({"number": 4, "title": "Season 4"})
+    season4.parent = show
+
+    # 2026 release for Season 4 must be accepted
+    assert _check_item_year(season4, ParsedData(raw_title="", year=2026)) is True
+    # 2022 premiere year must be accepted
+    assert _check_item_year(season4, ParsedData(raw_title="", year=2022)) is True
+    # Pre-show year (2012 movie) must be rejected
+    assert _check_item_year(season4, ParsedData(raw_title="", year=2012)) is False
+
+    # Episode 1 of Season 4 without explicit year metadata
+    s4e1 = Episode({"number": 1, "title": "Episode 1"})
+    s4e1.parent = season4
+    assert _check_item_year(s4e1, ParsedData(raw_title="", year=2026)) is True
+    assert _check_item_year(s4e1, ParsedData(raw_title="", year=2012)) is False
+
+
 def test_check_item_year_episode():
     """Verify episode checks both episode/season air year and root show premiere year."""
     show = Show(
@@ -136,6 +159,21 @@ def test_parse_results_with_multi_season_year_tolerance():
     # Torrent named with show premiere year (2008) and S04
     infohash = "a" * 40
     raw_title = "Breaking.Bad.2008.S04.1080p.BluRay.x264-ROVERS"
+    results = {infohash: raw_title}
+
+    streams = parse_results(season4, results)
+    assert len(streams) == 1
+    assert infohash in streams
+
+
+def test_parse_results_reacher_s04_pack_accepted():
+    """Verify parse_results accepts real-world Reacher S04 multi-episode release tagged with (2026)."""
+    show = Show({"title": "Reacher", "year": 2022, "aired_at": datetime(2022, 2, 4)})
+    season4 = Season({"number": 4, "title": "Season 4"})
+    season4.parent = show
+
+    infohash = "b" * 40
+    raw_title = "Reacher - S04 E01-08 (2026) WEBRip 1080p x264 EAC3 ITA ENG SUB ITA ENG -Lullozz"
     results = {infohash: raw_title}
 
     streams = parse_results(season4, results)
