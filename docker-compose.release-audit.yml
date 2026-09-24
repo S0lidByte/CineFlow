@@ -29,8 +29,8 @@ services:
       PUID: "0"
       PGID: "0"
       TZ: UTC
-      RIVEN_FORCE_ENV: "true"
-      RIVEN_DATABASE_HOST: postgresql+psycopg2://cineflow_audit:audit-postgres-only@postgres/cineflow_audit
+      CINEFLOW_FORCE_ENV: "true"
+      CINEFLOW_DATABASE_HOST: postgresql+psycopg2://cineflow_audit:audit-postgres-only@postgres/cineflow_audit
       API_KEY: phase35-legacy-api-key-000000001
       BFF_API_KEY: phase35-bff-api-key-000000000002
       ACTOR_CONTEXT_SECRET: phase35-actor-context-secret-release-audit
@@ -64,7 +64,7 @@ services:
       ACTOR_CONTEXT_SECRET: phase35-actor-context-secret-release-audit
       AUTH_SECRET: phase35-auth-secret-release-audit-only
       ORIGIN: http://localhost:13003
-      DATABASE_URL: /riven/data/riven.db
+      CINEFLOW_DATABASE_URL: /riven/data/cineflow.db
     volumes:
       - release_audit_frontend:/riven/data
     depends_on:

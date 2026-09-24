@@ -46,8 +46,8 @@ services:
       - PUID=0
       - PGID=0
       - TZ=UTC
-      - RIVEN_FORCE_ENV=true
-      - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
+      - CINEFLOW_FORCE_ENV=true
+      - CINEFLOW_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
       - RIVEN_API_KEY=local-legacy-api-key-32characters
       - API_KEY=local-legacy-api-key-32characters
       - BFF_API_KEY=local-bff-api-key-32characters
@@ -83,7 +83,7 @@ services:
       - ACTOR_CONTEXT_SECRET=local-stack-test-actor-secret-32chars
       - AUTH_SECRET=local-stack-test-auth-secret-32chars
       - ORIGIN=http://localhost:3000
-      - DATABASE_URL=/riven/data/riven.db
+      - CINEFLOW_DATABASE_URL=/riven/data/cineflow.db
     volumes:
       - cineflow_test_frontend:/riven/data
     depends_on:

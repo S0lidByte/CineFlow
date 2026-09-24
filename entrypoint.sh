@@ -12,7 +12,7 @@ cleanup_riven_mounts() {
 
     while grep -q " $MOUNT_PATH " /proc/mounts 2>/dev/null; do
         ATTEMPT=$((ATTEMPT + 1))
-        echo "Cleaning stale RivenVFS mount at $MOUNT_PATH (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
+        echo "Cleaning stale CineFlow VFS mount at $MOUNT_PATH (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
 
         fusermount3 -u -z "$MOUNT_PATH" 2>/dev/null || \
         fusermount -u -z "$MOUNT_PATH" 2>/dev/null || \
@@ -30,7 +30,7 @@ cleanup_riven_mounts() {
 forward_signal() {
     SIGNAL="$1"
 
-    echo "Received $SIGNAL, shutting down Riven..."
+    echo "Received $SIGNAL, shutting down CineFlow..."
 
     if [ -n "${MAIN_PID:-}" ] && kill -0 "$MAIN_PID" 2>/dev/null; then
         kill -TERM "$MAIN_PID" 2>/dev/null || true
@@ -67,19 +67,20 @@ chown -R "$PUID:$PGID" "$USER_HOME"
 export HOME="$USER_HOME"
 
 # Define the command to run based on the DEBUG flag
-RIVEN_PYTHON=${RIVEN_PYTHON:-/riven/.venv/bin/python}
+# CINEFLOW_PYTHON is the primary override; RIVEN_PYTHON remains a compatibility alias.
+CINEFLOW_PYTHON=${CINEFLOW_PYTHON:-${RIVEN_PYTHON:-/riven/.venv/bin/python}}
 if [ "${DEBUG}" != "" ]; then
     echo "Installing debugpy..."
-    "$RIVEN_PYTHON" -m ensurepip
-    "$RIVEN_PYTHON" -m pip install debugpy
-    CMD="$RIVEN_PYTHON -m debugpy --listen 0.0.0.0:5678 src/main.py"
+    "$CINEFLOW_PYTHON" -m ensurepip
+    "$CINEFLOW_PYTHON" -m pip install debugpy
+    CMD="$CINEFLOW_PYTHON -m debugpy --listen 0.0.0.0:5678 src/main.py"
 else
-    CMD="$RIVEN_PYTHON src/main.py"
+    CMD="$CINEFLOW_PYTHON src/main.py"
 fi
 
 
 echo "Container Initialization complete."
-echo "Starting Riven (Backend)..."
+echo "Starting CineFlow (Backend)..."
 
 cleanup_riven_mounts 20
 
@@ -93,7 +94,7 @@ fi
 $RUN_CMD &
 MAIN_PID=$!
 
-echo "Waiting for RivenVFS FUSE mount to initialize..."
+echo "Waiting for CineFlow VFS FUSE mount to initialize..."
 # Do not leave a failed backend container running forever if initialization fails.
 MOUNT_WAIT_TIMEOUT=${MOUNT_WAIT_TIMEOUT:-120}
 MOUNT_WAIT_ELAPSED=0

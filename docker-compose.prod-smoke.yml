@@ -50,8 +50,8 @@ services:
       - PUID=0
       - PGID=0
       - TZ=UTC
-      - RIVEN_FORCE_ENV=true
-      - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
+      - CINEFLOW_FORCE_ENV=true
+      - CINEFLOW_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
       - API_KEY=abcdefghijklmnopqrstuvwxyz123456
       - BFF_API_KEY=local-prod-smoke-bff-key-32chars
       - ACTOR_CONTEXT_SECRET=local-prod-smoke-actor-secret-32ch
@@ -121,7 +121,7 @@ services:
       - ACTOR_CONTEXT_SECRET=local-prod-smoke-actor-secret-32ch
       - AUTH_SECRET=local-prod-smoke-auth-secret-32ch
       - ORIGIN=http://localhost:3000
-      - DATABASE_URL=/riven/data/riven.db
+      - CINEFLOW_DATABASE_URL=/riven/data/cineflow.db
     volumes:
       - cineflow_prod_smoke_frontend:/riven/data
     depends_on:

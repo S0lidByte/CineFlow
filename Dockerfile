@@ -22,9 +22,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Final Stage
 # -----------------
 FROM python:3.13-alpine
-LABEL name="Riven" \
-      description="Riven Media Server" \
-      url="https://github.com/rivenmedia/riven"
+LABEL name="CineFlow" \
+      description="CineFlow Media Server" \
+      url="https://github.com/S0lidByte/CineFlow"
 
 # Install only runtime dependencies
 RUN apk add --no-cache curl libcurl shadow unzip ffmpeg libpq fuse3 libcap libcap-utils postgresql17-client gosu

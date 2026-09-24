@@ -22,7 +22,7 @@ The VFS automatically handles:
 Usage:
     from rivenvfs import RivenVFS
 
-    vfs = RivenVFS("/mnt/riven", db_path="./riven.db", providers=providers)
+    vfs = RivenVFS("/mnt/riven", db_path="./cineflow.db", providers=providers)
     vfs.add_file("/movies/example.mp4", "https://real-debrid.com/d/ABC123", size=1073741824)
     # VFS is now mounted and ready for use
 

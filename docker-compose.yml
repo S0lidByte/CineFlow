@@ -1,7 +1,7 @@
 services:
     # riven-frontend:
-    #     image: spoked/riven-frontend:latest
-    #     container_name: riven-frontend
+    #     image: coldspirit/cineflow-frontend:latest
+    #     container_name: cineflow-frontend
     #     restart: unless-stopped
     #     tty: true
     #     environment:
@@ -11,12 +11,12 @@ services:
     #     volumes:
     #         - /path/to/riven/frontend:/riven/config # You need to mount a config directory here (different from riven)
     #     depends_on:
-    #         riven:
+    #         cineflow:
     #             condition: service_started
 
-    riven:
-        image: spoked/riven:latest
-        container_name: riven
+    cineflow:
+        image: coldspirit/cineflow:latest
+        container_name: cineflow
         restart: unless-stopped
         ports:
             # Bind to localhost only so external clients cannot bypass the frontend BFF
@@ -40,35 +40,39 @@ services:
             - PGID=1000
             - TZ=America/New_York
             - RIVEN_FORCE_ENV=true
-            # Prefer Compose service name for DNS; riven-db remains an alias for older configs.
-            - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
-            # Optional: move cache off RAM — e.g. RIVEN_FILESYSTEM_CACHE_DIR=/riven/data/cache
+            # CineFlow names are primary; legacy Riven DNS aliases remain available for existing deployments.
+            - CINEFLOW_FORCE_ENV=true
+            - CINEFLOW_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@cineflow_postgres/cineflow
+            # Optional: move cache off RAM — e.g. CINEFLOW_FILESYSTEM_CACHE_DIR=/riven/data/cache
         healthcheck:
             test: curl -s http://localhost:8080 >/dev/null || exit 1
             interval: 30s
             timeout: 10s
             retries: 10
         volumes:
-            - /path/to/riven/data:/riven/data
-            - /path/to/riven/mount:/mount:rshared,z
+            - /path/to/cineflow/data:/riven/data
+            - /path/to/cineflow/mount:/mount:rshared,z
         depends_on:
-            riven_postgres:
+            cineflow_postgres:
                 condition: service_healthy
 
-    riven_postgres:
+    cineflow_postgres:
         image: postgres:17-alpine
-        container_name: riven-db
-        hostname: riven-db
+        container_name: cineflow-db
+        hostname: cineflow-db
         environment:
             - PGDATA=/var/lib/postgresql/data/pgdata
             - POSTGRES_USER=postgres
             - POSTGRES_PASSWORD=postgres
-            - POSTGRES_DB=riven
+            - POSTGRES_DB=cineflow
         volumes:
-            - /path/to/riven/db:/var/lib/postgresql/data/pgdata
+            - /path/to/cineflow/db:/var/lib/postgresql/data/pgdata
         networks:
             default:
                 aliases:
+                    # Legacy aliases preserve existing internal clients and custom Compose overrides.
+                    - cineflow-db
+                    - cineflow_postgres
                     - riven-db
                     - riven_postgres
         healthcheck:
