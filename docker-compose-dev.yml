@@ -1,12 +1,12 @@
 #docker compose -f docker-compose-dev.yml up -d --build --no-deps
 #docker compose -f docker-compose-dev.yml down
 services:
-  riven:
+  cineflow:
     build:
       context: .
       dockerfile: Dockerfile
       no_cache: true
-    container_name: riven
+    container_name: cineflow
     restart: unless-stopped
     tty: true
     shm_size: 1024m
@@ -16,9 +16,11 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=UTC
-      - ORIGIN=${RIVEN_ORIGIN:-http://localhost:8080}
+      - ORIGIN=${CINEFLOW_ORIGIN:-${RIVEN_ORIGIN:-http://localhost:8080}}
+      - CINEFLOW_FORCE_ENV=true
       - RIVEN_FORCE_ENV=true
-      - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
+      - CINEFLOW_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@cineflow_postgres/riven
+      - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@cineflow_postgres/riven
     devices:
       - /dev/fuse
     cap_add:
@@ -26,16 +28,16 @@ services:
     security_opt:
       - apparmor:unconfined
     volumes:
-      - ./container_data/riven:/riven/data
+      - ./container_data/cineflow:/riven/data
       - ./container_data/mount:/mount:rshared,z
     depends_on:
-      riven_postgres:
+      cineflow_postgres:
         condition: service_healthy
 
-  riven_postgres:
+  cineflow_postgres:
     image: postgres:17-alpine
-    container_name: riven-db
-    hostname: riven-db
+    container_name: cineflow-db
+    hostname: cineflow-db
     ports:
       - "5432:5432"
     restart: unless-stopped
@@ -49,6 +51,8 @@ services:
     networks:
       default:
         aliases:
+          - cineflow-db
+          - cineflow_postgres
           - riven-db
           - riven_postgres
           - postgres

@@ -36,7 +36,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 1) Clone the repository
 
 ```sh
-git clone https://github.com/rivenmedia/riven.git && cd riven
+git clone https://github.com/S0lidByte/CineFlow.git && cd CineFlow
 ```
 
 2) Install system dependencies (example for Debian/Ubuntu)

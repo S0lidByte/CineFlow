@@ -9,7 +9,7 @@ services:
     #     ports:
     #         - 3000:3000
     #     volumes:
-    #         - /path/to/riven/frontend:/riven/config # You need to mount a config directory here (different from riven)
+    #         - /path/to/cineflow/frontend:/riven/config # You need to mount a config directory here (different from riven)
     #     depends_on:
     #         cineflow:
     #             condition: service_started
@@ -98,4 +98,4 @@ services:
         - "8096:8096"
         volumes:
         - /path/to/jellyfin/config:/config
-        - /path/to/riven/mount:/mount:rslave,z
+        - /path/to/cineflow/mount:/mount:rslave,z

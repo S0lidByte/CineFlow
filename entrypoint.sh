@@ -21,7 +21,7 @@ cleanup_riven_mounts() {
         sleep 1
 
         if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
-            echo "Failed to fully clean stale RivenVFS mounts after $MAX_ATTEMPTS attempts."
+            echo "Failed to fully clean stale CineFlow VFS mounts after $MAX_ATTEMPTS attempts."
             break
         fi
     done
@@ -102,13 +102,13 @@ while ! grep -q "rivenvfs" /proc/mounts; do
     if ! kill -0 "$MAIN_PID" 2>/dev/null; then
         wait "$MAIN_PID" 2>/dev/null
         EXIT_CODE=$?
-        echo "Riven exited before the VFS mount initialized (exit code $EXIT_CODE)."
+        echo "CineFlow exited before the VFS mount initialized (exit code $EXIT_CODE)."
         cleanup_riven_mounts 20
         exit "$EXIT_CODE"
     fi
 
     if [ "$MOUNT_WAIT_ELAPSED" -ge "$MOUNT_WAIT_TIMEOUT" ]; then
-        echo "Timed out waiting for the RivenVFS mount after ${MOUNT_WAIT_TIMEOUT}s."
+        echo "Timed out waiting for the CineFlow VFS mount after ${MOUNT_WAIT_TIMEOUT}s."
         kill -TERM "$MAIN_PID" 2>/dev/null || true
         wait "$MAIN_PID" 2>/dev/null
         cleanup_riven_mounts 20

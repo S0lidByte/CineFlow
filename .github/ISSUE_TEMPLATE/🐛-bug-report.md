@@ -1,6 +1,6 @@
 ---
 name: "\U0001F41B Bug Report"
-about: Create a report to help improve Riven
+about: Create a report to help improve CineFlow
 title: "[Issue]"
 labels: ''
 assignees: ''
@@ -9,13 +9,12 @@ assignees: ''
 
 ## Prerequisites
 <!-- Please check all boxes that apply -->
-- [ ] I have checked the [existing issues](https://github.com/rivenmedia/riven/issues) and confirmed this is not a duplicate
-- [ ] I am running the latest version of Riven
-- [ ] I have read the [documentation](https://github.com/rivenmedia/riven/blob/main/README.md)
-- [ ] I have checked in [Discord channel](https://discord.com/invite/rivenmedia) for a solution
+- [ ] I have checked the [existing issues](https://github.com/S0lidByte/CineFlow/issues) and confirmed this is not a duplicate
+- [ ] I am running the latest version of CineFlow
+- [ ] I have read the [documentation](https://github.com/S0lidByte/CineFlow/blob/main/README.md)
 
 ## Environment
-- **Riven Version**: <!-- e.g., 1.2.3 -->
+- **CineFlow Version**: <!-- e.g., 1.2.3 -->
 - **Deployment Method**: <!-- Docker/Docker Compose/Manual Installation/Other -->
 - **Operating System**: <!-- Linux/macOS/Windows/Other -->
 

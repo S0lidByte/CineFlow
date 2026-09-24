@@ -1,6 +1,6 @@
 ---
 name: "\U0001F4A1 Feature Request"
-about: Suggest an idea for Riven
+about: Suggest an idea for CineFlow
 title: "[feature]"
 labels: ''
 assignees: ''
@@ -9,8 +9,8 @@ assignees: ''
 
 ## Prerequisites
 <!-- Please check all boxes that apply -->
-- [ ] I have checked the [existing issues](https://github.com/rivenmedia/riven/issues) and confirmed this feature has not already been requested
-- [ ] I have read the [documentation](https://github.com/rivenmedia/riven/blob/main/README.md) and confirmed this feature does not already exist
+- [ ] I have checked the [existing issues](https://github.com/S0lidByte/CineFlow/issues) and confirmed this feature has not already been requested
+- [ ] I have read the [documentation](https://github.com/S0lidByte/CineFlow/blob/main/README.md) and confirmed this feature does not already exist
 
 ## Feature Category
 <!-- Select the most relevant category for your feature -->
