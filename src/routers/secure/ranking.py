@@ -19,6 +19,7 @@ from program.services.scrapers.shared import (
     normalize_rtn_language_settings,
     ranking_model,
 )
+from program.services.scrapers.trash_scorer import evaluate_trash_release
 from program.settings import settings_manager
 from program.settings.models import RTNSettingsModel
 from program.settings.ranking_descriptions import (
@@ -36,6 +37,15 @@ from program.settings.ranking_presets import (
     GOLDEN_TITLES,
     RANKING_PRESETS,
     TITLE_MATCHING_MODES,
+)
+from program.settings.trash_catalog import (
+    get_default_trash_custom_formats,
+    get_default_trash_profiles,
+)
+from program.settings.trash_models import (
+    TrashCustomFormat,
+    TrashEvaluationSummary,
+    TrashProfile,
 )
 
 router = APIRouter(
@@ -102,6 +112,14 @@ class RankingTestRequest(BaseModel):
             "Empty dict disables aliases for this test."
         ),
     )
+    evaluate_trash: bool = Field(
+        default=True,
+        description="Whether to evaluate TRaSH custom format score in test output",
+    )
+    trash_profile: str | None = Field(
+        default=None,
+        description="Optional TRaSH profile ID to evaluate with",
+    )
 
     @field_validator("aliases")
     @classmethod
@@ -147,6 +165,38 @@ class RankingTestResponse(BaseModel):
     title_similarity_threshold: float | None = None
     aliases_used: bool = False
     parsed: dict[str, Any] | None = None
+    trash_summary: TrashEvaluationSummary | None = None
+
+
+class TrashCustomFormatsResponse(BaseModel):
+    message: str
+    custom_formats: list[TrashCustomFormat]
+    profiles: list[TrashProfile]
+
+
+class TrashEvaluateRequest(BaseModel):
+    raw_title: str = Field(min_length=1, description="Release title to evaluate")
+    profile_id: str | None = Field(
+        default=None, description="Optional profile ID to evaluate with"
+    )
+    min_score: int | None = Field(
+        default=None, description="Optional minimum score threshold"
+    )
+    reject_negative_scores: bool = Field(
+        default=False, description="Reject if net score < 0"
+    )
+    reject_unwanted_sources: bool = Field(
+        default=True, description="Reject CAM/TS releases"
+    )
+    custom_formats: list[TrashCustomFormat] | None = Field(
+        default=None,
+        description="Optional custom formats list (defaults to active/catalog)",
+    )
+
+
+class TrashEvaluateResponse(BaseModel):
+    message: str
+    summary: TrashEvaluationSummary
 
 
 class RankingMetaResponse(BaseModel):
@@ -385,6 +435,78 @@ async def validate_ranking_patterns(
     )
 
 
+@router.get(
+    "/custom-formats",
+    operation_id="get_trash_custom_formats",
+    response_model=TrashCustomFormatsResponse,
+)
+async def get_trash_custom_formats() -> TrashCustomFormatsResponse:
+    """Retrieve default TRaSH Guides custom formats catalog and profiles."""
+    trash_cfg = getattr(settings_manager.settings.scraping, "trash_scoring", None)
+    formats = (
+        trash_cfg.custom_formats
+        if (trash_cfg and trash_cfg.custom_formats)
+        else get_default_trash_custom_formats()
+    )
+    profiles = (
+        trash_cfg.profiles
+        if (trash_cfg and trash_cfg.profiles)
+        else get_default_trash_profiles()
+    )
+    return TrashCustomFormatsResponse(
+        message="TRaSH Guides Custom Formats and Profiles",
+        custom_formats=formats,
+        profiles=profiles,
+    )
+
+
+@router.post(
+    "/custom-formats/evaluate",
+    operation_id="evaluate_trash_custom_formats",
+    response_model=TrashEvaluateResponse,
+)
+async def evaluate_trash_custom_formats(
+    body: TrashEvaluateRequest,
+) -> TrashEvaluateResponse:
+    """Evaluate a release title against TRaSH Custom Formats without saving settings."""
+    _enforce_ranking_rate_limit("evaluate-trash")
+    trash_cfg = getattr(settings_manager.settings.scraping, "trash_scoring", None)
+    formats = body.custom_formats
+    if formats is None:
+        formats = (
+            trash_cfg.custom_formats
+            if (trash_cfg and trash_cfg.custom_formats)
+            else get_default_trash_custom_formats()
+        )
+
+    profile = None
+    if body.profile_id:
+        if trash_cfg:
+            profile = trash_cfg.get_profile(body.profile_id)
+        if profile is None:
+            # Check default profiles
+            for p in get_default_trash_profiles():
+                if p.profile_id == body.profile_id:
+                    profile = p
+                    break
+    elif trash_cfg and getattr(trash_cfg, "enabled", False):
+        profile = trash_cfg.get_active_profile()
+
+    summary = evaluate_trash_release(
+        raw_title=body.raw_title,
+        formats=formats,
+        profile=profile,
+        min_score=body.min_score,
+        reject_negative_scores=body.reject_negative_scores,
+        reject_unwanted_sources=body.reject_unwanted_sources,
+    )
+
+    return TrashEvaluateResponse(
+        message="Evaluated TRaSH Custom Formats",
+        summary=summary,
+    )
+
+
 @router.post("/test", operation_id="test_ranking", response_model=RankingTestResponse)
 async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
     """Run a release title through RTN using current (or provided) ranking settings."""
@@ -412,6 +534,31 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
         aliases = body.aliases if body.aliases is not None else {}
         threshold = float(getattr(settings_model.options, "title_similarity", 0.85))
 
+        trash_summary: TrashEvaluationSummary | None = None
+        trash_cfg = getattr(settings_manager.settings.scraping, "trash_scoring", None)
+        if body.evaluate_trash:
+            profile = None
+            if body.trash_profile and trash_cfg:
+                profile = trash_cfg.get_profile(body.trash_profile)
+            elif trash_cfg and getattr(trash_cfg, "enabled", False):
+                profile = trash_cfg.get_active_profile()
+            trash_summary = evaluate_trash_release(
+                raw_title=body.raw_title,
+                formats=(
+                    trash_cfg.custom_formats
+                    if (trash_cfg and trash_cfg.custom_formats)
+                    else None
+                ),
+                profile=profile,
+                min_score=trash_cfg.min_score if trash_cfg else None,
+                reject_negative_scores=(
+                    trash_cfg.reject_negative_scores if trash_cfg else False
+                ),
+                reject_unwanted_sources=(
+                    trash_cfg.reject_unwanted_sources if trash_cfg else True
+                ),
+            )
+
         try:
             torrent = rtn_instance.rank(
                 raw_title=body.raw_title,
@@ -425,10 +572,14 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
                 if hasattr(torrent.data, "model_dump")
                 else None
             )
+            effective_rank = int(torrent.rank)
+            if trash_summary and trash_summary.total_score:
+                effective_rank += trash_summary.total_score
+
             return RankingTestResponse(
                 message="Accepted by RTN",
                 accepted=True,
-                rank=int(torrent.rank),
+                rank=effective_rank,
                 lev_ratio=float(torrent.lev_ratio),
                 fetch=bool(torrent.fetch),
                 deny_reason=None,
@@ -437,6 +588,7 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
                 title_similarity_threshold=threshold,
                 aliases_used=bool(aliases),
                 parsed=parsed,
+                trash_summary=trash_summary,
             )
         except GarbageTorrent as exc:
             msg = str(exc)
@@ -470,6 +622,7 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
                 title_similarity_threshold=threshold,
                 aliases_used=bool(aliases),
                 parsed=parsed,
+                trash_summary=trash_summary,
             )
     except HTTPException:
         raise

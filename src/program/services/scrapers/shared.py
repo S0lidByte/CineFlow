@@ -20,6 +20,7 @@ from RTN.models import SettingsModel
 from program.media.item import Episode, MediaItem, Movie, Season, Show
 from program.media.stream import Stream
 from program.services.scrapers.funnel import ScrapeFunnelStats
+from program.services.scrapers.trash_scorer import evaluate_trash_release
 from program.settings import settings_manager
 from program.settings.models import RTNSettingsModel, ScraperModel
 from program.utils.title_normalizer import (
@@ -916,6 +917,32 @@ def _accumulate_ranked_torrents(
             if funnel is not None:
                 funnel.record_content_filter()
             continue
+
+        # TRaSH Guides Custom Formats scoring and quality rejection
+        scraping_curr = _scraping_settings()
+        trash_cfg = getattr(scraping_curr, "trash_scoring", None)
+        if trash_cfg and getattr(trash_cfg, "enabled", False):
+            trash_summary = evaluate_trash_release(
+                raw_title=raw_title,
+                formats=trash_cfg.custom_formats if trash_cfg.custom_formats else None,
+                profile=trash_cfg.get_active_profile(),
+                min_score=trash_cfg.min_score,
+                reject_negative_scores=trash_cfg.reject_negative_scores,
+                reject_unwanted_sources=trash_cfg.reject_unwanted_sources,
+            )
+            if not manual and trash_summary.rejected_by_lq:
+                logger.trace(
+                    f"Skipping torrent rejected by TRaSH Custom Formats for {item.log_string}: "
+                    f"{raw_title} ({trash_summary.rejection_reason})"
+                )
+                if funnel is not None:
+                    funnel.record_content_filter()
+                continue
+
+            if trash_summary.total_score != 0:
+                torrent = torrent.model_copy(
+                    update={"rank": torrent.rank + trash_summary.total_score}
+                )
 
         torrents.add(torrent)
         processed_infohashes.add(infohash)

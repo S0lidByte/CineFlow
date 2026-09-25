@@ -330,3 +330,60 @@ def test_dispatcher_publishes_canonical_sse_items_and_isolates_listener_failures
             assert saved.status == "completed"
     finally:
         dispatcher.stop(wait=True)
+
+
+def test_dispatcher_handles_raw_httpx_429_and_503_transient_retries(test_db_session):
+    """Test that raw httpx.HTTPStatusError (429 and 503) are normalized and scheduled for retry."""
+    import httpx
+
+    TestingSession, _test_session = test_db_session
+    attempts_429: list[int] = []
+    attempted_429_event = threading.Event()
+
+    def http_429_handler(ledger: OperationLedger, payload: dict[str, Any]):
+        attempts_429.append(ledger.attempt_count)
+        attempted_429_event.set()
+        req = httpx.Request("GET", "https://api.example.com/stream")
+        resp = httpx.Response(429, headers={"Retry-After": "45"}, request=req)
+        raise httpx.HTTPStatusError("Too Many Requests", request=req, response=resp)
+
+    dispatcher = OutboxDispatcher(
+        worker_id="test-worker-http-errors",
+        max_workers=2,
+        poll_interval_seconds=0.05,
+        max_retries=3,
+        base_backoff_seconds=1.0,
+        db_session_cm=_test_session,
+    )
+    dispatcher.register_handler("item.http_429_action", http_429_handler)
+    dispatcher.start()
+
+    try:
+        with TestingSession() as session:
+            op = enqueue_operation(
+                session=session,
+                operation_type="item.http_429_action",
+                payload={"target": "url"},
+            )
+            session.commit()
+            op_id = op.id
+
+        dispatcher.notify()
+        assert attempted_429_event.wait(timeout=10.0), "429 handler was not invoked"
+
+        time.sleep(0.2)
+        with TestingSession() as session:
+            saved = session.get(OperationLedger, op_id)
+            assert saved is not None
+            assert saved.status == "pending"  # Re-scheduled, not dead-lettered
+            assert saved.attempt_count == 1
+            assert saved.error_classification == "ProviderRateLimitError"
+            sched_utc = (
+                saved.scheduled_at
+                if saved.scheduled_at.tzinfo is not None
+                else saved.scheduled_at.replace(tzinfo=UTC)
+            )
+            assert sched_utc > datetime.now(UTC) + timedelta(seconds=40)
+    finally:
+        dispatcher.stop(wait=True)
+

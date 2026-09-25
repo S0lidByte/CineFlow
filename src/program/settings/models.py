@@ -16,6 +16,7 @@ from pydantic.networks import PostgresDsn
 from RTN.models import SettingsModel
 
 from program.settings.migratable import MigratableBaseModel
+from program.settings.trash_settings import TrashSettingsModel
 from program.utils import generate_api_key, get_version
 
 deprecation_warning = (
@@ -949,6 +950,9 @@ class StremThruConfig(Observable):
     ratelimit: bool = Field(default=True, description="Enable rate limiting")
 
 
+class TrashSettingsConfig(TrashSettingsModel, Observable): ...
+
+
 class ScraperModel(Observable):
     after_2: float = Field(
         default=2, description="Hours to wait after 2 failed scrapes"
@@ -1046,6 +1050,10 @@ class ScraperModel(Observable):
     stremthru: StremThruConfig = Field(
         default_factory=lambda: StremThruConfig(),
         description="StremThru Torznab scraper configuration",
+    )
+    trash_scoring: TrashSettingsConfig = Field(
+        default_factory=lambda: TrashSettingsConfig(),
+        description="TRaSH Guides Custom Formats (CF) scoring engine configuration",
     )
 
 

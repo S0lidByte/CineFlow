@@ -275,24 +275,16 @@ async def overseerr(request: Request) -> OverseerrWebhookResponse:
     response_model=PlexWebhookResponse,
 )
 async def plex_webhook(request: Request) -> PlexWebhookResponse:
-    """Plex webhook: parse ``media.scrobble``, map provider GUIDs, optionally sync.
+    """Plex webhook: parse stream events (play/pause/stop/scrobble), attribute sessions & sync Trakt.
 
     When ``content.plex_webhook.sync_to_trakt`` is false (default), logs GUIDs only.
-    When true and Trakt OAuth is connected, POSTs to Trakt ``/sync/history``.
+    When true and Trakt OAuth is connected, POSTs to Trakt ``/sync/history`` for scrobbles.
     """
 
     try:
         verify_plex_webhook_secret(request)
         payload = await _parse_plex_webhook_payload(request)
         event = str(payload.get("event") or "").strip()
-
-        if event != PLEX_SCROBBLE_EVENT:
-            logger.debug(f"Ignoring Plex webhook event={event or 'unknown'}")
-            return PlexWebhookResponse(
-                success=True,
-                event=event or None,
-                message="ignored (not media.scrobble)",
-            )
 
         metadata_raw = cast(object, payload.get("Metadata"))
         metadata: dict[str, Any] | None
@@ -301,8 +293,103 @@ async def plex_webhook(request: Request) -> PlexWebhookResponse:
         else:
             metadata = None
 
+        account_raw = cast(object, payload.get("Account"))
+        user_name: str | None = None
+        if isinstance(account_raw, dict):
+            user_account_dict = cast(dict[str, Any], account_raw)
+            raw_user_title = user_account_dict.get("title")
+            user_name = str(raw_user_title) if raw_user_title else None
+
+        player_raw = cast(object, payload.get("Player"))
+        player_device: str | None = None
+        client_ip: str | None = None
+        if isinstance(player_raw, dict):
+            player_dict = cast(dict[str, Any], player_raw)
+            raw_player_title = player_dict.get("title")
+            player_device = str(raw_player_title) if raw_player_title else None
+            raw_player_ip = player_dict.get("publicAddress")
+            client_ip = str(raw_player_ip) if raw_player_ip else None
+
+        # Extract media attributes
+        title: str | None = None
+        file_path: str | None = None
+        media_resolution: str | None = None
+        media_bitrate_kbps: int | None = None
+        decision: str | None = None
+
+        if metadata:
+            raw_title = metadata.get("title") or metadata.get("originalTitle")
+            title = str(raw_title) if raw_title else None
+            media_raw = cast(object, metadata.get("Media"))
+            if isinstance(media_raw, list) and media_raw:
+                media_list = cast(list[object], media_raw)
+                first_media_raw = media_list[0]
+                if isinstance(first_media_raw, dict):
+                    first_media = cast(dict[str, Any], first_media_raw)
+                    raw_res = first_media.get("videoResolution")
+                    media_resolution = str(raw_res) if raw_res else None
+                    raw_bitrate = first_media.get("bitrate")
+                    if isinstance(raw_bitrate, int):
+                        media_bitrate_kbps = raw_bitrate
+                    elif isinstance(raw_bitrate, str) and raw_bitrate.isdigit():
+                        media_bitrate_kbps = int(raw_bitrate)
+                    parts_raw = cast(object, first_media.get("Part"))
+                    if isinstance(parts_raw, list) and parts_raw:
+                        part_list = cast(list[object], parts_raw)
+                        first_part_raw = part_list[0]
+                        if isinstance(first_part_raw, dict):
+                            first_part = cast(dict[str, Any], first_part_raw)
+                            raw_file = first_part.get("file")
+                            file_path = str(raw_file) if raw_file else None
+                            raw_decision = first_part.get("decision")
+                            if raw_decision:
+                                decision = str(raw_decision)
+
+        # Also support Tautulli explicit payload fields if relayed
+        if not user_name and payload.get("user"):
+            user_name = str(payload.get("user"))
+        if not player_device and payload.get("player"):
+            player_device = str(payload.get("player"))
+        if not client_ip and payload.get("ip_address"):
+            client_ip = str(payload.get("ip_address"))
+        if not decision and payload.get("transcode_decision"):
+            decision = str(payload.get("transcode_decision"))
+
         guids = sanitize_plex_guids(metadata)
         media_type = plex_media_kind(metadata)
+
+        # Correlate session attribution with active VFS/HTTP streams in PlaybackTelemetryCollector
+        try:
+            from program.services.streaming.telemetry import (
+                playback_telemetry_collector,
+            )
+
+            playback_telemetry_collector.correlate_plex_session(
+                event=event,
+                user_name=user_name,
+                player_device=player_device,
+                client_ip=client_ip,
+                file_path=file_path,
+                title=title,
+                decision=decision,
+                media_resolution=media_resolution,
+                media_bitrate_kbps=media_bitrate_kbps,
+                guids=guids,
+            )
+        except Exception as e:
+            logger.debug(f"Failed to correlate Plex stream session: {e}")
+
+        # If not a scrobble event, finish with session attribution response
+        if event != PLEX_SCROBBLE_EVENT:
+            logger.debug(
+                f"Processed Plex stream session event={event or 'unknown'} user={user_name} player={player_device}"
+            )
+            return PlexWebhookResponse(
+                success=True,
+                event=event or None,
+                guids=guids,
+                message=f"session attributed ({event})",
+            )
 
         sync_enabled = bool(
             settings_manager.settings.content.plex_webhook.sync_to_trakt

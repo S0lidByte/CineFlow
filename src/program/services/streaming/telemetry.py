@@ -31,6 +31,15 @@ class StreamSessionTracker:
         client_ip: str | None = None,
         client_user_agent: str | None = None,
         provider: str | None = None,
+        user_name: str | None = None,
+        player_device: str | None = None,
+        playback_state: str = "playing",
+        decision: str | None = None,
+        video_decision: str | None = None,
+        audio_decision: str | None = None,
+        quality_profile: str | None = None,
+        media_resolution: str | None = None,
+        media_bitrate_kbps: int | None = None,
     ) -> None:
         self.stream_id = stream_id
         self.title = title
@@ -38,6 +47,15 @@ class StreamSessionTracker:
         self.client_ip = client_ip
         self.client_user_agent = client_user_agent
         self.provider = provider
+        self.user_name = user_name
+        self.player_device = player_device
+        self.playback_state = playback_state
+        self.decision = decision
+        self.video_decision = video_decision
+        self.audio_decision = audio_decision
+        self.quality_profile = quality_profile
+        self.media_resolution = media_resolution
+        self.media_bitrate_kbps = media_bitrate_kbps
         self.started_at = datetime.now(UTC)
         self.last_read_at = self.started_at
         self.bytes_transferred = 0
@@ -49,6 +67,130 @@ class StreamSessionTracker:
         # Rolling window: deque of (timestamp, byte_count) for throughput calculation
         self._window: collections.deque[tuple[float, int]] = collections.deque()
         self._window_duration = 5.0  # 5-second window
+
+    def update_attribution(
+        self,
+        *,
+        user_name: str | None = None,
+        player_device: str | None = None,
+        playback_state: str | None = None,
+        decision: str | None = None,
+        video_decision: str | None = None,
+        audio_decision: str | None = None,
+        quality_profile: str | None = None,
+        media_resolution: str | None = None,
+        media_bitrate_kbps: int | None = None,
+    ) -> None:
+        """Update Plex/Tautulli attribution details on the active tracker."""
+        with self._lock:
+            if user_name is not None:
+                self.user_name = user_name
+            if player_device is not None:
+                self.player_device = player_device
+            if playback_state is not None:
+                norm_state = playback_state.lower().strip()
+                if norm_state in {"playing", "paused", "buffering", "stopped"}:
+                    self.playback_state = norm_state
+                elif norm_state in {"play", "resume"}:
+                    self.playback_state = "playing"
+                elif norm_state in {"pause"}:
+                    self.playback_state = "paused"
+                elif norm_state in {"stop", "scrobble"}:
+                    self.playback_state = "stopped"
+                else:
+                    self.playback_state = "playing"
+
+                if self.playback_state == "stopped":
+                    self.is_active = False
+            if decision is not None:
+                norm_decision = (
+                    decision.lower().strip().replace(" ", "").replace("-", "_")
+                )
+                if norm_decision in {"direct_play", "directplay", "direct"}:
+                    self.decision = "direct_play"
+                elif norm_decision in {"direct_stream", "directstream"}:
+                    self.decision = "direct_stream"
+                elif norm_decision in {"transcode", "transcoding"}:
+                    self.decision = "transcode"
+                elif norm_decision in {"unknown"}:
+                    self.decision = "unknown"
+                else:
+                    self.decision = "unknown"
+            if video_decision is not None:
+                self.video_decision = video_decision
+            if audio_decision is not None:
+                self.audio_decision = audio_decision
+            if quality_profile is not None:
+                self.quality_profile = quality_profile
+            if media_resolution is not None:
+                self.media_resolution = media_resolution
+                if not self.quality_profile:
+                    res_upper = media_resolution.upper()
+                    self.quality_profile = f"{res_upper}p" if res_upper.isdigit() else res_upper
+            if media_bitrate_kbps is not None:
+                self.media_bitrate_kbps = media_bitrate_kbps
+
+    def _format_session_badge_locked(
+        self, throughput_mbps: float, cache_rate: float
+    ) -> str:
+        """Format live session badge: e.g. 'Alice · 4K Direct Play · 42 Mbps · RD Cache'."""
+        parts: list[str] = []
+
+        # 1. User / Player
+        user_part = self.user_name or ""
+        if self.player_device:
+            user_part = (
+                f"{user_part} ({self.player_device})"
+                if user_part
+                else self.player_device
+            )
+        if user_part:
+            parts.append(user_part)
+
+        # 2. Quality & Decision
+        decision_label = ""
+        if self.decision in {"direct_play", "direct"}:
+            decision_label = "Direct Play"
+        elif self.decision == "direct_stream":
+            decision_label = "Direct Stream"
+        elif self.decision == "transcode":
+            decision_label = "Transcode"
+
+        quality_label = self.quality_profile or ""
+        if not quality_label and self.media_resolution:
+            res = self.media_resolution.upper()
+            quality_label = f"{res}p" if res.isdigit() else res
+
+        if quality_label and decision_label:
+            parts.append(f"{quality_label} {decision_label}")
+        elif quality_label:
+            parts.append(quality_label)
+        elif decision_label:
+            parts.append(decision_label)
+
+        # 3. Bitrate / Speed
+        if throughput_mbps > 0.0:
+            speed_mbps = round(throughput_mbps * 8.0, 1)  # MB/s to Mbps
+            parts.append(f"{speed_mbps} Mbps")
+        elif self.media_bitrate_kbps and self.media_bitrate_kbps > 0:
+            speed_mbps = round(self.media_bitrate_kbps / 1000.0, 1)
+            parts.append(f"{speed_mbps} Mbps")
+
+        # 4. Storage / Cache source
+        prov = (self.provider or "Debrid").upper()
+        if prov.startswith("REAL"):
+            prov = "RD"
+        elif prov.startswith("ALL"):
+            prov = "AD"
+        elif prov.startswith("TORBOX"):
+            prov = "TB"
+
+        if cache_rate >= 50.0:
+            parts.append(f"{prov} Cache")
+        else:
+            parts.append(f"{prov} Stream")
+
+        return " · ".join(parts)
 
     def record_read(self, nbytes: int, from_cache: bool = False) -> None:
         """Record bytes read in this session."""
@@ -99,6 +241,7 @@ class StreamSessionTracker:
                     (self.bytes_from_cache / self.bytes_transferred) * 100.0, 1
                 )
             throughput = self._get_current_throughput_mbps_locked(now_mono)
+            badge = self._format_session_badge_locked(throughput, cache_rate)
             return StreamSessionMetric(
                 stream_id=self.stream_id,
                 media_item_id=self.media_item_id,
@@ -114,6 +257,16 @@ class StreamSessionTracker:
                 is_active=self.is_active,
                 provider=self.provider,
                 cdn_url_refreshed=self.cdn_url_refreshed,
+                user_name=self.user_name,
+                player_device=self.player_device,
+                playback_state=self.playback_state,  # type: ignore[arg-type]
+                decision=self.decision,  # type: ignore[arg-type]
+                video_decision=self.video_decision,
+                audio_decision=self.audio_decision,
+                quality_profile=self.quality_profile,
+                media_resolution=self.media_resolution,
+                media_bitrate_kbps=self.media_bitrate_kbps,
+                session_badge=badge if badge else None,
             )
 
 
@@ -161,7 +314,7 @@ class PlaybackTelemetryCollector:
         client_ip: str | None = None,
         client_user_agent: str | None = None,
         provider: str | None = None,
-    ) -> None:
+    ) -> StreamSessionTracker:
         """Register commencement of a new media stream session."""
         with self._lock:
             self._total_streams_count += 1
@@ -185,6 +338,12 @@ class PlaybackTelemetryCollector:
                     "media_item_id": media_item_id,
                 },
             )
+            return tracker
+
+    def get_session(self, stream_id: str) -> StreamSessionTracker | None:
+        """Retrieve a specific session tracker by stream_id."""
+        with self._lock:
+            return self._sessions.get(stream_id)
 
     def record_stream_read(
         self, stream_id: str, nbytes: int, from_cache: bool = False
@@ -195,6 +354,104 @@ class PlaybackTelemetryCollector:
             tracker = self._sessions.get(stream_id)
             if tracker:
                 tracker.record_read(nbytes, from_cache=from_cache)
+
+    def correlate_plex_session(
+        self,
+        *,
+        event: str,
+        user_name: str | None = None,
+        player_device: str | None = None,
+        client_ip: str | None = None,
+        file_path: str | None = None,
+        title: str | None = None,
+        decision: str | None = None,
+        video_decision: str | None = None,
+        audio_decision: str | None = None,
+        quality_profile: str | None = None,
+        media_resolution: str | None = None,
+        media_bitrate_kbps: int | None = None,
+        guids: list[str] | None = None,
+    ) -> int:
+        """Correlate incoming Plex/Tautulli webhook event with active VFS/HTTP stream sessions.
+
+        Returns number of active stream sessions updated.
+        """
+        # Map Plex webhook event to normalized playback_state
+        state = "playing"
+        if "pause" in event.lower():
+            state = "paused"
+        elif "stop" in event.lower() or "scrobble" in event.lower():
+            state = "stopped"
+        elif "buffer" in event.lower():
+            state = "buffering"
+
+        matched_count = 0
+        with self._lock:
+            clean_file = (file_path or "").strip().lower()
+            file_name = clean_file.split("/")[-1].split("\\")[-1] if clean_file else ""
+            clean_title = (title or "").strip().lower()
+
+            for stream_id, tracker in self._sessions.items():
+                if not tracker.is_active and state != "stopped":
+                    continue
+
+                matched = False
+                stream_title_lower = tracker.title.lower()
+                stream_id_lower = stream_id.lower()
+
+                # 1. Match by file path / file name in stream_id or title
+                if (
+                    file_name
+                    and (
+                        file_name in stream_title_lower or file_name in stream_id_lower
+                    )
+                    or clean_file
+                    and (
+                        clean_file in stream_title_lower
+                        or clean_file in stream_id_lower
+                    )
+                    or clean_title
+                    and (
+                        clean_title in stream_title_lower
+                        or stream_title_lower in clean_title
+                    )
+                    or client_ip
+                    and tracker.client_ip == client_ip
+                ):
+                    matched = True
+
+                if matched:
+                    tracker.update_attribution(
+                        user_name=user_name,
+                        player_device=player_device,
+                        playback_state=state,
+                        decision=decision,
+                        video_decision=video_decision,
+                        audio_decision=audio_decision,
+                        quality_profile=quality_profile,
+                        media_resolution=media_resolution,
+                        media_bitrate_kbps=media_bitrate_kbps,
+                    )
+                    matched_count += 1
+
+            # Also log discrete telemetry event for visibility
+            self._add_event_locked(
+                stream_id=f"plex:{user_name or 'user'}:{event}",
+                event_type="STREAM_START"
+                if state == "playing"
+                else ("STREAM_COMPLETE" if state == "stopped" else "STREAM_READ"),
+                title=title or file_name or "Plex Media",
+                details={
+                    "event": event,
+                    "user": user_name,
+                    "player": player_device,
+                    "decision": decision,
+                    "matched_streams": matched_count,
+                    "guids": guids or [],
+                },
+            )
+
+        return matched_count
 
     def record_cache_hit(
         self, stream_id: str | None = None, title: str | None = None, nbytes: int = 0

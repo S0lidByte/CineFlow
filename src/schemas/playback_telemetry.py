@@ -52,6 +52,42 @@ class StreamSessionMetric(BaseModel):
     cdn_url_refreshed: bool = Field(
         False, description="Whether CDN link refresh was triggered during playback"
     )
+    # Plex & Tautulli session attribution (Phase 4.9 ECO-001)
+    user_name: str | None = Field(None, description="Plex/client username (e.g. Alice)")
+    player_device: str | None = Field(
+        None, description="Plex client device/player name (e.g. Apple TV 4K, Shield)"
+    )
+    playback_state: Literal["playing", "paused", "buffering", "stopped", "unknown"] = (
+        Field(
+            "playing",
+            description="Current playback state (playing, paused, buffering, stopped)",
+        )
+    )
+    decision: (
+        Literal["direct_play", "direct_stream", "transcode", "direct", "unknown"] | None
+    ) = Field(
+        None,
+        description="Playback streaming decision (direct_play, direct_stream, transcode)",
+    )
+    video_decision: str | None = Field(
+        None, description="Video stream transcode/direct decision"
+    )
+    audio_decision: str | None = Field(
+        None, description="Audio stream transcode/direct decision"
+    )
+    quality_profile: str | None = Field(
+        None, description="Playback quality label (e.g. 4K, 1080p, 720p, Original)"
+    )
+    media_resolution: str | None = Field(
+        None, description="Media resolution string (e.g. 4k, 1080, 720)"
+    )
+    media_bitrate_kbps: int | None = Field(
+        None, description="Media stream bitrate in kbps"
+    )
+    session_badge: str | None = Field(
+        None,
+        description="Formatted live session badge (e.g. 'Alice · 4K Direct Play · 42 Mbps · RD Cache')",
+    )
 
 
 class AggregatePlaybackMetrics(BaseModel):
