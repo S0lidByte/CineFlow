@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.39.0](https://github.com/S0lidByte/CineFlow/compare/v1.38.0...v1.39.0) (2026-09-25)
+
+
+### Features
+
+* **ecosystem:** plex stream session attribution and TRaSH guides custom formats scoring (ECO-001, ECO-002) ([0319367](https://github.com/S0lidByte/CineFlow/commit/031936726b287a253d646333077d4ad2cd42ce15))
+* **rebrand:** container defaults and entrypoint interpreter precedence (REBRAND-003) ([8688f3d](https://github.com/S0lidByte/CineFlow/commit/8688f3d48c238fbc8d389310b50494a2dcb60eca))
+
+
+### Documentation
+
+* **rebrand:** documentation, migration guides & API reference audit (REBRAND-004) ([3105994](https://github.com/S0lidByte/CineFlow/commit/3105994989feab9a0167984755eee79bd3aa01ec))
+
 ## [1.38.0](https://github.com/S0lidByte/CineFlow/compare/v1.37.0...v1.38.0) (2026-09-23)
 
 
