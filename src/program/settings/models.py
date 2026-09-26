@@ -9,6 +9,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    PrivateAttr,
     field_validator,
     model_validator,
 )
@@ -1060,7 +1061,42 @@ class ScraperModel(Observable):
 # Version Ranking Model (set application defaults here!)
 
 
-class RTNSettingsModel(SettingsModel, Observable): ...
+class RTNSettingsModel(SettingsModel, Observable):
+    _trash_scoring_ref: Any = PrivateAttr(default=None)
+
+    def bind_trash_scoring(self, ref: Any) -> None:
+        """Bind a reference to the scraping trash_scoring configuration."""
+        self._trash_scoring_ref = ref
+
+    @property
+    def trash_scoring(self) -> Any:
+        if self._trash_scoring_ref is not None:
+            return self._trash_scoring_ref
+        try:
+            from program.settings import settings_manager
+
+            if hasattr(settings_manager, "settings") and hasattr(
+                settings_manager.settings, "scraping"
+            ):
+                return getattr(
+                    settings_manager.settings.scraping, "trash_scoring", None
+                )
+        except Exception:
+            pass
+        return None
+
+    @trash_scoring.setter
+    def trash_scoring(self, value: Any) -> None:
+        self._trash_scoring_ref = value
+        try:
+            from program.settings import settings_manager
+
+            if hasattr(settings_manager, "settings") and hasattr(
+                settings_manager.settings, "scraping"
+            ):
+                settings_manager.settings.scraping.trash_scoring = value
+        except Exception:
+            pass
 
 
 def _default_ranking_anime() -> RTNSettingsModel:
@@ -1379,6 +1415,15 @@ class AppModel(Observable):
         default_factory=lambda: StreamModel(), description="Stream configuration"
     )
 
+    @property
+    def trash_scoring(self) -> Any:
+        return getattr(self.scraping, "trash_scoring", None)
+
+    @trash_scoring.setter
+    def trash_scoring(self, value: Any) -> None:
+        if hasattr(self, "scraping"):
+            self.scraping.trash_scoring = value
+
     @field_validator("log_level", mode="before")
     def check_debug(cls, v: str | bool):
         if v is True:
@@ -1397,3 +1442,9 @@ class AppModel(Observable):
 
         if self.api_key == "":
             self.api_key = generate_api_key()
+
+        if hasattr(self, "scraping") and hasattr(self.scraping, "trash_scoring"):
+            if hasattr(self, "ranking"):
+                self.ranking.bind_trash_scoring(self.scraping.trash_scoring)
+            if hasattr(self, "ranking_anime"):
+                self.ranking_anime.bind_trash_scoring(self.scraping.trash_scoring)

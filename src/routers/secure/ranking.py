@@ -120,6 +120,10 @@ class RankingTestRequest(BaseModel):
         default=None,
         description="Optional TRaSH profile ID to evaluate with",
     )
+    media_type: str | None = Field(
+        default=None,
+        description="Optional media type ('movie', 'show') for TRaSH profile resolution",
+    )
 
     @field_validator("aliases")
     @classmethod
@@ -178,6 +182,13 @@ class TrashEvaluateRequest(BaseModel):
     raw_title: str = Field(min_length=1, description="Release title to evaluate")
     profile_id: str | None = Field(
         default=None, description="Optional profile ID to evaluate with"
+    )
+    media_type: str | None = Field(
+        default=None,
+        description="Optional media type ('movie', 'show') for profile resolution",
+    )
+    is_anime: bool = Field(
+        default=False, description="Whether release is anime (resolves anime profile)"
     )
     min_score: int | None = Field(
         default=None, description="Optional minimum score threshold"
@@ -481,7 +492,9 @@ async def evaluate_trash_custom_formats(
 
     profile = None
     if body.profile_id:
-        if trash_cfg:
+        if trash_cfg and hasattr(trash_cfg, "resolve_profile"):
+            profile = trash_cfg.resolve_profile(profile_id=body.profile_id)
+        elif trash_cfg:
             profile = trash_cfg.get_profile(body.profile_id)
         if profile is None:
             # Check default profiles
@@ -489,14 +502,18 @@ async def evaluate_trash_custom_formats(
                 if p.profile_id == body.profile_id:
                     profile = p
                     break
-    elif trash_cfg and getattr(trash_cfg, "enabled", False):
+    elif trash_cfg and hasattr(trash_cfg, "resolve_profile"):
+        profile = trash_cfg.resolve_profile(
+            media_type=body.media_type, is_anime=body.is_anime
+        )
+    elif trash_cfg:
         profile = trash_cfg.get_active_profile()
 
     summary = evaluate_trash_release(
         raw_title=body.raw_title,
         formats=formats,
         profile=profile,
-        min_score=body.min_score,
+        min_score_threshold=body.min_score,
         reject_negative_scores=body.reject_negative_scores,
         reject_unwanted_sources=body.reject_unwanted_sources,
     )
@@ -540,7 +557,11 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
             profile = None
             if body.trash_profile and trash_cfg:
                 profile = trash_cfg.get_profile(body.trash_profile)
-            elif trash_cfg and getattr(trash_cfg, "enabled", False):
+            elif trash_cfg and hasattr(trash_cfg, "resolve_profile"):
+                profile = trash_cfg.resolve_profile(
+                    media_type=body.media_type, is_anime=body.for_anime
+                )
+            elif trash_cfg:
                 profile = trash_cfg.get_active_profile()
             trash_summary = evaluate_trash_release(
                 raw_title=body.raw_title,
@@ -550,7 +571,7 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
                     else None
                 ),
                 profile=profile,
-                min_score=trash_cfg.min_score if trash_cfg else None,
+                min_score_threshold=trash_cfg.min_score if trash_cfg else None,
                 reject_negative_scores=(
                     trash_cfg.reject_negative_scores if trash_cfg else False
                 ),

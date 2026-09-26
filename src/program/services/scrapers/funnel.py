@@ -53,22 +53,48 @@ def bucket_rtn_reason(exc: BaseException) -> str:
     return type(exc).__name__
 
 
+def bucket_trash_reason(reason: str | None) -> str:
+    """Map a TRaSH rejection reason string to a clean, aggregatable reason bucket."""
+    if not reason:
+        return "unspecified_trash_reject"
+    clean = reason.strip().lower()
+    if (
+        "unwanted source" in clean
+        or "critical" in clean
+        or "cam" in clean
+        or "telesync" in clean
+    ):
+        return "unwanted_source"
+    if "negative" in clean:
+        return "negative_score"
+    if "below minimum" in clean or "threshold" in clean:
+        return "below_min_threshold"
+    slug = re.sub(r"[^\w]+", "_", clean).strip("_")
+    return slug[:48] if slug else "unspecified_trash_reject"
+
+
 @dataclass
 class ScrapeFunnelStats:
     """Per-scrape funnel counts (one item, one scrape pass)."""
 
     found: int = 0
     rtn_rejected: int = 0
+    trash_rejected: int = 0
     content_filtered: int = 0
     ranked: int = 0
     already_known: int = 0
     blacklisted: int = 0
     new: int = 0
     rtn_reasons: Counter[str] = field(default_factory=lambda: Counter[str]())
+    trash_reasons: Counter[str] = field(default_factory=lambda: Counter[str]())
 
     def record_rtn_reject(self, exc: BaseException) -> None:
         self.rtn_rejected += 1
         self.rtn_reasons[bucket_rtn_reason(exc)] += 1
+
+    def record_trash_reject(self, reason: str | None = None) -> None:
+        self.trash_rejected += 1
+        self.trash_reasons[bucket_trash_reason(reason)] += 1
 
     def record_content_filter(self) -> None:
         self.content_filtered += 1
@@ -93,6 +119,9 @@ class ScrapeFunnelStats:
     def top_rtn_reasons(self, limit: int = 5) -> list[tuple[str, int]]:
         return self.rtn_reasons.most_common(limit)
 
+    def top_trash_reasons(self, limit: int = 5) -> list[tuple[str, int]]:
+        return self.trash_reasons.most_common(limit)
+
     def to_summary(
         self, *, item_id: int | None = None, item_log: str | None = None
     ) -> dict[str, Any]:
@@ -107,10 +136,15 @@ class ScrapeFunnelStats:
             "already_known": self.already_known,
             "blacklisted": self.blacklisted,
             "rtn_rejected": self.rtn_rejected,
+            "trash_rejected": self.trash_rejected,
             "content_filtered": self.content_filtered,
             "rtn_top": [
                 {"reason": reason, "count": count}
                 for reason, count in self.top_rtn_reasons(5)
+            ],
+            "trash_top": [
+                {"reason": reason, "count": count}
+                for reason, count in self.top_trash_reasons(5)
             ],
         }
 
@@ -119,12 +153,18 @@ class ScrapeFunnelStats:
         if self.rtn_reasons:
             top = self.top_rtn_reasons(5)
             reasons = " rtn_top=[" + ", ".join(f"{k}:{v}" for k, v in top) + "]"
+        trash_reasons = ""
+        if self.trash_reasons:
+            t_top = self.top_trash_reasons(5)
+            trash_reasons = (
+                " trash_top=[" + ", ".join(f"{k}:{v}" for k, v in t_top) + "]"
+            )
         return (
             f"Scrape funnel for {item_log}: "
             f"found={self.found} ranked={self.ranked} new={self.new} "
             f"already_known={self.already_known} blacklisted={self.blacklisted} "
-            f"rtn_rejected={self.rtn_rejected} "
-            f"content_filtered={self.content_filtered}{reasons}"
+            f"rtn_rejected={self.rtn_rejected} trash_rejected={self.trash_rejected} "
+            f"content_filtered={self.content_filtered}{reasons}{trash_reasons}"
         )
 
 

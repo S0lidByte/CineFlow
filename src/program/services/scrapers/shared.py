@@ -336,9 +336,11 @@ def _should_retry_as_untagged_english(
     allow_english = getattr(
         settings.options,
         "allow_english_in_languages",
-        True
-        if getattr(settings.options, "get", None) is None
-        else settings.options.get("allow_english_in_languages", True),  # type: ignore[union-attr]
+        (
+            True
+            if getattr(settings.options, "get", None) is None
+            else settings.options.get("allow_english_in_languages", True)
+        ),  # type: ignore[union-attr]
     )
     if not allow_english:
         return False
@@ -922,10 +924,15 @@ def _accumulate_ranked_torrents(
         scraping_curr = _scraping_settings()
         trash_cfg = getattr(scraping_curr, "trash_scoring", None)
         if trash_cfg and getattr(trash_cfg, "enabled", False):
+            effective_profile = (
+                trash_cfg.get_profile_for_item(item)
+                if hasattr(trash_cfg, "get_profile_for_item")
+                else trash_cfg.get_active_profile()
+            )
             trash_summary = evaluate_trash_release(
                 raw_title=raw_title,
                 formats=trash_cfg.custom_formats if trash_cfg.custom_formats else None,
-                profile=trash_cfg.get_active_profile(),
+                profile=effective_profile,
                 min_score=trash_cfg.min_score,
                 reject_negative_scores=trash_cfg.reject_negative_scores,
                 reject_unwanted_sources=trash_cfg.reject_unwanted_sources,
@@ -936,7 +943,7 @@ def _accumulate_ranked_torrents(
                     f"{raw_title} ({trash_summary.rejection_reason})"
                 )
                 if funnel is not None:
-                    funnel.record_content_filter()
+                    funnel.record_trash_reject(trash_summary.rejection_reason)
                 continue
 
             if trash_summary.total_score != 0:

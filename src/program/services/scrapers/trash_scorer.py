@@ -23,10 +23,24 @@ from program.settings.trash_models import (
     TrashProfile,
 )
 
+# Safety limits to defend against hostile or malformed custom format regex
+MAX_PATTERN_LENGTH = 1024
+MAX_RAW_TITLE_LENGTH = 2048
+REGEX_TIMEOUT_SECONDS = 0.25
+
 
 @lru_cache(maxsize=512)
 def _compile_pattern(pattern: str) -> regex_lib.Pattern[str]:
-    """Compile regex pattern with case-insensitivity unless case-flagged."""
+    """Compile regex pattern with case-insensitivity unless case-flagged.
+
+    Raises ValueError if pattern exceeds maximum allowed length, or regex_lib.error
+    if pattern syntax is invalid.
+    """
+    if len(pattern) > MAX_PATTERN_LENGTH:
+        raise ValueError(
+            f"Pattern exceeds maximum allowed length of {MAX_PATTERN_LENGTH} characters"
+        )
+
     flags = regex_lib.IGNORECASE
     clean_pattern = pattern
     if len(pattern) >= 2 and pattern.startswith("/") and pattern.endswith("/"):
@@ -45,11 +59,27 @@ def evaluate_trash_condition(condition: TrashCondition, raw_title: str) -> bool:
     if not condition.pattern:
         return True
 
+    safe_title = (
+        raw_title[:MAX_RAW_TITLE_LENGTH]
+        if len(raw_title) > MAX_RAW_TITLE_LENGTH
+        else raw_title
+    )
+
     try:
         compiled = _compile_pattern(condition.pattern)
-        matched = bool(compiled.search(raw_title))
+        matched = bool(compiled.search(safe_title, timeout=REGEX_TIMEOUT_SECONDS))
+    except TimeoutError:
+        logger.warning(
+            f"TRaSH regex evaluation timed out after {REGEX_TIMEOUT_SECONDS}s for pattern: {condition.pattern[:64]}"
+        )
+        matched = False
+    except (regex_lib.error, ValueError) as e:
+        logger.warning(f"TRaSH invalid regex pattern '{condition.pattern[:64]}': {e}")
+        matched = False
     except Exception as e:
-        logger.trace(f"Failed regex evaluation for pattern '{condition.pattern}': {e}")
+        logger.trace(
+            f"Failed regex evaluation for pattern '{condition.pattern[:64]}': {e}"
+        )
         matched = False
 
     return not matched if condition.negate else matched
@@ -61,7 +91,9 @@ def evaluate_trash_custom_format(
     score_override: int | None = None,
 ) -> TrashFormatMatchResult:
     """Evaluate whether a custom format matches the given release title."""
-    effective_score = score_override if score_override is not None else custom_format.score
+    effective_score = (
+        score_override if score_override is not None else custom_format.score
+    )
 
     if not custom_format.enabled or not custom_format.conditions:
         return TrashFormatMatchResult(
@@ -115,6 +147,7 @@ def evaluate_trash_release(
     profile: TrashProfile | None = None,
     *,
     min_score: int | None = None,
+    min_score_threshold: int | None = None,
     reject_negative_scores: bool = False,
     reject_unwanted_sources: bool = True,
 ) -> TrashEvaluationSummary:
@@ -125,6 +158,7 @@ def evaluate_trash_release(
         formats: List of custom formats to evaluate (defaults to standard catalog).
         profile: Optional active profile with score overrides and cutoff rules.
         min_score: Minimum total score threshold (releases below are rejected).
+        min_score_threshold: Alias for min_score for cross-module compatibility.
         reject_negative_scores: If True, net negative scores trigger rejection.
         reject_unwanted_sources: If True, CAM/TS sources with score <= -10000 trigger instant rejection.
     """
@@ -132,13 +166,24 @@ def evaluate_trash_release(
         formats = get_default_trash_custom_formats()
 
     score_overrides = profile.format_scores if profile else {}
-    effective_min_score = min_score if min_score is not None else (profile.min_score if profile else None)
-    effective_reject_neg = reject_negative_scores or (profile.reject_negative_scores if profile else False)
+    target_min = min_score if min_score is not None else min_score_threshold
+    effective_min_score = (
+        target_min
+        if target_min is not None
+        else (profile.min_score if profile else None)
+    )
+    effective_reject_neg = reject_negative_scores or (
+        profile.reject_negative_scores if profile else False
+    )
 
     total_score = 0
+    additive_score = 0
+    negative_score = 0
     matched_results: list[TrashFormatMatchResult] = []
+    categorized_matches: dict[str, list[str]] = {}
     rejected = False
     rejection_reason = None
+    active_profile_id = profile.profile_id if profile else None
 
     for cf in formats:
         override = score_overrides.get(cf.trash_id)
@@ -146,23 +191,44 @@ def evaluate_trash_release(
         if result.matched:
             matched_results.append(result)
             total_score += result.score
+            if result.score >= 0:
+                additive_score += result.score
+            else:
+                negative_score += result.score
+
+            categorized_matches.setdefault(result.category, []).append(result.name)
 
             # Check for critical rejection criteria
             if reject_unwanted_sources and result.score <= -10000:
                 rejected = True
-                rejection_reason = f"Rejected by critical unwanted source format: {result.name}"
+                rejection_reason = (
+                    f"Rejected by critical unwanted source format: {result.name}"
+                )
 
     if not rejected and effective_reject_neg and total_score < 0:
         rejected = True
         rejection_reason = f"Rejected due to negative TRaSH net score ({total_score})"
 
-    if not rejected and effective_min_score is not None and total_score < effective_min_score:
+    if (
+        not rejected
+        and effective_min_score is not None
+        and total_score < effective_min_score
+    ):
         rejected = True
         rejection_reason = f"Rejected: TRaSH score ({total_score}) is below minimum threshold ({effective_min_score})"
 
+    cutoff_reached = False
+    if profile:
+        cutoff_reached = total_score >= profile.cutoff_score
+
     return TrashEvaluationSummary(
         total_score=total_score,
+        additive_score=additive_score,
+        negative_score=negative_score,
         matched_formats=matched_results,
         rejected_by_lq=rejected,
         rejection_reason=rejection_reason,
+        active_profile_id=active_profile_id,
+        cutoff_reached=cutoff_reached,
+        categorized_matches=categorized_matches,
     )

@@ -87,7 +87,22 @@ def get_default_trash_custom_formats() -> list[TrashCustomFormat]:
                 ),
             ],
         ),
-
+        TrashCustomFormat(
+            trash_id="imax-enhanced",
+            name="IMAX Enhanced / IMAX Edition",
+            category="hdr_dv",
+            description="IMAX Enhanced or expanded aspect ratio edition",
+            default_score=400,
+            score=400,
+            enabled=True,
+            conditions=[
+                TrashCondition(
+                    name="Has IMAX tag",
+                    pattern=r"\b(?:IMAX[ .-]Enhanced|IMAX)\b",
+                    required=True,
+                ),
+            ],
+        ),
         # --- Advanced & Immersive Audio ---
         TrashCustomFormat(
             trash_id="truehd-atmos",
@@ -176,6 +191,22 @@ def get_default_trash_custom_formats() -> list[TrashCustomFormat]:
             ],
         ),
         TrashCustomFormat(
+            trash_id="audio-pcm",
+            name="PCM / LPCM Uncompressed Audio",
+            category="audio_advanced",
+            description="Uncompressed Pulse-Code Modulation audio stream",
+            default_score=600,
+            score=600,
+            enabled=True,
+            conditions=[
+                TrashCondition(
+                    name="PCM tag",
+                    pattern=r"\b(?:LPCM|PCM)\b",
+                    required=True,
+                ),
+            ],
+        ),
+        TrashCustomFormat(
             trash_id="ddp-atmos",
             name="Dolby Digital Plus with Atmos",
             category="audio_advanced",
@@ -239,7 +270,6 @@ def get_default_trash_custom_formats() -> list[TrashCustomFormat]:
                 ),
             ],
         ),
-
         # --- Source & Remux Tiers ---
         TrashCustomFormat(
             trash_id="remux-tier-01",
@@ -299,7 +329,6 @@ def get_default_trash_custom_formats() -> list[TrashCustomFormat]:
                 ),
             ],
         ),
-
         # --- WEB-DL Tiers ---
         TrashCustomFormat(
             trash_id="web-tier-01",
@@ -349,7 +378,87 @@ def get_default_trash_custom_formats() -> list[TrashCustomFormat]:
                 ),
             ],
         ),
-
+        # --- Streaming Services ---
+        TrashCustomFormat(
+            trash_id="streaming-apple-atvp",
+            name="Apple TV+ (High Bitrate Web)",
+            category="streaming_service",
+            description="Apple TV+ streaming source (known for highest 4K WEB-DL bitrates)",
+            default_score=600,
+            score=600,
+            enabled=True,
+            conditions=[
+                TrashCondition(
+                    name="Apple TV+ tag",
+                    pattern=r"\b(?:ATVP|AppleTV|Apple[ .-]TV(?:\+)?)\b",
+                    required=True,
+                ),
+            ],
+        ),
+        TrashCustomFormat(
+            trash_id="streaming-disney-dsnp",
+            name="Disney+ (High Bitrate Web)",
+            category="streaming_service",
+            description="Disney+ streaming source",
+            default_score=500,
+            score=500,
+            enabled=True,
+            conditions=[
+                TrashCondition(
+                    name="Disney+ tag",
+                    pattern=r"\b(?:DSNP|Disney(?:\+)?|DisneyPlus)\b",
+                    required=True,
+                ),
+            ],
+        ),
+        TrashCustomFormat(
+            trash_id="streaming-max-hmax",
+            name="HBO Max / MAX",
+            category="streaming_service",
+            description="HBO Max / Warner Bros streaming source",
+            default_score=450,
+            score=450,
+            enabled=True,
+            conditions=[
+                TrashCondition(
+                    name="MAX / HBO Max tag",
+                    pattern=r"\b(?:HMAX|MAX|HBO[ .-]Max)\b",
+                    required=True,
+                ),
+            ],
+        ),
+        TrashCustomFormat(
+            trash_id="streaming-amazon-amzn",
+            name="Amazon Prime Video",
+            category="streaming_service",
+            description="Amazon Prime Video streaming source",
+            default_score=400,
+            score=400,
+            enabled=True,
+            conditions=[
+                TrashCondition(
+                    name="Amazon Prime tag",
+                    pattern=r"\b(?:AMZN|Amazon|AmazonPrime)\b",
+                    required=True,
+                ),
+            ],
+        ),
+        TrashCustomFormat(
+            trash_id="streaming-netflix-nf",
+            name="Netflix",
+            category="streaming_service",
+            description="Netflix streaming source",
+            default_score=400,
+            score=400,
+            enabled=True,
+            conditions=[
+                TrashCondition(
+                    name="Netflix tag",
+                    pattern=r"\b(?:NF|Netflix)\b",
+                    required=True,
+                ),
+            ],
+        ),
         # --- Unwanted LQ Penalties & Rejections ---
         TrashCustomFormat(
             trash_id="lq-release-groups",
@@ -415,7 +524,60 @@ def get_default_trash_custom_formats() -> list[TrashCustomFormat]:
                 ),
             ],
         ),
-
+        TrashCustomFormat(
+            trash_id="bad-dual-groups",
+            name="Bad Dual Audio / Dub Groups",
+            category="unwanted_lq",
+            description="Releases with mangled, desynced, or poor quality dual audio dubs",
+            default_score=-2500,
+            score=-2500,
+            enabled=True,
+            conditions=[
+                TrashCondition(
+                    name="Bad dual audio / dub marker",
+                    pattern=r"\b(?:Dual-Audio-Poor|Dubbed-Mismatch|DUB-LOW)\b",
+                    required=True,
+                ),
+            ],
+        ),
+        TrashCustomFormat(
+            trash_id="retags",
+            name="P2P Site Retags / Watermarked Re-releases",
+            category="unwanted_lq",
+            description="Retagged, watermarked, or p2p re-encoded scene releases",
+            default_score=-2000,
+            score=-2000,
+            enabled=True,
+            conditions=[
+                TrashCondition(
+                    name="Retag or p2p watermark tag",
+                    pattern=r"\[(?:rarbg|eztv|TGx|ettv|rartv)\]|-(?:xpost|retag|rarbg|eztv|TGx|ettv)\b|\b(?:xpost|retag)\b",
+                    required=True,
+                ),
+            ],
+        ),
+        TrashCustomFormat(
+            trash_id="x265-hd-penalty",
+            name="x265 / HEVC HD SDR Penalty",
+            category="unwanted_lq",
+            description="x265/HEVC encodes of 720p/1080p SDR content (often bitrate-starved low quality encodes)",
+            default_score=-1500,
+            score=-1500,
+            enabled=True,
+            conditions=[
+                TrashCondition(
+                    name="Is 720p or 1080p with x265/HEVC",
+                    pattern=r"\b(?:1080p|720p)\b.*\b(?:x265|HEVC|H\.?265)\b|\b(?:x265|HEVC|H\.?265)\b.*\b(?:1080p|720p)\b",
+                    required=True,
+                ),
+                TrashCondition(
+                    name="Lacks HDR or DV",
+                    pattern=r"\b(?:HDR10(?:\+)?|HDR|DV|Dolby[ .-]Vision|DoVi)\b",
+                    negate=True,
+                    required=True,
+                ),
+            ],
+        ),
         # --- Anime Fansubs & Dual Audio ---
         TrashCustomFormat(
             trash_id="anime-tier-01",
@@ -483,11 +645,13 @@ def get_default_trash_profiles() -> list[TrashProfile]:
                 "dv-no-fallback": 200,
                 "hdr10plus": 600,
                 "hdr10": 450,
+                "imax-enhanced": 400,
                 "truehd-atmos": 750,
                 "dts-x": 700,
                 "dts-hd-ma": 500,
                 "truehd": 450,
                 "flac": 400,
+                "audio-pcm": 600,
                 "ddp-atmos": 350,
                 "ddp-51-71": 200,
                 "channels-71": 200,
@@ -498,10 +662,18 @@ def get_default_trash_profiles() -> list[TrashProfile]:
                 "web-tier-01": 1000,
                 "web-tier-02": 500,
                 "web-tier-03": 250,
+                "streaming-apple-atvp": 600,
+                "streaming-disney-dsnp": 500,
+                "streaming-max-hmax": 450,
+                "streaming-amazon-amzn": 400,
+                "streaming-netflix-nf": 400,
                 "lq-release-groups": -5000,
                 "unwanted-video-sources": -10000,
                 "ai-upscaled-fake": -3000,
                 "extras-samples-unwanted": -2500,
+                "bad-dual-groups": -2500,
+                "retags": -2000,
+                "x265-hd-penalty": -1500,
                 "anime-tier-01": 1200,
                 "anime-dual-audio": 500,
             },
@@ -518,11 +690,13 @@ def get_default_trash_profiles() -> list[TrashProfile]:
                 "dv-no-fallback": 100,
                 "hdr10plus": 700,
                 "hdr10": 500,
+                "imax-enhanced": 500,
                 "truehd-atmos": 1200,
                 "dts-x": 1000,
                 "dts-hd-ma": 800,
                 "truehd": 600,
                 "flac": 500,
+                "audio-pcm": 800,
                 "remux-tier-01": 2500,
                 "remux-tier-02": 1800,
                 "remux-tier-03": 1000,
@@ -531,6 +705,9 @@ def get_default_trash_profiles() -> list[TrashProfile]:
                 "lq-release-groups": -10000,
                 "unwanted-video-sources": -10000,
                 "ai-upscaled-fake": -5000,
+                "bad-dual-groups": -5000,
+                "retags": -3000,
+                "x265-hd-penalty": -3000,
             },
         ),
         TrashProfile(
@@ -549,8 +726,16 @@ def get_default_trash_profiles() -> list[TrashProfile]:
                 "web-tier-01": 1500,
                 "web-tier-02": 800,
                 "web-tier-03": 400,
+                "streaming-apple-atvp": 800,
+                "streaming-disney-dsnp": 700,
+                "streaming-max-hmax": 600,
+                "streaming-amazon-amzn": 500,
+                "streaming-netflix-nf": 500,
                 "lq-release-groups": -5000,
                 "unwanted-video-sources": -10000,
+                "bad-dual-groups": -2500,
+                "retags": -2000,
+                "x265-hd-penalty": -1500,
             },
         ),
         TrashProfile(
@@ -565,8 +750,11 @@ def get_default_trash_profiles() -> list[TrashProfile]:
                 "anime-tier-02": 800,
                 "anime-dual-audio": 800,
                 "flac": 600,
+                "audio-pcm": 600,
                 "lq-release-groups": -5000,
                 "unwanted-video-sources": -10000,
+                "bad-dual-groups": -5000,
+                "retags": -2000,
             },
         ),
     ]
