@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.41.0](https://github.com/S0lidByte/CineFlow/compare/v1.40.0...v1.41.0) (2026-09-26)
+
+
+### Features
+
+* **media:** enrich parsed audio channels & support media quality matrix (AVAIL-001) ([16730e5](https://github.com/S0lidByte/CineFlow/commit/16730e591814f46c11e5d4a8728fc10ea504c6c1))
+* **vfs:** certify adaptive prefetch and real-fuse streaming ([99fd2f7](https://github.com/S0lidByte/CineFlow/commit/99fd2f7f07a313347b5dbb512dbe18160c32b54a))
+
 ## [1.40.0](https://github.com/S0lidByte/CineFlow/compare/v1.39.0...v1.40.0) (2026-09-26)
 
 
