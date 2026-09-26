@@ -247,9 +247,24 @@ class MediaMetadata(BaseModel):
         # Extract audio tracks from parsed data
         audio_tracks = list[AudioMetadata]()
 
+        parsed_channels: int | None = None
+        if parsed_data.channels:
+            first_ch = str(parsed_data.channels[0]).strip()
+            if "." in first_ch:
+                parts = first_ch.split(".")
+                if parts[0].isdigit():
+                    sub = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+                    parsed_channels = int(parts[0]) + sub
+            elif first_ch.isdigit():
+                parsed_channels = int(first_ch)
+
         if parsed_data.audio:
             for audio_codec in parsed_data.audio:
-                audio_tracks.append(AudioMetadata(codec=audio_codec))
+                audio_tracks.append(
+                    AudioMetadata(codec=audio_codec, channels=parsed_channels)
+                )
+        elif parsed_channels is not None:
+            audio_tracks.append(AudioMetadata(channels=parsed_channels))
 
         # Extract subtitle tracks from parsed data
         subtitle_tracks = list[SubtitleMetadata]()
