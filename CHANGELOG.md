@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.40.0](https://github.com/S0lidByte/CineFlow/compare/v1.39.0...v1.40.0) (2026-09-26)
+
+
+### Features
+
+* **trash:** complete TRASH-001 evidence closure ([85504f2](https://github.com/S0lidByte/CineFlow/commit/85504f290947a7ff678d296e14a2100043164505))
+
+
+### Bug Fixes
+
+* **test-stack:** configure RFC-compliant network alias for zilean-db in stack-test compose ([6bd0a45](https://github.com/S0lidByte/CineFlow/commit/6bd0a45376695cfd67c35ce014716a4afb84395b))
+
 ## [1.39.0](https://github.com/S0lidByte/CineFlow/compare/v1.38.0...v1.39.0) (2026-09-25)
 
 
