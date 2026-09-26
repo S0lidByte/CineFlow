@@ -93,7 +93,7 @@ services:
   zilean_postgres:
     image: postgres:16-alpine
     container_name: cineflow-test-zilean-db
-    hostname: zilean_postgres
+    hostname: zilean-db
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -101,6 +101,11 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - cineflow_test_zilean_pg:/var/lib/postgresql/data
+    networks:
+      default:
+        aliases:
+          - zilean-db
+          - zilean_postgres
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres >/dev/null 2>&1 || exit 1"]
       interval: 3s
@@ -116,7 +121,7 @@ services:
     ports:
       - "8181:8181"
     environment:
-      Zilean__Database__ConnectionString: Host=zilean_postgres;Port=5432;Database=zilean;Username=postgres;Password=postgres
+      Zilean__Database__ConnectionString: Host=zilean-db;Port=5432;Database=zilean;Username=postgres;Password=postgres
     volumes:
       - cineflow_test_zilean_data:/app/data
     depends_on:
