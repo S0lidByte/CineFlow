@@ -41,6 +41,7 @@ class GetEntryByOriginalFilenameResult(BaseModel):
     created: str | None
     modified: str | None
     entry_type: Literal["media", "subtitle"]
+    bitrate: int | None = None
 
     @property
     def url(self) -> str | None:
@@ -251,6 +252,10 @@ class VFSDatabase:
                         session=session,
                     )
 
+                bitrate: int | None = None
+                if entry.media_metadata and hasattr(entry.media_metadata, "bitrate"):
+                    bitrate = entry.media_metadata.bitrate
+
                 return GetEntryByOriginalFilenameResult(
                     original_filename=entry.original_filename,
                     download_url=download_url,
@@ -264,6 +269,7 @@ class VFSDatabase:
                     # so entry_type is always "media" here. Subtitles are read directly
                     # from the DB by get_subtitle_content() and never reach this path.
                     entry_type="media",
+                    bitrate=bitrate,
                 )
         except DebridServiceLinkUnavailable:
             raise

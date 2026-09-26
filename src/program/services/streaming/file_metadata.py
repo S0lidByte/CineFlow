@@ -8,3 +8,4 @@ class FileMetadata:
     original_filename: str
     file_size: int
     path: str
+    bitrate: int | None = None

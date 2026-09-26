@@ -2607,6 +2607,15 @@ class RivenVFS(pyfuse3.Operations):
             if not entry_info or not entry_info.url or not entry_info.provider:
                 raise pyfuse3.FUSEError(errno.ENOENT)
 
+            raw_bitrate = getattr(entry_info, "bitrate", None)
+            stream_bitrate = (
+                raw_bitrate
+                if isinstance(raw_bitrate, int)
+                and not isinstance(raw_bitrate, bool)
+                and raw_bitrate > 0
+                else None
+            )
+
             self._active_streams[stream_key] = MediaStream(
                 fh=fh,
                 file_size=file_size,
@@ -2614,6 +2623,7 @@ class RivenVFS(pyfuse3.Operations):
                 original_filename=original_filename,
                 provider=entry_info.provider,
                 initial_url=entry_info.url,
+                bitrate=stream_bitrate,
                 nursery=self.stream_nursery,
                 http_pool=self.http_pool,
                 require_mount_http_pool=True,

@@ -126,7 +126,9 @@ class StreamSessionTracker:
                 self.media_resolution = media_resolution
                 if not self.quality_profile:
                     res_upper = media_resolution.upper()
-                    self.quality_profile = f"{res_upper}p" if res_upper.isdigit() else res_upper
+                    self.quality_profile = (
+                        f"{res_upper}p" if res_upper.isdigit() else res_upper
+                    )
             if media_bitrate_kbps is not None:
                 self.media_bitrate_kbps = media_bitrate_kbps
 
@@ -437,9 +439,11 @@ class PlaybackTelemetryCollector:
             # Also log discrete telemetry event for visibility
             self._add_event_locked(
                 stream_id=f"plex:{user_name or 'user'}:{event}",
-                event_type="STREAM_START"
-                if state == "playing"
-                else ("STREAM_COMPLETE" if state == "stopped" else "STREAM_READ"),
+                event_type=(
+                    "STREAM_START"
+                    if state == "playing"
+                    else ("STREAM_COMPLETE" if state == "stopped" else "STREAM_READ")
+                ),
                 title=title or file_name or "Plex Media",
                 details={
                     "event": event,

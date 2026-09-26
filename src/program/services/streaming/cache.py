@@ -1179,6 +1179,14 @@ class Cache:
         with self._thread_lock:
             return int(self._total_bytes), int(len(self._index))
 
+    @property
+    def usage_percentage(self) -> float:
+        """Percentage of cache capacity currently used (0.0 to 100.0)."""
+        if not self.cfg or self.cfg.max_size_bytes <= 0:
+            return 0.0
+        total_bytes, _ = self.sync_size_snapshot()
+        return min(100.0, (total_bytes / self.cfg.max_size_bytes) * 100.0)
+
     async def stats(self) -> CacheSnapshot:
         s = self._metrics.snapshot()
 

@@ -126,6 +126,7 @@ class MediaStream:
         nursery: trio.Nursery,
         provider: str,
         initial_url: str,
+        bitrate: int | None = None,
         http_pool: TrioStreamingHttpPool | None = None,
         require_mount_http_pool: bool = False,
     ) -> None:
@@ -175,10 +176,22 @@ class MediaStream:
             # falls back to the activity-based timeout path.
             self._created_at = 0.0
 
+        from .adaptive_prefetch import AdaptivePrefetchConfig, AdaptivePrefetchManager
+
+        self.adaptive_prefetch = AdaptivePrefetchManager(
+            config=AdaptivePrefetchConfig(
+                chunk_size_bytes=self.config.chunk_size,
+                default_fallback_chunks=self.config.prefetch_chunks,
+                sequential_tolerance_bytes=self.config.sequential_read_tolerance,
+            ),
+            initial_bitrate=bitrate,
+        )
+
         self.file_metadata = FileMetadata(
             file_size=file_size,
             path=path,
             original_filename=original_filename,
+            bitrate=bitrate,
         )
 
         self.chunker = Chunker(
@@ -355,13 +368,14 @@ class MediaStream:
     async def _run_opportunistic_prefetch(
         self,
         chunks: OrderedSet[Chunk],
-        process_chunks: Callable[[OrderedSet[Chunk]], Awaitable[None]],
+        process_chunks: Callable[..., Awaitable[None]],
         *,
         label: str,
+        prefetch_gen: int | None = None,
     ) -> bool:
         """Run prefetch without poisoning reads when an idle CDN socket is empty."""
         try:
-            await process_chunks(chunks)
+            await process_chunks(chunks, is_prefetch=True, prefetch_gen=prefetch_gen)
         except EmptyDataException as error:
             self._trace_stream(
                 f"{label} did not return data ({error}); keeping the stream "
@@ -458,6 +472,9 @@ class MediaStream:
 
                                 async def _process_chunks(
                                     chunks: OrderedSet[Chunk],
+                                    *,
+                                    is_prefetch: bool = False,
+                                    prefetch_gen: int | None = None,
                                 ) -> None:
                                     nonlocal needs_url_refresh, position
                                     if len(chunks) == 0:
@@ -470,6 +487,17 @@ class MediaStream:
                                             )
 
                                         return
+
+                                    if is_prefetch and prefetch_gen is not None:
+                                        if hasattr(
+                                            self, "adaptive_prefetch"
+                                        ) and self.adaptive_prefetch.should_abort_prefetch(
+                                            prefetch_gen
+                                        ):
+                                            self._trace_stream(
+                                                "Prefetch aborted before start: seek detected"
+                                            )
+                                            return
 
                                     if self.enable_tracing:
                                         logger.log(
@@ -513,6 +541,17 @@ class MediaStream:
                                         )
                                     ):
                                         for chunk in chunks:
+                                            if is_prefetch and prefetch_gen is not None:
+                                                if hasattr(
+                                                    self, "adaptive_prefetch"
+                                                ) and self.adaptive_prefetch.should_abort_prefetch(
+                                                    prefetch_gen
+                                                ):
+                                                    self._trace_stream(
+                                                        f"Prefetch loop aborted before chunk #{chunk.index}: seek detected"
+                                                    )
+                                                    return
+
                                             if (
                                                 connection.current_read_position
                                                 != chunk.start
@@ -554,6 +593,28 @@ class MediaStream:
                                             ):
                                                 chunk_buffer = bytearray()
                                                 while len(chunk_buffer) < chunk.size:
+                                                    if (
+                                                        is_prefetch
+                                                        and prefetch_gen is not None
+                                                    ):
+                                                        if hasattr(
+                                                            self,
+                                                            "adaptive_prefetch",
+                                                        ) and self.adaptive_prefetch.should_abort_prefetch(
+                                                            prefetch_gen
+                                                        ):
+                                                            self._trace_stream(
+                                                                f"Prefetch read aborted mid-chunk #{chunk.index}: seek detected"
+                                                            )
+                                                            if len(chunk_buffer) > 0:
+                                                                # Partial bytes consumed from socket; reposition connection before next demand
+                                                                connection.seek(
+                                                                    chunk_range=self.chunker.get_chunk_range(
+                                                                        position=chunk.start,
+                                                                        size=chunk.size,
+                                                                    )
+                                                                )
+                                                            return
                                                     try:
                                                         raw_part = await anext(
                                                             connection.reader
@@ -702,64 +763,104 @@ class MediaStream:
                                         self.config.prefetch_chunks > 0
                                         and read.read_type in ("body_read", "cache_hit")
                                     ):
-                                        _, playhead_end = read.chunk_range.request_range
-                                        ahead = self.chunker.get_prefetch_uncached(
-                                            after_end=playhead_end,
-                                            count=self.config.prefetch_chunks,
-                                        )
-                                        if ahead:
-                                            if self.enable_tracing:
-                                                logger.log(
-                                                    "STREAM",
-                                                    self.build_log_message(
-                                                        f"Prefetching {len(ahead)} chunk(s) "
-                                                        f"ahead of playhead@{playhead_end}"
-                                                    ),
-                                                )
-                                            # Prefer contiguous fetch from connection tip;
-                                            # seek if gap to first prefetch chunk.
-                                            first = ahead[0]
-                                            if (
-                                                connection.current_read_position
-                                                < first.start
+                                        active_leases = 0
+                                        pool = getattr(self, "_http_pool", None)
+                                        if pool is not None:
+                                            try:
+                                                active_leases = pool.active_leases
+                                            except Exception:
+                                                pass
+
+                                        cache_usage = 0.0
+                                        try:
+                                            from .cache import Cache
+
+                                            if Cache in di and hasattr(
+                                                di[Cache], "usage_percentage"
                                             ):
+                                                cache_usage = di[Cache].usage_percentage
+                                        except Exception:
+                                            pass
+
+                                        prefetch_window = (
+                                            self.adaptive_prefetch.calculate_window(
+                                                active_leases=active_leases,
+                                                cache_usage_pct=cache_usage,
+                                            )
+                                            if hasattr(self, "adaptive_prefetch")
+                                            else self.config.prefetch_chunks
+                                        )
+
+                                        if prefetch_window > 0:
+                                            _, playhead_end = (
+                                                read.chunk_range.request_range
+                                            )
+                                            ahead = self.chunker.get_prefetch_uncached(
+                                                after_end=playhead_end,
+                                                count=prefetch_window,
+                                            )
+                                            if ahead:
+                                                prefetch_gen = (
+                                                    self.adaptive_prefetch.current_generation
+                                                    if hasattr(
+                                                        self, "adaptive_prefetch"
+                                                    )
+                                                    else None
+                                                )
+                                                if self.enable_tracing:
+                                                    logger.log(
+                                                        "STREAM",
+                                                        self.build_log_message(
+                                                            f"Prefetching {len(ahead)} chunk(s) (window={prefetch_window}) "
+                                                            f"ahead of playhead@{playhead_end}"
+                                                        ),
+                                                    )
+                                                # Prefer contiguous fetch from connection tip;
+                                                # seek if gap to first prefetch chunk.
+                                                first = ahead[0]
                                                 if (
-                                                    first.start
-                                                    - connection.current_read_position
-                                                    <= self.config.chunk_size * 2
+                                                    connection.current_read_position
+                                                    < first.start
                                                 ):
-                                                    gap_range = self.chunker.get_chunk_range(
-                                                        position=connection.current_read_position,
-                                                        size=first.start
-                                                        - connection.current_read_position,
-                                                    )
-                                                    if gap_range.uncached_chunks:
-                                                        prefetched = await self._run_opportunistic_prefetch(
-                                                            gap_range.uncached_chunks,
-                                                            _process_chunks,
-                                                            label="Prefetch gap-fill",
+                                                    if (
+                                                        first.start
+                                                        - connection.current_read_position
+                                                        <= self.config.chunk_size * 2
+                                                    ):
+                                                        gap_range = self.chunker.get_chunk_range(
+                                                            position=connection.current_read_position,
+                                                            size=first.start
+                                                            - connection.current_read_position,
                                                         )
-                                                        if not prefetched:
-                                                            needs_url_refresh = False
-                                                            break
-                                                else:
-                                                    connection.seek(
-                                                        chunk_range=self.chunker.get_chunk_range(
-                                                            position=first.start,
-                                                            size=first.size,
+                                                        if gap_range.uncached_chunks:
+                                                            prefetched = await self._run_opportunistic_prefetch(
+                                                                gap_range.uncached_chunks,
+                                                                _process_chunks,
+                                                                label="Prefetch gap-fill",
+                                                                prefetch_gen=prefetch_gen,
+                                                            )
+                                                            if not prefetched:
+                                                                needs_url_refresh = (
+                                                                    False
+                                                                )
+                                                                break
+                                                    else:
+                                                        connection.seek(
+                                                            chunk_range=self.chunker.get_chunk_range(
+                                                                position=first.start,
+                                                                size=first.size,
+                                                            )
                                                         )
-                                                    )
-                                                    break
-                                            prefetched = (
-                                                await self._run_opportunistic_prefetch(
+                                                        break
+                                                prefetched = await self._run_opportunistic_prefetch(
                                                     ahead,
                                                     _process_chunks,
                                                     label="Prefetch",
+                                                    prefetch_gen=prefetch_gen,
                                                 )
-                                            )
-                                            if not prefetched:
-                                                needs_url_refresh = False
-                                                break
+                                                if not prefetched:
+                                                    needs_url_refresh = False
+                                                    break
 
                             position = connection.current_read_position
                             seek_range = connection.seek_range
@@ -1010,9 +1111,14 @@ class MediaStream:
                 chunk_range
             ):
                 _, playhead_end = chunk_range.request_range
+                ahead_count = (
+                    self.adaptive_prefetch.calculate_window()
+                    if hasattr(self, "adaptive_prefetch")
+                    else self.config.prefetch_chunks
+                )
                 ahead = self.chunker.get_prefetch_uncached(
                     after_end=playhead_end,
-                    count=self.config.prefetch_chunks,
+                    count=ahead_count,
                 )
                 if ahead:
                     start_pos = ahead[0].start
@@ -1027,6 +1133,14 @@ class MediaStream:
                 chunk_range=chunk_range,
                 read_type=read_type,
             )
+
+            if hasattr(self, "adaptive_prefetch"):
+                start_byte, end_byte = chunk_range.request_range
+                self.adaptive_prefetch.record_read(
+                    start=start_byte,
+                    end=end_byte,
+                    current_time=monotonic(),
+                )
 
             yield read_type
         finally:
@@ -1586,7 +1700,8 @@ class MediaStream:
             # Playback has already begun, so the header has been served
             # for this file, but the scan happens on a new file handle
             # and is the first request to be made.
-            start > self.config.header_size and self.recent_reads.last_read_end is None
+            start > self.config.header_size
+            and self.recent_reads.last_read_end is None
         ):
             return "general_scan"
 
