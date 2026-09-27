@@ -14,8 +14,12 @@ class DebridServiceHTTPException(DebridServiceException):
 class DebridServiceRefusedRangeRequestException(DebridServiceHTTPException):
     """Raised when the debrid service refuses a range request."""
 
-    def __init__(self, provider: str) -> None:
-        super().__init__("Refused range request", provider=provider)
+    def __init__(
+        self,
+        provider: str,
+        message: str = "Refused range request",
+    ) -> None:
+        super().__init__(message, provider=provider)
 
 
 class DebridServiceRangeNotSatisfiableException(DebridServiceHTTPException):

@@ -1,6 +1,8 @@
+import re
 import threading
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from functools import cached_property
 from http import HTTPStatus
 from time import monotonic
@@ -53,6 +55,176 @@ from .streaming_constants import PROXY_REQUIRED_PROVIDERS
 # Guard against transient short scan reads from unstable debrid/CDN responses.
 DISCRETE_SCAN_MAX_INTEGRITY_ATTEMPTS = 3
 DISCRETE_SCAN_RETRY_BACKOFF_SECONDS = [0.1, 0.25]
+
+_CONTENT_RANGE_PATTERN = re.compile(
+    r"^(?P<unit>[a-zA-Z]+)\s+(?P<start>\d+)-(?P<end>\d+)/(?P<total>\d+|\*)$"
+)
+
+
+@dataclass(frozen=True)
+class ParsedContentRange:
+    """Parsed RFC 9110 Content-Range header representation."""
+
+    unit: str
+    first_byte: int
+    last_byte: int
+    complete_length: int | None
+
+
+def parse_content_range(header_val: str | None) -> ParsedContentRange | None:
+    """Parse RFC 9110 Content-Range header value.
+
+    Returns ParsedContentRange or None if missing/malformed.
+    """
+    if not header_val:
+        return None
+    match = _CONTENT_RANGE_PATTERN.match(header_val.strip())
+    if not match:
+        return None
+    unit = match.group("unit")
+    first_byte = int(match.group("start"))
+    last_byte = int(match.group("end"))
+    total_str = match.group("total")
+    complete_length = int(total_str) if total_str != "*" else None
+    return ParsedContentRange(
+        unit=unit,
+        first_byte=first_byte,
+        last_byte=last_byte,
+        complete_length=complete_length,
+    )
+
+
+def format_range_header(start: int, end: int | None = None) -> str:
+    """Format RFC 9110 Range header for byte ranges.
+
+    Explicitly differentiates end=None (open-ended range) from end=0 (e.g. single-byte probe).
+    """
+    if end is None:
+        return f"bytes={start}-"
+    return f"bytes={start}-{end}"
+
+
+def validate_range_response(
+    response: httpx.Response,
+    requested_start: int,
+    requested_end: int | None,
+    provider: str,
+    file_size: int | None = None,
+) -> ParsedContentRange | None:
+    """Enforce strict RFC 9110 Range integrity contract on upstream HTTP responses.
+
+    Validates that the returned status and headers guarantee the payload matches the
+    requested interval [requested_start, requested_end].
+
+    Raises:
+        DebridServiceRefusedRangeRequestException: If the response cannot be safely
+            accepted as the payload for the requested range.
+    """
+    content_encoding = response.headers.get("Content-Encoding")
+    if content_encoding is not None and content_encoding.lower().strip() not in (
+        "",
+        "identity",
+    ):
+        raise DebridServiceRefusedRangeRequestException(
+            provider=provider,
+            message=f"Non-identity Content-Encoding not supported for range requests: {content_encoding}",
+        )
+
+    content_type = response.headers.get("Content-Type", "")
+    if content_type.lower().startswith("multipart/"):
+        raise DebridServiceRefusedRangeRequestException(
+            provider=provider,
+            message=f"Multipart byte range response is not supported: {content_type}",
+        )
+
+    if response.status_code == HTTPStatus.OK:
+        # HTTP 200 is only valid if the caller requested the full file from offset 0
+        if requested_start == 0 and (
+            requested_end is None
+            or (file_size is not None and requested_end >= file_size - 1)
+        ):
+            return None
+
+        if requested_start > 0:
+            raise DebridServiceRefusedRangeRequestException(
+                provider=provider,
+                message=(
+                    f"Upstream returned HTTP 200 for sub-range request start={requested_start}; "
+                    "refusing to commit byte-0 payload to non-zero cache offset"
+                ),
+            )
+
+        raise DebridServiceRefusedRangeRequestException(
+            provider=provider,
+            message=(
+                f"Upstream returned full HTTP 200 for bounded sub-range request 0-{requested_end}"
+            ),
+        )
+
+    if response.status_code == HTTPStatus.PARTIAL_CONTENT:
+        content_range_hdr = response.headers.get("Content-Range")
+        if not content_range_hdr:
+            raise DebridServiceRefusedRangeRequestException(
+                provider=provider,
+                message="HTTP 206 Partial Content response missing Content-Range header",
+            )
+
+        parsed = parse_content_range(content_range_hdr)
+        if parsed is None or parsed.unit.lower() != "bytes":
+            raise DebridServiceRefusedRangeRequestException(
+                provider=provider,
+                message=f"HTTP 206 invalid or non-bytes Content-Range header: '{content_range_hdr}'",
+            )
+
+        if parsed.first_byte != requested_start:
+            raise DebridServiceRefusedRangeRequestException(
+                provider=provider,
+                message=(
+                    f"HTTP 206 Content-Range start mismatch: requested {requested_start}, "
+                    f"got {parsed.first_byte} ('{content_range_hdr}')"
+                ),
+            )
+
+        if parsed.last_byte < parsed.first_byte:
+            raise DebridServiceRefusedRangeRequestException(
+                provider=provider,
+                message=f"HTTP 206 inverted Content-Range: {parsed.first_byte}-{parsed.last_byte}",
+            )
+
+        if requested_end is not None and parsed.last_byte > requested_end:
+            raise DebridServiceRefusedRangeRequestException(
+                provider=provider,
+                message=(
+                    f"HTTP 206 Content-Range end exceeds requested: requested {requested_end}, "
+                    f"got {parsed.last_byte} ('{content_range_hdr}')"
+                ),
+            )
+
+        content_length_hdr = response.headers.get("Content-Length")
+        if content_length_hdr is not None:
+            try:
+                parsed_len = int(content_length_hdr)
+                expected_len = parsed.last_byte - parsed.first_byte + 1
+                if parsed_len != expected_len:
+                    raise DebridServiceRefusedRangeRequestException(
+                        provider=provider,
+                        message=(
+                            f"HTTP 206 Content-Length {parsed_len} contradicts "
+                            f"Content-Range length {expected_len}"
+                        ),
+                    )
+            except ValueError:
+                raise DebridServiceRefusedRangeRequestException(
+                    provider=provider,
+                    message=f"HTTP 206 invalid Content-Length header: '{content_length_hdr}'",
+                )
+
+        return parsed
+
+    raise DebridServiceRefusedRangeRequestException(
+        provider=provider,
+        message=f"Unexpected status code for range request: HTTP {response.status_code}",
+    )
 
 
 type ReadType = Literal[
@@ -633,6 +805,31 @@ class MediaStream:
 
                                                 raise EmptyDataException(
                                                     range=(chunk.start, chunk.end)
+                                                )
+
+                                            expected_chunk_size = chunk.size
+                                            if (
+                                                self.file_metadata.file_size is not None
+                                                and chunk.start
+                                                < self.file_metadata.file_size
+                                            ):
+                                                expected_chunk_size = min(
+                                                    chunk.size,
+                                                    self.file_metadata.file_size
+                                                    - chunk.start,
+                                                )
+
+                                            if len(data) < expected_chunk_size:
+                                                logger.warning(
+                                                    self.build_log_message(
+                                                        f"Incomplete chunk read for {chunk}: expected {expected_chunk_size} bytes, got {len(data)} bytes; "
+                                                        "discarding partial chunk to prevent cache corruption"
+                                                    )
+                                                )
+                                                raise RecoverableMediaStreamException(
+                                                    EmptyDataException(
+                                                        range=(chunk.start, chunk.end)
+                                                    )
                                                 )
 
                                             with benchmark(
@@ -1316,7 +1513,7 @@ class MediaStream:
             {
                 "Accept-Encoding": "identity",
                 "Connection": "keep-alive",
-                "Range": f"bytes={start}-{end or ''}",
+                "Range": format_range_header(start=start, end=end),
             }
         )
 
@@ -1355,74 +1552,36 @@ class MediaStream:
                     ) as stream:
                         stream.raise_for_status()
 
-                        content_length = stream.headers.get("Content-Length")
-                        content_range = stream.headers.get("Content-Range")
-                        accept_ranges = stream.headers.get("Accept-Ranges")
-
-                        if end is not None:
-                            range_bytes = end - start + 1
-
-                            if stream.status_code == HTTPStatus.OK:
-                                logger.warning(
-                                    self.build_log_message(
-                                        "Ranged request returned HTTP 200; "
-                                        f"content-length={content_length} "
-                                        f"content-range={content_range} "
-                                        f"accept-ranges={accept_ranges}"
-                                    )
+                        try:
+                            validate_range_response(
+                                response=stream,
+                                requested_start=start,
+                                requested_end=end,
+                                provider=self.provider,
+                                file_size=self.file_metadata.file_size,
+                            )
+                        except DebridServiceRefusedRangeRequestException as range_exc:
+                            logger.warning(
+                                self.build_log_message(
+                                    f"Range integrity check failed on attempt {transport_attempt + 1}/{max_transport_attempts}: {range_exc}"
                                 )
-                            elif stream.status_code == HTTPStatus.PARTIAL_CONTENT:
-                                expected_prefix = f"bytes {start}-"
-
-                                if not content_range:
-                                    logger.warning(
-                                        self.build_log_message(
-                                            "HTTP 206 response missing Content-Range header"
-                                        )
-                                    )
-                                elif not content_range.startswith(expected_prefix):
-                                    logger.warning(
-                                        self.build_log_message(
-                                            f"HTTP 206 Content-Range mismatch; "
-                                            f"expected prefix '{expected_prefix}', got '{content_range}'"
-                                        )
-                                    )
-                        else:
-                            range_bytes = self.file_metadata.file_size - start
-
-                        if (
-                            stream.status_code == HTTPStatus.OK
-                            and content_length is not None
-                        ):
-                            try:
-                                parsed_content_length = int(content_length)
-                            except ValueError:
-                                logger.warning(
-                                    self.build_log_message(
-                                        f"Invalid Content-Length header '{content_length}'"
-                                    )
+                            )
+                            # Cap range refusal retries to 1 with URL refresh to prevent retry storms
+                            if transport_attempt == 0:
+                                failed_url = self.target_url.value
+                                has_fresh_url = await self._refresh_download_url(
+                                    failed_url=failed_url
                                 )
-                            else:
-                                if parsed_content_length > range_bytes:
-                                    # Server appears to be ignoring the range request and returning full content.
-                                    # This is incompatible with our stream, as it will start at the incorrect position.
+                                if has_fresh_url:
                                     logger.warning(
                                         self.build_log_message(
-                                            "Server returned full content instead of range."
+                                            "URL refresh succeeded after range refusal; retrying with fresh URL"
                                         )
                                     )
+                                    transport_attempt += 1
+                                    continue
 
-                                    if await self._retry_with_backoff(
-                                        transport_attempt,
-                                        max_transport_attempts,
-                                        backoffs,
-                                    ):
-                                        transport_attempt += 1
-                                        continue
-
-                                    raise DebridServiceRefusedRangeRequestException(
-                                        provider=self.provider
-                                    )
+                            raise
 
                         self.session_statistics.total_session_connections += 1
 
@@ -1623,7 +1782,11 @@ class MediaStream:
                 raise DebridServiceClosedConnectionException(
                     provider=self.provider
                 ) from e
-            except (DebridServiceLinkUnavailable, DebridServiceFairUsageLimitException):
+            except (
+                DebridServiceLinkUnavailable,
+                DebridServiceFairUsageLimitException,
+                DebridServiceRefusedRangeRequestException,
+            ):
                 raise
             except Exception as e:
                 logger.exception(
@@ -1964,7 +2127,7 @@ class MediaStream:
         expected_length = end - start
         actual_length = len(data)
 
-        if actual_length < expected_length:
+        if actual_length != expected_length:
             raise ByteLengthMismatchException(
                 expected_length=expected_length,
                 actual_length=actual_length,
