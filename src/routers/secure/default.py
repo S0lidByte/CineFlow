@@ -261,9 +261,21 @@ async def trakt_oauth_status() -> TraktOAuthStatusResponse:
         raise HTTPException(status_code=404, detail="Trakt service not found")
 
     oauth = settings_manager.settings.content.trakt.oauth
+    trakt = settings_manager.settings.content.trakt
+    effective_client_id = (
+        (oauth.oauth_client_id or "").strip()
+        or (trakt.api_key or "").strip()
+        or trakt_api.oauth_client_id
+    )
+    if (
+        effective_client_id in TraktAPI.PLACEHOLDER_CLIENT_IDS
+        or effective_client_id == TraktAPI.DEFAULT_CLIENT_ID
+    ):
+        effective_client_id = ""
+
     return TraktOAuthStatusResponse(
         connected=trakt_api.oauth_connected(),
-        has_client_id=bool((oauth.oauth_client_id or "").strip()),
+        has_client_id=bool(effective_client_id),
         has_client_secret=bool((oauth.oauth_client_secret or "").strip()),
         redirect_uri=(oauth.oauth_redirect_uri or "").strip(),
         redirect_uri_hint=(
@@ -289,13 +301,13 @@ async def trakt_oauth_callback(
     except ServiceError:
         raise HTTPException(status_code=404, detail="Trakt Api not found")
 
-    trakt_api_key = settings_manager.settings.content.trakt.api_key
+    trakt_api_key = (
+        (settings_manager.settings.content.trakt.oauth.oauth_client_id or "").strip()
+        or (settings_manager.settings.content.trakt.api_key or "").strip()
+        or trakt_api.oauth_client_id
+    )
 
-    if not (trakt_api_key or "").strip():
-        # Prefer oauth client id when api_key field is empty (same as header resolution).
-        trakt_api_key = trakt_api.client_id
-
-    if not (trakt_api_key or "").strip():
+    if not trakt_api_key or trakt_api_key in TraktAPI.PLACEHOLDER_CLIENT_IDS:
         raise HTTPException(
             status_code=404, detail="Trakt Api key not found in settings"
         )
@@ -613,7 +625,9 @@ def _upload_logs_to_paste() -> HttpUrl:
     """
     log_file_path: str | None = None
 
-    for handler in (  # pyright: ignore[reportUnknownVariableType]
+    for (
+        handler
+    ) in (  # pyright: ignore[reportUnknownVariableType]
         logger._core.handlers.values()  # pyright: ignore[reportAttributeAccessIssue, reportUnknownVariableType]
     ):
         if ".log" in handler._name:

@@ -61,6 +61,7 @@ class TraktAPI:
     _DEFAULT_CLIENT_ID = (
         "0183a05ad97098d87287fe46da4ae286f434f32e8e951caad4cc147c947d79a3"
     )
+    DEFAULT_CLIENT_ID = _DEFAULT_CLIENT_ID
 
     patterns = {
         "user_list": re.compile(r"https://trakt.tv/users/([^/]+)/lists/([^/]+)"),
@@ -98,9 +99,6 @@ class TraktAPI:
 
     def __init__(self, settings: TraktModel):
         self.settings = settings
-        self.oauth_client_id = self.settings.oauth.oauth_client_id
-        self.oauth_client_secret = self.settings.oauth.oauth_client_secret
-        self.oauth_redirect_uri = self.settings.oauth.oauth_redirect_uri
         self.client_id = self.resolve_client_id(settings)
         self._aliases_cache = TTLCache[tuple[str, str], dict[str, list[str]]](
             maxsize=4096, ttl=86400
@@ -139,6 +137,31 @@ class TraktAPI:
                 "https": self.settings.proxy_url,
             }
             self.session.proxies.update(proxies)
+
+    @property
+    def oauth_client_id(self) -> str:
+        """Resolve OAuth client ID from oauth.oauth_client_id, falling back to api_key or resolved client_id."""
+        candidate = (self.settings.oauth.oauth_client_id or "").strip()
+        if candidate and candidate not in self.PLACEHOLDER_CLIENT_IDS:
+            return candidate
+        cid = (self.settings.api_key or "").strip() or self.client_id
+        if (
+            cid
+            and cid not in self.PLACEHOLDER_CLIENT_IDS
+            and cid != self._DEFAULT_CLIENT_ID
+        ):
+            return cid
+        return ""
+
+    @property
+    def oauth_client_secret(self) -> str:
+        """Resolve OAuth client secret from settings."""
+        return (self.settings.oauth.oauth_client_secret or "").strip()
+
+    @property
+    def oauth_redirect_uri(self) -> str:
+        """Resolve OAuth redirect URI from settings."""
+        return (self.settings.oauth.oauth_redirect_uri or "").strip()
 
     @property
     def is_configured(self) -> bool:

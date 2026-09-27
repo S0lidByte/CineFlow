@@ -116,3 +116,25 @@ def test_oauth_token_exchange_logs_failure_body():
     api.session.post = MagicMock(return_value=mock_response)
 
     assert api.handle_oauth_callback("cid", "auth-code") is False
+
+
+def test_oauth_client_id_falls_back_to_api_key_when_oauth_field_empty():
+    """Ensure TraktAPI dynamically resolves oauth_client_id from api_key when oauth_client_id is omitted."""
+    settings = TraktModel(
+        api_key="trakt-app-client-id-12345",
+        oauth=TraktOauthModel(
+            oauth_client_id="",
+            oauth_client_secret="app-secret-67890",
+            oauth_redirect_uri="http://localhost:3000/api/trakt/oauth/callback",
+        ),
+    )
+    api = TraktAPI(settings)
+    assert api.client_id == "trakt-app-client-id-12345"
+    assert api.oauth_client_id == "trakt-app-client-id-12345"
+
+    url = api.build_oauth_url()
+    assert "client_id=trakt-app-client-id-12345" in url
+    assert (
+        "redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fapi%2Ftrakt%2Foauth%2Fcallback"
+        in url
+    )

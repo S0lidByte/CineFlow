@@ -699,9 +699,13 @@ class PlexWebhookModel(Observable):
 
 
 class TraktOauthModel(BaseModel):
-    oauth_client_id: str = Field(default="", description="Trakt OAuth client ID")
+    oauth_client_id: str = Field(
+        default="",
+        description="Trakt OAuth client ID (optional if Api Key is configured above)",
+    )
     oauth_client_secret: str = Field(
-        default="", description="Trakt OAuth client secret"
+        default="",
+        description="Trakt OAuth client secret (from trakt.tv/oauth/applications)",
     )
     oauth_redirect_uri: str = Field(
         default="",
@@ -712,15 +716,26 @@ class TraktOauthModel(BaseModel):
             "not the backend /api/v1/trakt/oauth/callback (that route requires an API key)."
         ),
     )
-    access_token: str = Field(default="", description="Trakt OAuth access token")
-    refresh_token: str = Field(default="", description="Trakt OAuth refresh token")
+    access_token: str = Field(
+        default="",
+        description="Trakt OAuth access token (managed automatically upon connection)",
+        json_schema_extra={"readOnly": True},
+    )
+    refresh_token: str = Field(
+        default="",
+        description="Trakt OAuth refresh token (managed automatically upon connection)",
+        json_schema_extra={"readOnly": True},
+    )
 
 
 class TraktModel(Updatable):
     enabled: bool = Field(default=False, description="Enable Trakt integration")
     api_key: str = Field(
         default="",
-        description="Trakt Client ID (from trakt.tv/oauth/applications — not the Client Secret)",
+        description=(
+            "Trakt Client ID (from trakt.tv/oauth/applications — acts as both API Key and "
+            "OAuth Client ID. Do not enter the Client Secret here)."
+        ),
     )
     watchlist: list[str] = Field(
         default_factory=list[str],

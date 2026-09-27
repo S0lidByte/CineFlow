@@ -311,6 +311,15 @@ async def set_settings(
     if any(p == "ranking" or p.startswith("ranking.") for p in requested_paths):
         _validate_ranking_in_settings(current_settings)
 
+    # Preserve active Trakt OAuth tokens if client payload submitted empty strings or omitted them
+    trakt_oauth = current_settings.get("content", {}).get("trakt", {}).get("oauth")
+    if isinstance(trakt_oauth, dict):
+        existing_oauth = settings_manager.settings.content.trakt.oauth
+        if not trakt_oauth.get("access_token") and existing_oauth.access_token:
+            trakt_oauth["access_token"] = existing_oauth.access_token
+        if not trakt_oauth.get("refresh_token") and existing_oauth.refresh_token:
+            trakt_oauth["refresh_token"] = existing_oauth.refresh_token
+
     try:
         updated_settings = settings_manager.settings.__class__(**current_settings)
         settings_manager.load(settings_dict=updated_settings.model_dump())
