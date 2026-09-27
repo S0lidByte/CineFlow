@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.41.1](https://github.com/S0lidByte/CineFlow/compare/v1.41.0...v1.41.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **docker:** bind frontend to 127.0.0.1:3000 to prevent WSL2 IPv6 relay hang ([155b776](https://github.com/S0lidByte/CineFlow/commit/155b7765eebe93866056e0740b930f855dcdc06e))
+* **indexers:** handle placeholder Trakt client ID and cache show aliases ([2097518](https://github.com/S0lidByte/CineFlow/commit/2097518beb259016d6bf5dcdbf3ebd71cc932592))
+* **trakt:** support unified client ID resolution and read-only token schema ([e0d0b73](https://github.com/S0lidByte/CineFlow/commit/e0d0b7344f23b9c94b8fd842a5403979aaaa2bd6))
+* **vfs:** align range refusal exception signature and enforce HTTP range integrity ([9ebd7c6](https://github.com/S0lidByte/CineFlow/commit/9ebd7c6222d600cca709730a370ca88a4fbcd35b))
+* **vfs:** eliminate unnecessary None comparison on file_size for pyright ([fd6b6a1](https://github.com/S0lidByte/CineFlow/commit/fd6b6a13cc2bbdc1382010688dda16cc9b3a4528))
+
 ## [1.41.0](https://github.com/S0lidByte/CineFlow/compare/v1.40.0...v1.41.0) (2026-09-26)
 
 
