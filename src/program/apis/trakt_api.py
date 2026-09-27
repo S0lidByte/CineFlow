@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any, Generic, Literal, TypeVar, cast
 from urllib.parse import urlencode
 
+from cachetools import TTLCache
 from loguru import logger
 from pydantic import BaseModel
 from requests import RequestException
@@ -66,6 +67,14 @@ class TraktAPI:
         "short_list": re.compile(r"https://trakt.tv/lists/\d+"),
     }
 
+    PLACEHOLDER_CLIENT_IDS = {
+        "",
+        "TRAKT_SECRET",
+        "YOUR_TRAKT_CLIENT_ID",
+        "YOUR_CLIENT_ID",
+        "CHANGEME",
+    }
+
     @staticmethod
     def resolve_client_id(settings: TraktModel) -> str:
         """Resolve Trakt Client ID for the ``trakt-api-key`` header.
@@ -93,6 +102,10 @@ class TraktAPI:
         self.oauth_client_secret = self.settings.oauth.oauth_client_secret
         self.oauth_redirect_uri = self.settings.oauth.oauth_redirect_uri
         self.client_id = self.resolve_client_id(settings)
+        self._aliases_cache = TTLCache[tuple[str, str], dict[str, list[str]]](
+            maxsize=4096, ttl=86400
+        )
+        self._auth_failed: bool = False
 
         self.session = SmartSession(
             base_url=self.BASE_URL,
@@ -126,6 +139,39 @@ class TraktAPI:
                 "https": self.settings.proxy_url,
             }
             self.session.proxies.update(proxies)
+
+    @property
+    def is_configured(self) -> bool:
+        """Check if Trakt has a user-configured client ID that is not a placeholder or revoked default."""
+        cid = (self.client_id or "").strip()
+        if not cid:
+            return False
+        if cid in self.PLACEHOLDER_CLIENT_IDS:
+            return False
+        if cid == self._DEFAULT_CLIENT_ID:
+            return False
+        return True
+
+    @property
+    def is_enabled(self) -> bool:
+        """Check if Trakt integration is enabled, configured, and authenticated."""
+        return bool(
+            self.settings.enabled and self.is_configured and not self._auth_failed
+        )
+
+    def _sync_client_id(self) -> None:
+        """Synchronize client_id and headers if settings changed at runtime."""
+        resolved = self.resolve_client_id(self.settings)
+        if resolved != self.client_id:
+            self.client_id = resolved
+            self.headers["trakt-api-key"] = self.client_id
+            self.session.headers["trakt-api-key"] = self.client_id
+            self._auth_failed = False
+            self.clear_aliases_cache()
+
+    def clear_aliases_cache(self) -> None:
+        """Clear cached Trakt aliases."""
+        self._aliases_cache.clear()
 
     def validate(self):
         response = self.session.get("lists/2")
@@ -401,10 +447,31 @@ class TraktAPI:
         if not imdb_id:
             return {}
 
+        self._sync_client_id()
+
+        if not self.is_enabled:
+            return {}
+
+        cache_key = (imdb_id, item_type)
+        if cache_key in self._aliases_cache:
+            return self._aliases_cache[cache_key]
+
         url = f"{self.BASE_URL}/{item_type}/{imdb_id}/aliases"
 
         try:
             response = self.session.get(url, timeout=30)
+
+            if response.status_code == 403:
+                self._auth_failed = True
+                masked_id = (
+                    f"{self.client_id[:8]}..." if len(self.client_id) > 8 else "***"
+                )
+                logger.warning(
+                    f"Trakt API returned 403 Forbidden with client_id '{masked_id}'. "
+                    "Disabling further Trakt alias lookups until valid credentials are configured."
+                )
+                self._aliases_cache[cache_key] = {}
+                return {}
 
             if response.ok and response.data:
                 aliases = dict[str, list[str]]()
@@ -430,11 +497,16 @@ class TraktAPI:
                     if title not in aliases[country]:
                         aliases[country].append(title)
 
+                self._aliases_cache[cache_key] = aliases
                 return aliases
+            else:
+                self._aliases_cache[cache_key] = {}
+                return {}
         except Exception as e:
             logger.debug(
                 f"Failed to get aliases for {imdb_id} with type {item_type}: {e}"
             )
+            self._aliases_cache[cache_key] = {}
 
         return {}
 

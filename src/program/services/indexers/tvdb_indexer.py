@@ -147,14 +147,16 @@ class TVDBIndexer(BaseIndexer):
             elif show_data.original_network:
                 network = show_data.original_network.name
 
-            # Get aliases
-            aliases = self.trakt_api.get_aliases(imdb_id, "shows")
+            # Get aliases (prefer Trakt when enabled and configured; fall back to TVDB)
+            aliases = {}
+            if self.trakt_api.is_enabled:
+                aliases = self.trakt_api.get_aliases(imdb_id, "shows")
+                if not aliases:
+                    logger.debug(
+                        f"No aliases returned from Trakt for imdbid {imdb_id}, falling back to TVDB aliases"
+                    )
 
             if not aliases:
-                logger.debug(
-                    f"Failed to get aliases from Trakt for imdbid {imdb_id}, using TVDB aliases"
-                )
-
                 aliases = self.api.get_aliases(show_data) or {}
 
             slug = (show_data.slug or "").replace("-", " ").title()
@@ -318,12 +320,15 @@ class TVDBIndexer(BaseIndexer):
             elif show_data.original_network:
                 network = show_data.original_network.name
 
-            aliases = self.trakt_api.get_aliases(imdb_id, "shows")
+            aliases = {}
+            if self.trakt_api.is_enabled:
+                aliases = self.trakt_api.get_aliases(imdb_id, "shows")
+                if not aliases:
+                    logger.debug(
+                        f"No aliases returned from Trakt for imdbid {imdb_id}, falling back to TVDB aliases"
+                    )
 
             if not aliases:
-                logger.debug(
-                    f"Failed to get aliases from Trakt for imdbid {imdb_id}, using TVDB aliases"
-                )
                 aliases = self.api.get_aliases(show_data) or {}
 
             slug = (show_data.slug or "").replace("-", " ").title()
