@@ -76,7 +76,7 @@ services:
       dockerfile: Dockerfile
     container_name: cineflow-test-frontend
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - BACKEND_URL=http://riven:8080
       - BFF_API_KEY=local-bff-api-key-32characters
