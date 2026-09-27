@@ -809,8 +809,7 @@ class MediaStream:
 
                                             expected_chunk_size = chunk.size
                                             if (
-                                                self.file_metadata.file_size is not None
-                                                and chunk.start
+                                                chunk.start
                                                 < self.file_metadata.file_size
                                             ):
                                                 expected_chunk_size = min(
