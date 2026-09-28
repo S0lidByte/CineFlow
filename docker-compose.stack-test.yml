@@ -48,10 +48,10 @@ services:
       - TZ=UTC
       - CINEFLOW_FORCE_ENV=true
       - CINEFLOW_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
-      - RIVEN_API_KEY=d5af2b85c976d4ecf822b8374db383b3
-      - API_KEY=d5af2b85c976d4ecf822b8374db383b3
-      - BFF_API_KEY=a52e1fff1dabda1098140149d2e48284
-      - ACTOR_CONTEXT_SECRET=local-stack-test-actor-secret-32chars
+      - RIVEN_API_KEY=${RIVEN_API_KEY:-${API_KEY}}
+      - API_KEY=${API_KEY}
+      - BFF_API_KEY=${BFF_API_KEY}
+      - ACTOR_CONTEXT_SECRET=${ACTOR_CONTEXT_SECRET:-local-stack-test-actor-secret-32chars}
     cap_add:
       - SYS_ADMIN
     security_opt:
@@ -79,9 +79,9 @@ services:
       - "127.0.0.1:3000:3000"
     environment:
       - BACKEND_URL=http://riven:8080
-      - BFF_API_KEY=a52e1fff1dabda1098140149d2e48284
-      - ACTOR_CONTEXT_SECRET=local-stack-test-actor-secret-32chars
-      - AUTH_SECRET=local-stack-test-auth-secret-32chars
+      - BFF_API_KEY=${BFF_API_KEY}
+      - ACTOR_CONTEXT_SECRET=${ACTOR_CONTEXT_SECRET:-local-stack-test-actor-secret-32chars}
+      - AUTH_SECRET=${AUTH_SECRET:-local-stack-test-auth-secret-32chars}
       - ORIGIN=http://localhost:3000
       - CINEFLOW_DATABASE_URL=/riven/data/cineflow.db
     volumes:
