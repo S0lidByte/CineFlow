@@ -714,9 +714,19 @@ class TestTrashExpandedCatalog:
 
     def test_retags_format(self, catalog):
         title = "Movie.2024.1080p.WEBRip.[rarbg].x264"
+        # By default in the expanded catalog, retags is disabled (opt-in)
         summary = evaluate_trash_release(title, formats=catalog)
         matched_ids = {m.trash_id for m in summary.matched_formats}
-        assert "retags" in matched_ids
+        assert "retags" not in matched_ids
+
+        # When explicitly enabled, retags matches properly
+        enabled_catalog = [
+            f.model_copy(update={"enabled": True}) if f.trash_id == "retags" else f
+            for f in catalog
+        ]
+        summary_enabled = evaluate_trash_release(title, formats=enabled_catalog)
+        matched_ids_enabled = {m.trash_id for m in summary_enabled.matched_formats}
+        assert "retags" in matched_ids_enabled
 
     def test_x265_hd_penalty_applies_to_sdr(self, catalog):
         # 1080p x265 without HDR/DV should receive penalty
@@ -810,3 +820,121 @@ class TestTrashScraperFunnel:
         line = funnel.summary_line("Movie Test")
         assert "trash_rejected=3" in line
         assert "trash_top=[" in line
+
+
+class TestScraperRankingRemediation:
+    """Certifies the 6 targeted requirements for the scraper ranking remediation."""
+
+    @pytest.fixture
+    def catalog(self):
+        return get_default_trash_custom_formats()
+
+    def test_qxr_not_classified_as_lq(self, catalog):
+        # 1. QxR is not classified by lq-release-groups
+        qxr_title = "The.Matrix.1999.1080p.BluRay.x265.10bit.DTS-HD.MA.5.1-QxR"
+        summary = evaluate_trash_release(qxr_title, formats=catalog)
+        matched_ids = {m.trash_id for m in summary.matched_formats}
+        assert "lq-release-groups" not in matched_ids
+        assert summary.rejected_by_lq is False
+
+    def test_existing_lq_groups_remain_classified(self, catalog):
+        # 2. Existing LQ groups remain classified
+        lq_samples = [
+            "Movie.2024.1080p.WEBRip.x264-[YTS.AM]",
+            "Movie.2024.720p.BluRay.x264-YIFY",
+            "Movie.2024.1080p.HEVC-PSA",
+            "Movie.2024.720p.HDTV-Pahe",
+            "Show.S01E01.720p.HDTV-MeGusta",
+            "Show.S01E01.720p.HDTV-GalaxyTV",
+            "Movie.2024.1080p.WEBRip-TGx",
+            "Show.S01E01.480p.HDTV-mSD",
+            "Movie.2024.720p.WEBRip-SAMPA",
+        ]
+        for title in lq_samples:
+            summary = evaluate_trash_release(title, formats=catalog)
+            matched_ids = {m.trash_id for m in summary.matched_formats}
+            assert (
+                "lq-release-groups" in matched_ids
+            ), f"Expected lq-release-groups for {title}"
+            assert summary.total_score <= -5000
+
+    def test_rarbg_not_penalized_by_default_profile(self, catalog):
+        # 3. [rarbg] is not penalized by the default profile when Retags is disabled
+        from program.settings.trash_catalog import get_default_trash_profiles
+
+        profiles = {p.profile_id: p for p in get_default_trash_profiles()}
+        default_profile = profiles["trash_balanced"]
+
+        # Ensure retags is disabled in catalog and omitted/zeroed in profile
+        assert any(f.trash_id == "retags" and not f.enabled for f in catalog)
+        assert "retags" not in default_profile.format_scores
+
+        title = "Movie.2024.1080p.WEBRip.[rarbg].x264"
+        summary = evaluate_trash_release(
+            title, formats=catalog, profile=default_profile
+        )
+        matched_ids = {m.trash_id for m in summary.matched_formats}
+        assert "retags" not in matched_ids
+        assert summary.total_score >= 0
+        assert not summary.rejected_by_lq
+
+    def test_explicitly_enabled_retags_applies_penalty(self):
+        # 4. Explicitly enabling Retags still applies the configured penalty
+        from program.settings.trash_catalog import (
+            get_default_trash_custom_formats,
+            get_default_trash_profiles,
+        )
+
+        catalog = [
+            f.model_copy(update={"enabled": True}) if f.trash_id == "retags" else f
+            for f in get_default_trash_custom_formats()
+        ]
+        profiles = {p.profile_id: p for p in get_default_trash_profiles()}
+        profile_with_retags = profiles["trash_balanced"].model_copy(deep=True)
+        profile_with_retags.format_scores["retags"] = -2000
+
+        title = "Movie.2024.1080p.WEBRip.[rarbg].x264"
+        summary = evaluate_trash_release(
+            title, formats=catalog, profile=profile_with_retags
+        )
+        matched_ids = {m.trash_id for m in summary.matched_formats}
+        assert "retags" in matched_ids
+        assert summary.total_score == -2000
+
+    def test_fresh_appmodel_receives_balanced_defaults(self):
+        # 5. A fresh AppModel() receives the balanced ranking defaults
+        from program.settings.models import AppModel
+
+        app = AppModel()
+        assert app.ranking.resolutions.r2160p is True
+        assert app.ranking.resolutions.r1080p is True
+        assert app.ranking.resolutions.r720p is True
+        assert app.ranking.custom_ranks.quality.remux.fetch is True
+        assert app.ranking.custom_ranks.hdr.dolby_vision.fetch is True
+        assert app.ranking.custom_ranks.rips.bdrip.fetch is True
+
+    def test_persisted_configuration_remains_unchanged(self):
+        # 6. Existing persisted configuration remains unchanged
+        from program.settings.models import AppModel
+
+        user_persisted_payload = {
+            "ranking": {
+                "profile": "custom",
+                "resolutions": {
+                    "r2160p": False,
+                    "r1080p": True,
+                    "r720p": False,
+                },
+                "custom_ranks": {
+                    "quality": {
+                        "remux": {"fetch": False, "rank": 10},
+                    }
+                },
+            }
+        }
+        app = AppModel.model_validate(user_persisted_payload)
+        assert app.ranking.resolutions.r2160p is False
+        assert app.ranking.resolutions.r1080p is True
+        assert app.ranking.resolutions.r720p is False
+        assert app.ranking.custom_ranks.quality.remux.fetch is False
+        assert app.ranking.custom_ranks.quality.remux.rank == 10

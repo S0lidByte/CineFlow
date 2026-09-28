@@ -1114,6 +1114,21 @@ class RTNSettingsModel(SettingsModel, Observable):
             pass
 
 
+def _default_ranking() -> RTNSettingsModel:
+    """Default ranking settings from the balanced preset, ensuring high-tier media eligibility."""
+    from program.settings.ranking_presets import apply_ranking_preset
+
+    model = RTNSettingsModel()
+    applied = apply_ranking_preset(model, "balanced")
+    applied.custom_ranks.quality.remux.fetch = True
+    applied.custom_ranks.rips.bdrip.fetch = True
+    applied.custom_ranks.hdr.dolby_vision.fetch = True
+    applied.custom_ranks.audio.dts_lossless.fetch = True
+    applied.custom_ranks.extras.subbed.fetch = True
+    applied.custom_ranks.extras.dubbed.fetch = True
+    return RTNSettingsModel(**applied.model_dump())
+
+
 def _default_ranking_anime() -> RTNSettingsModel:
     """Independent anime ranking defaults from the Anime Dub Friendly preset."""
     from program.settings.ranking_presets import default_anime_rtn_settings
@@ -1393,7 +1408,7 @@ class AppModel(Observable):
         default_factory=lambda: ScraperModel(), description="Scraper configuration"
     )
     ranking: RTNSettingsModel = Field(
-        default_factory=lambda: RTNSettingsModel(),
+        default_factory=lambda: _default_ranking(),
         description=(
             "RTN ranking and trash filters for movies and non-anime shows. "
             "DEBUG rejects map to custom_ranks.<category>.<attribute> as "

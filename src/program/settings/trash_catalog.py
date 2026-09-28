@@ -471,7 +471,7 @@ def get_default_trash_custom_formats() -> list[TrashCustomFormat]:
             conditions=[
                 TrashCondition(
                     name="LQ group tag",
-                    pattern=r"\b(?:YIFY|YTS(?:\.MX|\.LT|\.AG)?|PSA|Pahe|MeGusta|GalaxyTV|TGx|mSD|QxR|SAMPA)\b|-(?:YIFY|YTS|PSA|Pahe|MeGusta|GalaxyTV|TGx|mSD)\b",
+                    pattern=r"\b(?:YIFY|YTS(?:\.MX|\.LT|\.AG)?|PSA|Pahe|MeGusta|GalaxyTV|TGx|mSD|SAMPA)\b|-(?:YIFY|YTS|PSA|Pahe|MeGusta|GalaxyTV|TGx|mSD)\b",
                     required=True,
                 ),
             ],
@@ -547,7 +547,7 @@ def get_default_trash_custom_formats() -> list[TrashCustomFormat]:
             description="Retagged, watermarked, or p2p re-encoded scene releases",
             default_score=-2000,
             score=-2000,
-            enabled=True,
+            enabled=False,
             conditions=[
                 TrashCondition(
                     name="Retag or p2p watermark tag",
@@ -672,7 +672,6 @@ def get_default_trash_profiles() -> list[TrashProfile]:
                 "ai-upscaled-fake": -3000,
                 "extras-samples-unwanted": -2500,
                 "bad-dual-groups": -2500,
-                "retags": -2000,
                 "x265-hd-penalty": -1500,
                 "anime-tier-01": 1200,
                 "anime-dual-audio": 500,
