@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.41.2](https://github.com/S0lidByte/CineFlow/compare/v1.41.1...v1.41.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* **security:** re-rotate credentials and sanitize local VFS freeze documentation ([4e8416e](https://github.com/S0lidByte/CineFlow/commit/4e8416e0650e540b01f2509118528d2bfdbec381))
+* **vfs:** remediate HTTP range RFC 9110 parsing, harden cache eviction, and rotate credentials ([4281f70](https://github.com/S0lidByte/CineFlow/commit/4281f708f00470301d99bc9f50c67ebc8149cc47))
+
 ## [1.41.1](https://github.com/S0lidByte/CineFlow/compare/v1.41.0...v1.41.1) (2026-09-27)
 
 
