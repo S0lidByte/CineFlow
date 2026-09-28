@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.41.3](https://github.com/S0lidByte/CineFlow/compare/v1.41.2...v1.41.3) (2026-09-28)
+
+
+### Bug Fixes
+
+* **ranking:** remediate QxR/retags false penalties and establish balanced default ranking ([ec17fdc](https://github.com/S0lidByte/CineFlow/commit/ec17fdc6c24b51bd15cf868cf7e240a397644f72))
+
 ## [1.41.2](https://github.com/S0lidByte/CineFlow/compare/v1.41.1...v1.41.2) (2026-09-28)
 
 
