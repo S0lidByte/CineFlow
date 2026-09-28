@@ -9,7 +9,11 @@ from unittest.mock import patch
 import pytest
 import trio
 
-from program.services.streaming.cache import Cache, CacheConfig
+from program.services.streaming.cache import (
+    Cache,
+    CacheConfig,
+    CacheIndexInconsistencyError,
+)
 
 
 def _make_cache(
@@ -405,3 +409,27 @@ def test_cache_eviction_unlinks_without_holding_thread_lock(
     trio.run(_run)
     assert held_during_unlink, "expected eviction to unlink at least one file"
     assert all(not held for held in held_during_unlink)
+
+
+def test_cache_eviction_handles_index_inconsistency_deterministically(
+    tmp_path: Path,
+) -> None:
+    """Eviction must raise CacheIndexInconsistencyError (not raw AssertionError) and preserve safe state."""
+    cache = _make_cache(tmp_path, max_size_bytes=100)
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, b"1" * 60)
+        # Artificially inject a corrupted index entry with None value at the front of LRU
+        with cache._thread_lock:
+            cache._index["corrupted_key"] = None  # type: ignore[assignment]
+            cache._index.move_to_end("corrupted_key", last=False)
+            cache._total_bytes += 80
+
+        with pytest.raises(CacheIndexInconsistencyError) as exc_info:
+            await cache._evict_lru(10)
+
+        assert "Cache index inconsistency during eviction" in str(exc_info.value)
+        # Corrupted key was purged and index is restored
+        assert "corrupted_key" not in cache._index
+
+    trio.run(_run)

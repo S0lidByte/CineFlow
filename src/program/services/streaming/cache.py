@@ -29,6 +29,10 @@ class CacheSnapshot(TypedDict):
     entries: NotRequired[int]
 
 
+class CacheIndexInconsistencyError(RuntimeError):
+    """Raised when internal cache index encounters an inconsistent or missing entry during eviction."""
+
+
 @dataclass
 class CacheConfig:
     cache_dir: Path
@@ -653,48 +657,66 @@ class Cache:
         tiers: dict[str, Literal["hot", "warm"]] = {}
         evicted = 0
 
-        async with self.locks():
-            # Prefer evicting warm; only evict hot if single-tier or still over.
-            target = max(0, self._total_bytes + need_bytes - self.cfg.max_size_bytes)
+        try:
+            async with self.locks():
+                # Prefer evicting warm; only evict hot if single-tier or still over.
+                target = max(
+                    0, self._total_bytes + need_bytes - self.cfg.max_size_bytes
+                )
 
-            with self._thread_lock:
-                while target > 0 and self._index:
-                    # Prefer warm LRU first when two-tier
-                    victim_key = None
-                    victim_entry = None
-                    if self.cfg.two_tier:
-                        for k, entry in self._index.items():
-                            if entry.tier == "warm":
-                                victim_key, victim_entry = k, entry
-                                break
-                    if victim_key is None:
-                        victim_key, victim_entry = next(iter(self._index.items()))
+                with self._thread_lock:
+                    while target > 0 and self._index:
+                        # Prefer warm LRU first when two-tier
+                        victim_key: str | None = None
+                        if self.cfg.two_tier:
+                            for k, entry in self._index.items():
+                                if getattr(entry, "tier", None) == "warm":
+                                    victim_key = k
+                                    break
+                        if victim_key is None:
+                            victim_key = next(iter(self._index.keys()))
 
-                    assert victim_entry is not None
-                    self._index.pop(victim_key)
+                        victim_entry = self._index.get(victim_key)
+                        if victim_entry is None:
+                            logger.error(
+                                "Cache index inconsistency during eviction: "
+                                "victim_key={}, victim_entry={}, "
+                                "index_len={}, target={}",
+                                victim_key,
+                                victim_entry,
+                                len(self._index),
+                                target,
+                            )
+                            self._index.pop(victim_key, None)
+                            raise CacheIndexInconsistencyError(
+                                f"Cache index inconsistency during eviction: "
+                                f"victim_key={victim_key}, victim_entry={victim_entry}"
+                            )
 
-                    lst = self._by_path.get(victim_entry.cache_key)
-                    if lst:
-                        idx = bisect_right(lst, victim_entry.start) - 1
-                        if idx >= 0 and lst[idx] == victim_entry.start:
-                            del lst[idx]
-                        if not lst:
-                            self._by_path.pop(victim_entry.cache_key, None)
+                        self._index.pop(victim_key, None)
 
-                    to_unlink.append(victim_key)
-                    tiers[victim_key] = victim_entry.tier
-                    self._total_bytes -= victim_entry.size
-                    if victim_entry.tier == "hot":
-                        self._hot_bytes -= victim_entry.size
-                    target -= victim_entry.size
-                    evicted += 1
+                        lst = self._by_path.get(victim_entry.cache_key)
+                        if lst:
+                            idx = bisect_right(lst, victim_entry.start) - 1
+                            if idx >= 0 and lst[idx] == victim_entry.start:
+                                del lst[idx]
+                            if not lst:
+                                self._by_path.pop(victim_entry.cache_key, None)
 
-        if to_unlink:
-            await trio.to_thread.run_sync(
-                lambda: self._unlink_cache_files(to_unlink, tiers=tiers)
-            )
-        if evicted:
-            self._metrics.record_evictions(evicted)
+                        to_unlink.append(victim_key)
+                        tiers[victim_key] = victim_entry.tier
+                        self._total_bytes -= victim_entry.size
+                        if victim_entry.tier == "hot":
+                            self._hot_bytes -= victim_entry.size
+                        target -= victim_entry.size
+                        evicted += 1
+        finally:
+            if to_unlink:
+                await trio.to_thread.run_sync(
+                    lambda: self._unlink_cache_files(to_unlink, tiers=tiers)
+                )
+            if evicted:
+                self._metrics.record_evictions(evicted)
 
     async def _evict_ttl(self) -> None:
         ttl = self.cfg.ttl_seconds

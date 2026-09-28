@@ -100,12 +100,12 @@ async def stream_events(
     )
 
 
-def _get_media_info(item_id: int) -> tuple[str, str, str]:
+def _get_media_info(item_id: int) -> tuple[str, str, str, int]:
     """
     Retrieve media information for the given item ID.
 
     Returns:
-        Tuple of (url, provider, filename).
+        Tuple of (url, provider, filename, file_size).
 
     Raises:
         HTTPException: If item not found or has no valid media.
@@ -124,7 +124,13 @@ def _get_media_info(item_id: int) -> tuple[str, str, str]:
         if not url:
             raise HTTPException(status_code=404, detail="Item has no valid stream URL")
 
-        return url, item.media_entry.provider or "", item.media_entry.original_filename
+        file_size = int(item.media_entry.file_size or 0)
+        return (
+            url,
+            item.media_entry.provider or "",
+            item.media_entry.original_filename,
+            file_size,
+        )
 
 
 def _get_client(provider: str) -> httpx.AsyncClient:
@@ -136,11 +142,136 @@ def _get_client(provider: str) -> httpx.AsyncClient:
     return di[ProxyClient] if use_proxy else di[AsyncClient]
 
 
-def _build_forward_headers(request: Request) -> dict[str, str]:
+async def _probe_file_size(client: httpx.AsyncClient, url: str) -> int | None:
+    """Attempt to discover representation length if not populated in the database."""
+    try:
+        resp = await client.head(url, timeout=5.0)
+        if resp.status_code == 200 and "content-length" in resp.headers:
+            return int(resp.headers["content-length"])
+    except Exception:
+        pass
+    try:
+        resp = await client.get(url, headers={"Range": "bytes=0-0"}, timeout=5.0)
+        if resp.status_code == 206 and "content-range" in resp.headers:
+            match = re.search(r"/(\d+)$", resp.headers["content-range"])
+            if match:
+                return int(match.group(1))
+    except Exception:
+        pass
+    return None
+
+
+def _normalize_range_header(
+    range_header: str | None,
+    file_size: int | None,
+) -> tuple[str | None, tuple[int, int] | None, bool]:
+    """Parse and normalize an HTTP Range header per RFC 9110 Section 14.
+
+    Args:
+        range_header: Raw 'Range' header string from client, e.g. 'bytes=0-100'.
+        file_size: Total representation length in bytes if known, or None.
+
+    Returns:
+        A tuple of (normalized_range_str, (start, end), is_unsatisfiable):
+        - normalized_range_str: Sanitized Range string to forward upstream ('bytes=START-END'),
+          or None if the header is invalid/unsupported and should be ignored (serve 200).
+        - (start, end): Resolved 0-based inclusive byte offsets if satisfiable.
+        - is_unsatisfiable: True if the range is syntactically well-formed but out-of-bounds
+          relative to file_size (must trigger HTTP 416).
+    """
+    if not range_header:
+        return None, None, False
+
+    range_header = range_header.strip()
+    if not range_header.lower().startswith("bytes="):
+        # Case 14: Unsupported range unit -> ignore Range header (RFC 9110 §14.2)
+        return None, None, False
+
+    range_spec = range_header[len("bytes=") :].strip()
+    if not range_spec:
+        # Case 13: Malformed Range -> ignore
+        return None, None, False
+
+    # Case 16: Handle multiple ranges by selecting the first valid range set
+    first_range = range_spec.split(",")[0].strip()
+    if not first_range:
+        return None, None, False
+
+    # Suffix range: bytes=-<suffix-length> (Cases 6, 7, 8, 15)
+    if first_range.startswith("-"):
+        suffix_str = first_range[1:].strip()
+        if not suffix_str.isdigit():
+            # Case 15: Empty/invalid suffix -> ignore (RFC 9110 §14.2)
+            return None, None, False
+        suffix_len = int(suffix_str)
+        if suffix_len == 0:
+            # Suffix length of 0 is syntactically invalid (RFC 9110 §14.1.2) -> ignore
+            return None, None, False
+
+        if file_size is not None and file_size >= 0:
+            if file_size == 0:
+                # Representation length is 0 bytes -> unsatisfiable
+                return None, None, True
+            # RFC 9110: bytes=-N resolves to start = max(0, L - N), end = L - 1
+            start = max(0, file_size - suffix_len)
+            end = file_size - 1
+            return f"bytes={start}-{end}", (start, end), False
+        else:
+            return f"bytes=-{suffix_len}", None, False
+
+    # Standard range: bytes=<start>-[<end>]
+    if "-" not in first_range:
+        # Case 13: Malformed -> ignore
+        return None, None, False
+
+    start_str, end_str = first_range.split("-", 1)
+    start_str = start_str.strip()
+    end_str = end_str.strip()
+
+    if not start_str.isdigit():
+        # Case 13: Malformed -> ignore
+        return None, None, False
+
+    start = int(start_str)
+
+    if file_size is not None and file_size >= 0:
+        if start >= file_size:
+            # Case 12: First-byte-pos >= representation length -> Unsatisfiable (RFC 9110 §14.4)
+            return None, None, True
+
+    if not end_str:
+        # Open-ended: bytes=<start>- (Cases 4, 9)
+        if file_size is not None and file_size > 0:
+            end = file_size - 1
+            return f"bytes={start}-{end}", (start, end), False
+        else:
+            return f"bytes={start}-", None, False
+    else:
+        # Closed range: bytes=<start>-<end> (Cases 1, 2, 3, 5, 10, 11)
+        if not end_str.isdigit():
+            # Case 13: Malformed -> ignore
+            return None, None, False
+        end = int(end_str)
+        if end < start:
+            # Syntactically invalid (last-byte-pos < first-byte-pos) -> ignore
+            return None, None, False
+
+        if file_size is not None and file_size > 0:
+            # Case 11: If end exceeds representation length, clamp to file_size - 1
+            if end >= file_size:
+                end = file_size - 1
+            return f"bytes={start}-{end}", (start, end), False
+        else:
+            return f"bytes={start}-{end}", (start, end), False
+
+
+def _build_forward_headers(
+    request: Request, normalized_range: str | None = None
+) -> dict[str, str]:
     """Build headers to forward to upstream."""
     headers: dict[str, str] = {}
-    if "range" in request.headers:
-        headers["Range"] = request.headers["range"]
+    if normalized_range:
+        headers["Range"] = normalized_range
     return headers
 
 
@@ -183,6 +314,17 @@ def _extract_response_headers(
         if key in upstream_response.headers:
             headers[key] = upstream_response.headers[key]
     headers["content-disposition"] = f'inline; filename="{filename}"'
+
+    # Enforce RFC 9110 §14.4: For 206 Partial Content, Content-Length must be the size of the range
+    if upstream_response.status_code == 206 and "content-range" in headers:
+        cr_match = re.match(
+            r"^bytes\s+(\d+)-(\d+)/(?:\d+|\*)$", headers["content-range"].strip()
+        )
+        if cr_match:
+            start_b = int(cr_match.group(1))
+            end_b = int(cr_match.group(2))
+            headers["content-length"] = str(max(0, end_b - start_b + 1))
+
     return headers
 
 
@@ -201,7 +343,7 @@ async def _handle_upstream_error(upstream_response: httpx.Response) -> None:
 async def stream_file(
     item_id: int,
     request: Request,
-) -> StreamingResponse:
+) -> Response:
     """
     Stream a file directly from the provider.
 
@@ -210,12 +352,43 @@ async def stream_file(
         request: The FastAPI request object.
 
     Returns:
-        A StreamingResponse for the file content.
+        A StreamingResponse for the file content, or Response on 416 range error.
     """
-    url, provider, filename = _get_media_info(item_id)
+    media_info = _get_media_info(item_id)
+    url = media_info[0]
+    provider = media_info[1]
+    filename = media_info[2]
+    file_size: int | None = (
+        int(media_info[3]) if len(media_info) >= 4 and media_info[3] > 0 else None
+    )
 
-    client = _get_client(provider)
-    forward_headers = _build_forward_headers(request)
+    client = None
+
+    if file_size is None or file_size <= 0:
+        client = _get_client(provider)
+        file_size = await _probe_file_size(client, url)
+
+    raw_range = request.headers.get("range")
+    normalized_range, _, is_unsatisfiable = _normalize_range_header(
+        raw_range, file_size
+    )
+
+    if is_unsatisfiable:
+        total_len = str(file_size) if file_size is not None and file_size >= 0 else "*"
+        return Response(
+            status_code=416,
+            headers={
+                "Content-Range": f"bytes */{total_len}",
+                "Accept-Ranges": "bytes",
+                "Content-Type": "text/plain",
+            },
+            content="Requested Range Not Satisfiable",
+        )
+
+    if client is None:
+        client = _get_client(provider)
+
+    forward_headers = _build_forward_headers(request, normalized_range=normalized_range)
 
     upstream_response: httpx.Response | None = None
     try:
@@ -226,6 +399,22 @@ async def stream_file(
         except Exception as e:
             logger.error(f"Failed to connect to upstream: {e}")
             raise HTTPException(status_code=502, detail="Upstream connection failed")
+
+        if upstream_response.status_code == 416:
+            total_len = (
+                str(file_size) if file_size is not None and file_size >= 0 else "*"
+            )
+            cr = upstream_response.headers.get("content-range", f"bytes */{total_len}")
+            await upstream_response.aclose()
+            return Response(
+                status_code=416,
+                headers={
+                    "Content-Range": cr,
+                    "Accept-Ranges": "bytes",
+                    "Content-Type": "text/plain",
+                },
+                content="Requested Range Not Satisfiable",
+            )
 
         if upstream_response.status_code >= 400:
             await _handle_upstream_error(upstream_response)
@@ -238,10 +427,33 @@ async def stream_file(
         if guessed_type:
             response_headers["content-type"] = guessed_type
 
+        if "accept-ranges" not in response_headers:
+            response_headers["accept-ranges"] = "bytes"
+
+        max_bytes: int | None = None
+        if (
+            upstream_response.status_code == 206
+            and "content-length" in response_headers
+        ):
+            try:
+                max_bytes = int(response_headers["content-length"])
+            except ValueError:
+                pass
+
         async def stream_iterator():
+            bytes_yielded = 0
             try:
                 async for chunk in upstream_response.aiter_bytes():
+                    if max_bytes is not None:
+                        remaining = max_bytes - bytes_yielded
+                        if remaining <= 0:
+                            break
+                        if len(chunk) > remaining:
+                            yield chunk[:remaining]
+                            bytes_yielded += remaining
+                            break
                     yield chunk
+                    bytes_yielded += len(chunk)
             except Exception as e:
                 logger.error(f"Error during streaming: {e}")
             finally:
@@ -322,7 +534,8 @@ async def get_hls_playlist(
         level=level,
         resolution=resolution,
     )
-    url, _provider, _filename = _get_media_info(item_id)
+    media_info = _get_media_info(item_id)
+    url = media_info[0]
     duration = _get_video_duration(url, request.headers)
 
     segment_duration = 12
@@ -383,7 +596,8 @@ async def get_hls_segment(
         level=level,
         resolution=resolution,
     )
-    url, _, _ = _get_media_info(item_id)
+    media_info = _get_media_info(item_id)
+    url = media_info[0]
 
     segment_duration = 12
     start_time = seq * segment_duration
