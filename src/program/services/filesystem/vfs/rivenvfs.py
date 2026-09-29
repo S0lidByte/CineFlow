@@ -384,6 +384,18 @@ class RivenVFS(pyfuse3.Operations):
 
         async with self._active_streams_lock:
             for stream_key, stream in list(self._active_streams.items()):
+                fh = getattr(stream, "fh", None)
+                if fh is None:
+                    try:
+                        fh = int(stream_key.rsplit(":", 1)[-1])
+                    except (ValueError, IndexError):
+                        fh = None
+
+                with self._tree_lock:
+                    handle_still_open = (
+                        (fh in self._file_handles) if fh is not None else False
+                    )
+
                 is_streaming = cast(bool, stream.is_streaming.value)
                 # Give newly-started streams 5 s before considering them
                 # zero-progress: the very first body_read chunk (up to
@@ -400,7 +412,9 @@ class RivenVFS(pyfuse3.Operations):
                     and is_streaming
                     and stream_age > 5.0
                 )
-                if stream.is_timed_out or zero_progress:
+                # Do not shed streams whose FUSE handle is still open by the OS / player,
+                # even if idle (>timeout), to protect playback buffers and D74 cache leases.
+                if not handle_still_open and (stream.is_timed_out or zero_progress):
                     candidates[stream_key] = stream
 
         if not candidates:
@@ -445,21 +459,51 @@ class RivenVFS(pyfuse3.Operations):
 
                 if len(timed_out_streams) > 0:
                     logger.debug(
-                        f"Found {len(timed_out_streams)} timed-out stream(s) to close"
+                        f"Found {len(timed_out_streams)} timed-out stream candidate(s)"
                     )
 
                     for stream_key, stream in timed_out_streams.items():
                         try:
-                            if stream.is_timed_out:
-                                logger.debug(f"Closing timed-out stream: {stream_key}")
+                            if not stream.is_timed_out:
+                                continue
 
-                                await stream.close()
+                            fh = getattr(stream, "fh", None)
+                            if fh is None:
+                                try:
+                                    fh = int(stream_key.rsplit(":", 1)[-1])
+                                except (ValueError, IndexError):
+                                    fh = None
 
-                                async with self._active_streams_lock:
-                                    if self._active_streams.pop(stream_key, None):
-                                        self._active_stream_count = len(
-                                            self._active_streams
-                                        )
+                            with self._tree_lock:
+                                handle_still_open = (
+                                    (fh in self._file_handles)
+                                    if fh is not None
+                                    else False
+                                )
+
+                            if handle_still_open:
+                                # FUSE file handle is still open by the operating system / player
+                                # (e.g. Plex Direct Play read-ahead buffer gap or playback pause).
+                                # Under the FUSE handle > MediaStream > HTTP connection hierarchy,
+                                # the logical MediaStream and its D74 cache leases MUST remain intact.
+                                logger.debug(
+                                    f"Preserving idle stream {stream_key}: FUSE handle {fh} is still open "
+                                    f"(player buffered/paused); retaining stream and D74 cache leases."
+                                )
+                                continue
+
+                            # FUSE handle is no longer in _file_handles (orphaned stream).
+                            logger.debug(
+                                f"Closing orphaned timed-out stream: {stream_key} (handle {fh} not open)"
+                            )
+
+                            await stream.close()
+
+                            async with self._active_streams_lock:
+                                if self._active_streams.pop(stream_key, None):
+                                    self._active_stream_count = len(
+                                        self._active_streams
+                                    )
                         except Exception:
                             logger.exception("Error during stream timeout check")
                 else:
@@ -2455,26 +2499,39 @@ class RivenVFS(pyfuse3.Operations):
                             if node:
                                 path = node.path
 
-                if path:
-                    stream_key = self._stream_key(path, fh)
-                    async with self._active_streams_lock:
-                        active_stream = self._active_streams.pop(stream_key, None)
-                        if active_stream is not None:
-                            self._active_stream_count = len(self._active_streams)
+            streams_to_close: list[MediaStream] = []
+            if path:
+                stream_key = self._stream_key(path, fh)
+                async with self._active_streams_lock:
+                    active_stream = self._active_streams.pop(stream_key, None)
+                    if active_stream is not None:
+                        self._active_stream_count = len(self._active_streams)
+                        streams_to_close.append(active_stream)
 
-                    if active_stream:
-                        await active_stream.close()
-                        try:
-                            from program.services.streaming.telemetry import (
-                                playback_telemetry_collector,
-                            )
+            if not streams_to_close:
+                # Robust fallback: find any stream registered for this fh
+                async with self._active_streams_lock:
+                    for k, s in list(self._active_streams.items()):
+                        s_fh = getattr(s, "fh", None)
+                        if s_fh == fh or (s_fh is None and k.endswith(f":{fh}")):
+                            self._active_streams.pop(k, None)
+                            streams_to_close.append(s)
+                    self._active_stream_count = len(self._active_streams)
 
-                            playback_telemetry_collector.register_stream_complete(
-                                stream_id=f"{path}:{fh}",
-                                title=Path(path).name,
-                            )
-                        except Exception:
-                            pass
+            for active_stream in streams_to_close:
+                await active_stream.close()
+                try:
+                    from program.services.streaming.telemetry import (
+                        playback_telemetry_collector,
+                    )
+
+                    stream_path = getattr(active_stream, "path", path) or ""
+                    playback_telemetry_collector.register_stream_complete(
+                        stream_id=f"{stream_path}:{fh}",
+                        title=Path(stream_path).name,
+                    )
+                except Exception:
+                    pass
 
             logger.trace(f"release: fh={fh} path={path}")
         except pyfuse3.FUSEError:
@@ -2590,12 +2647,17 @@ class RivenVFS(pyfuse3.Operations):
         # where two concurrent read() coroutines both see stream_key absent and
         # both proceed to create a MediaStream, orphaning one connection.
         if stream_key in self._active_streams:
-            return self._active_streams[stream_key]
+            stream = self._active_streams[stream_key]
+            if not getattr(stream, "is_killed", None) or not stream.is_killed.value:
+                return stream
 
         async with self._active_streams_lock:
             # Re-check inside the lock (double-checked locking).
             if stream_key in self._active_streams:
-                return self._active_streams[stream_key]
+                stream = self._active_streams[stream_key]
+                if not getattr(stream, "is_killed", None) or not stream.is_killed.value:
+                    return stream
+                self._active_streams.pop(stream_key, None)
 
             # Get provider info and URL from database
             entry_info = await trio.to_thread.run_sync(
