@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.42.1](https://github.com/S0lidByte/CineFlow/compare/v1.42.0...v1.42.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **vfs:** remediate D74 streaming cache eviction, prefetch horizon, and disk probe lookup ([967dfa6](https://github.com/S0lidByte/CineFlow/commit/967dfa6f9e2522e816d92944b2a3d9bab1a11c87))
+
 ## [1.42.0](https://github.com/S0lidByte/CineFlow/compare/v1.41.3...v1.42.0) (2026-09-29)
 
 
