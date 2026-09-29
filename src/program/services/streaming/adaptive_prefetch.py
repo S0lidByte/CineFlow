@@ -121,6 +121,7 @@ class AdaptivePrefetchManager:
         active_leases: int = 0,
         max_leases: int = 64,
         cache_usage_pct: float = 0.0,
+        cache_protected_pct: float | None = None,
     ) -> int:
         """
         Calculate the optimal prefetch window (in chunks) using:
@@ -147,10 +148,20 @@ class AdaptivePrefetchManager:
             )
             window = max(self.config.min_window_chunks, int(window * throttle_scale))
 
-        # Cache capacity pressure throttling
-        if cache_usage_pct >= 95.0:
+        # Cache capacity pressure throttling:
+        # Prioritize active playback over cache retention.
+        # If cache_protected_pct is provided, throttle ONLY when un-evictable protected
+        # playback data nears capacity. Historical evictable cache does not throttle prefetch.
+        raw_pressure = (
+            cache_protected_pct if cache_protected_pct is not None else cache_usage_pct
+        )
+        if callable(raw_pressure):
+            effective_cache_pressure = float(raw_pressure())  # type: ignore[reportUnknownArgumentType]
+        else:
+            effective_cache_pressure = float(raw_pressure)
+        if effective_cache_pressure >= 95.0:
             window = self.config.min_window_chunks
-        elif cache_usage_pct >= self.config.cache_pressure_threshold_pct:
+        elif effective_cache_pressure >= self.config.cache_pressure_threshold_pct:
             window = max(self.config.min_window_chunks, int(window * 0.5))
 
         # Post-seek ramp-up: ramp up prefetch gradually to conserve bandwidth during seeking/scrubbing

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from http import HTTPStatus
 from time import monotonic
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import httpx
 import trio
@@ -365,6 +365,8 @@ class MediaStream:
             original_filename=original_filename,
             bitrate=bitrate,
         )
+
+        self.stream_id = f"{self.file_metadata.original_filename}:{self.fh}"
 
         self.chunker = Chunker(
             cache_key=self.file_metadata.original_filename,
@@ -968,13 +970,41 @@ class MediaStream:
                                                 pass
 
                                         cache_usage = 0.0
+                                        cache_protected = 0.0
                                         try:
                                             from .cache import Cache
 
-                                            if Cache in di and hasattr(
-                                                di[Cache], "usage_percentage"
-                                            ):
-                                                cache_usage = di[Cache].usage_percentage
+                                            if Cache in di:
+                                                cache_inst: Any = di[Cache]
+                                                if hasattr(
+                                                    cache_inst, "usage_percentage"
+                                                ):
+                                                    u_val: Any = (
+                                                        cache_inst.usage_percentage
+                                                    )
+                                                    raw_u: Any = (
+                                                        u_val()
+                                                        if callable(u_val)
+                                                        else u_val
+                                                    )
+                                                    cache_usage = float(
+                                                        cast(float, raw_u)
+                                                    )
+                                                if hasattr(
+                                                    cache_inst,
+                                                    "protected_usage_percentage",
+                                                ):
+                                                    p_val: Any = (
+                                                        cache_inst.protected_usage_percentage
+                                                    )
+                                                    raw_p: Any = (
+                                                        p_val()
+                                                        if callable(p_val)
+                                                        else p_val
+                                                    )
+                                                    cache_protected = float(
+                                                        cast(float, raw_p)
+                                                    )
                                         except Exception:
                                             pass
 
@@ -982,6 +1012,7 @@ class MediaStream:
                                             self.adaptive_prefetch.calculate_window(
                                                 active_leases=active_leases,
                                                 cache_usage_pct=cache_usage,
+                                                cache_protected_pct=cache_protected,
                                             )
                                             if hasattr(self, "adaptive_prefetch")
                                             else self.config.prefetch_chunks
@@ -1206,6 +1237,15 @@ class MediaStream:
         # Always attempt to free the httpx pool slot even if kill timed out.
         await self._force_aclose_active_response()
 
+        # Free active playback lease reservations for this stream in the VFS cache
+        try:
+            from .cache import Cache
+
+            if Cache in di and hasattr(self, "stream_id"):
+                di[Cache].release_stream(self.stream_id)
+        except Exception:
+            pass
+
         if self.enable_tracing:
             logger.log(
                 "STREAM",
@@ -1307,8 +1347,29 @@ class MediaStream:
                 chunk_range
             ):
                 _, playhead_end = chunk_range.request_range
+                cache_usage = 0.0
+                cache_protected = 0.0
+                try:
+                    from .cache import Cache
+
+                    if Cache in di:
+                        cache_inst: Any = di[Cache]
+                        if hasattr(cache_inst, "usage_percentage"):
+                            u_val: Any = cache_inst.usage_percentage
+                            raw_u: Any = u_val() if callable(u_val) else u_val
+                            cache_usage = float(cast(float, raw_u))
+                        if hasattr(cache_inst, "protected_usage_percentage"):
+                            p_val: Any = cache_inst.protected_usage_percentage
+                            raw_p: Any = p_val() if callable(p_val) else p_val
+                            cache_protected = float(cast(float, raw_p))
+                except Exception:
+                    pass
+
                 ahead_count = (
-                    self.adaptive_prefetch.calculate_window()
+                    self.adaptive_prefetch.calculate_window(
+                        cache_usage_pct=cache_usage,
+                        cache_protected_pct=cache_protected,
+                    )
                     if hasattr(self, "adaptive_prefetch")
                     else self.config.prefetch_chunks
                 )
@@ -1369,6 +1430,19 @@ class MediaStream:
         request_size: int,
     ) -> bytes:
         """Handles incoming read requests from the VFS."""
+
+        # Protect active playhead lookback and lookahead chunks in VFS cache
+        try:
+            from .cache import Cache
+
+            if Cache in di and hasattr(self, "stream_id"):
+                di[Cache].reconcile_stream_playhead(
+                    stream_id=self.stream_id,
+                    cache_key=self.file_metadata.original_filename,
+                    playhead_byte=request_start,
+                )
+        except Exception:
+            pass
 
         read_range = self.chunker.get_chunk_range(
             position=request_start,
@@ -1993,6 +2067,7 @@ class MediaStream:
             cache_key=self.file_metadata.original_filename,
             start=start,
             end=end,
+            stream_id=getattr(self, "stream_id", None),
         )
 
     async def _cache_chunk(
@@ -2009,6 +2084,7 @@ class MediaStream:
             cache_key=self.file_metadata.original_filename,
             start=start,
             data=data,
+            stream_id=getattr(self, "stream_id", None),
         )
 
     async def _refresh_download_url(self, failed_url: str | None = None) -> bool:

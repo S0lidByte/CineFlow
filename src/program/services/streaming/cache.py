@@ -10,8 +10,9 @@ import uuid
 from bisect import bisect_right, insort
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Literal, NotRequired, Required, TypedDict
 
@@ -58,6 +59,31 @@ class CacheEntry:
     size: int
     mtime: float
     tier: Literal["hot", "warm"] = "warm"
+
+    @property
+    def chunk_state(self) -> ChunkState:
+        return ChunkState.HOT if self.tier == "hot" else ChunkState.WARM
+
+
+class ChunkState(str, Enum):
+    """Lifecycle state of a media chunk in cache."""
+
+    HOT = "hot"  # In fast RAM/tmpfs tier
+    WARM = "warm"  # In persistent disk tier
+    EVICTED = "evicted"  # Removed from disk and index
+
+
+@dataclass
+class StreamLease:
+    """Active playback lease protecting a chunk from eviction."""
+
+    stream_id: str
+    cache_key: str
+    start: int
+    size: int
+    expires_at: float  # monotonic timestamp
+    acquired_at: float
+    last_touched_at: float
 
 
 @dataclass(frozen=True)
@@ -183,6 +209,16 @@ class Cache:
         # boundary. Only one may trim and collect metrics; the rest must keep
         # serving reads rather than queueing behind eviction I/O.
         self._metrics_maintenance_lock = trio.Lock()
+
+        # Active Playback Protection:
+        # key (composite chunk_key e.g. "hash_start") -> dict[stream_id, StreamLease]
+        self._leases_by_key: dict[str, dict[str, StreamLease]] = {}
+        # stream_id -> dict[key, StreamLease]
+        self._leases_by_stream: dict[str, dict[str, StreamLease]] = {}
+        # key -> active reader refcount (incremented in reading_chunk context manager)
+        self._active_readers: dict[str, int] = {}
+        # Count of refused evictions when all candidates are protected
+        self.eviction_refusals: int = 0
 
         try:
             os.makedirs(self.cfg.cache_dir, exist_ok=True)
@@ -558,6 +594,227 @@ class Cache:
         if hot_meta.exists():
             self._rename_or_copy(hot_meta, warm_meta)
 
+    @contextmanager
+    def reading_chunk(self, chunk_key: str):
+        """Context manager tracking active readers to prevent eviction races."""
+        with self._thread_lock:
+            self._active_readers[chunk_key] = self._active_readers.get(chunk_key, 0) + 1
+        try:
+            yield
+        finally:
+            with self._thread_lock:
+                cnt = self._active_readers.get(chunk_key, 1) - 1
+                if cnt <= 0:
+                    self._active_readers.pop(chunk_key, None)
+                else:
+                    self._active_readers[chunk_key] = cnt
+
+    def _is_entry_protected(self, key: str, entry: CacheEntry | None = None) -> bool:
+        """Check if cache entry is protected by active readers or valid stream leases.
+
+        Must be called while holding self._thread_lock.
+        """
+        if self._active_readers.get(key, 0) > 0:
+            return True
+
+        leases = self._leases_by_key.get(key)
+        if not leases:
+            return False
+
+        now = time.monotonic()
+        active = False
+        expired_streams: list[str] = []
+        for stream_id, lease in leases.items():
+            if lease.expires_at > now:
+                active = True
+            else:
+                expired_streams.append(stream_id)
+
+        # Cleanup expired leases
+        for stream_id in expired_streams:
+            leases.pop(stream_id, None)
+            if stream_id in self._leases_by_stream:
+                self._leases_by_stream[stream_id].pop(key, None)
+                if not self._leases_by_stream[stream_id]:
+                    self._leases_by_stream.pop(stream_id, None)
+
+        if not leases:
+            self._leases_by_key.pop(key, None)
+
+        return active
+
+    def acquire_lease(
+        self,
+        *,
+        stream_id: str,
+        cache_key: str,
+        start: int,
+        size: int,
+        lease_seconds: float = 60.0,
+    ) -> StreamLease:
+        """Acquire or renew an active playback lease on a chunk."""
+        k = self._key(cache_key, start)
+        now = time.monotonic()
+        expires_at = now + lease_seconds
+
+        with self._thread_lock:
+            lease_dict = self._leases_by_key.setdefault(k, {})
+            existing = lease_dict.get(stream_id)
+            if existing:
+                lease = StreamLease(
+                    stream_id=stream_id,
+                    cache_key=cache_key,
+                    start=start,
+                    size=size,
+                    expires_at=expires_at,
+                    acquired_at=existing.acquired_at,
+                    last_touched_at=now,
+                )
+            else:
+                lease = StreamLease(
+                    stream_id=stream_id,
+                    cache_key=cache_key,
+                    start=start,
+                    size=size,
+                    expires_at=expires_at,
+                    acquired_at=now,
+                    last_touched_at=now,
+                )
+
+            lease_dict[stream_id] = lease
+            stream_dict = self._leases_by_stream.setdefault(stream_id, {})
+            stream_dict[k] = lease
+
+            if k in self._index:
+                self._index.move_to_end(k, last=True)
+
+            return lease
+
+    def release_lease(
+        self,
+        *,
+        stream_id: str,
+        cache_key: str,
+        start: int,
+    ) -> None:
+        """Release an active playback lease on a chunk."""
+        k = self._key(cache_key, start)
+        with self._thread_lock:
+            if k in self._leases_by_key:
+                self._leases_by_key[k].pop(stream_id, None)
+                if not self._leases_by_key[k]:
+                    self._leases_by_key.pop(k, None)
+
+            if stream_id in self._leases_by_stream:
+                self._leases_by_stream[stream_id].pop(k, None)
+                if not self._leases_by_stream[stream_id]:
+                    self._leases_by_stream.pop(stream_id, None)
+
+    def release_stream(self, stream_id: str) -> int:
+        """Release all active leases held by stream_id. Returns count of released leases."""
+        with self._thread_lock:
+            leases = self._leases_by_stream.pop(stream_id, {})
+            count = len(leases)
+            for k in leases:
+                if k in self._leases_by_key:
+                    self._leases_by_key[k].pop(stream_id, None)
+                    if not self._leases_by_key[k]:
+                        self._leases_by_key.pop(k, None)
+            return count
+
+    def reconcile_stream_playhead(
+        self,
+        *,
+        stream_id: str,
+        cache_key: str,
+        playhead_byte: int,
+        lookback_bytes: int = 16 * 1024 * 1024,
+        lookahead_bytes: int = 256 * 1024 * 1024,
+        lease_seconds: float = 60.0,
+    ) -> int:
+        """Protect chunks within [playhead - lookback, playhead + lookahead] for stream_id.
+
+        Releases obsolete leases for chunks outside this window.
+        Returns count of protected chunks for this stream.
+        """
+        min_pos = max(0, playhead_byte - lookback_bytes)
+        max_pos = playhead_byte + lookahead_bytes
+        now = time.monotonic()
+
+        with self._thread_lock:
+            # 1. Release existing leases for this stream that are outside [min_pos, max_pos]
+            active_leases = self._leases_by_stream.get(stream_id, {})
+            obsolete_keys = [
+                k
+                for k, lease in active_leases.items()
+                if lease.cache_key == cache_key
+                and (lease.start < min_pos or lease.start > max_pos)
+            ]
+            for k in obsolete_keys:
+                active_leases.pop(k, None)
+                if k in self._leases_by_key:
+                    self._leases_by_key[k].pop(stream_id, None)
+                    if not self._leases_by_key[k]:
+                        self._leases_by_key.pop(k, None)
+
+            # 2. Acquire/renew leases for all chunks within the window for this cache_key
+            cached_starts = self._by_path.get(cache_key, [])
+            if not cached_starts:
+                return len(self._leases_by_stream.get(stream_id, {}))
+
+            start_idx = bisect_right(cached_starts, min_pos) - 1
+            start_idx = max(start_idx, 0)
+            end_idx = bisect_right(cached_starts, max_pos)
+
+            for i in range(start_idx, min(end_idx + 1, len(cached_starts))):
+                chunk_start = cached_starts[i]
+                chunk_key = self._key(cache_key, chunk_start)
+                entry = self._index.get(chunk_key)
+                if not entry:
+                    continue
+                chunk_end = chunk_start + entry.size - 1
+                if chunk_end >= min_pos and chunk_start <= max_pos:
+                    lease = StreamLease(
+                        stream_id=stream_id,
+                        cache_key=cache_key,
+                        start=chunk_start,
+                        size=entry.size,
+                        expires_at=now + lease_seconds,
+                        acquired_at=now,
+                        last_touched_at=now,
+                    )
+                    self._leases_by_key.setdefault(chunk_key, {})[stream_id] = lease
+                    self._leases_by_stream.setdefault(stream_id, {})[chunk_key] = lease
+                    self._index.move_to_end(chunk_key, last=True)
+
+            return len(self._leases_by_stream.get(stream_id, {}))
+
+    def is_protected(self, cache_key: str, start: int) -> bool:
+        """Inspect if a chunk at cache_key/start is currently protected."""
+        k = self._key(cache_key, start)
+        with self._thread_lock:
+            return self._is_entry_protected(k)
+
+    def protected_bytes(self) -> int:
+        """Return total bytes of currently protected chunks."""
+        with self._thread_lock:
+            now = time.monotonic()
+            protected = 0
+            for k, entry in self._index.items():
+                if self._active_readers.get(k, 0) > 0:
+                    protected += entry.size
+                    continue
+                leases = self._leases_by_key.get(k)
+                if leases and any(l.expires_at > now for l in leases.values()):
+                    protected += entry.size
+            return protected
+
+    def protected_usage_percentage(self) -> float:
+        """Return percentage of total cache capacity currently protected by active playback (0.0 to 100.0)."""
+        if self.cfg.max_size_bytes <= 0:
+            return 0.0
+        return (self.protected_bytes() / self.cfg.max_size_bytes) * 100.0
+
     async def _ensure_hot_capacity(self, need_bytes: int) -> None:
         """Demote LRU hot entries to warm until hot tier can accept need_bytes."""
         if not self.cfg.two_tier:
@@ -576,13 +833,23 @@ class Cache:
             if target <= 0:
                 return
 
-            for cache_entry in list(self._index.values()):
-                if target <= 0:
-                    break
-                if cache_entry.tier != "hot":
-                    continue
-                to_demote.append(cache_entry)
-                target -= cache_entry.size
+            with self._thread_lock:
+                # Prefer demoting unprotected hot entries first to preserve active playback in RAM
+                unprotected_hot: list[CacheEntry] = []
+                protected_hot: list[CacheEntry] = []
+                for cache_entry in self._index.values():
+                    if cache_entry.tier != "hot":
+                        continue
+                    if not self._is_entry_protected(cache_entry.key, cache_entry):
+                        unprotected_hot.append(cache_entry)
+                    else:
+                        protected_hot.append(cache_entry)
+
+                for cache_entry in unprotected_hot + protected_hot:
+                    if target <= 0:
+                        break
+                    to_demote.append(cache_entry)
+                    target -= cache_entry.size
 
         for entry in to_demote:
             try:
@@ -606,7 +873,9 @@ class Cache:
                         mtime=current.mtime,
                         tier="warm",
                     )
-                    self._index.move_to_end(entry.key, last=False)
+                    # NOTE: Do NOT do self._index.move_to_end(entry.key, last=False)!
+                    # Demoted chunks must NOT be pushed to the head of the LRU queue,
+                    # which caused active playback chunks to be immediately evicted.
                     self._hot_bytes = max(0, self._hot_bytes - current.size)
 
         # Warm may now be over budget
@@ -666,15 +935,32 @@ class Cache:
 
                 with self._thread_lock:
                     while target > 0 and self._index:
-                        # Prefer warm LRU first when two-tier
+                        # Prefer oldest unprotected warm entry first when two-tier
                         victim_key: str | None = None
                         if self.cfg.two_tier:
                             for k, entry in self._index.items():
-                                if getattr(entry, "tier", None) == "warm":
+                                if getattr(
+                                    entry, "tier", None
+                                ) == "warm" and not self._is_entry_protected(k, entry):
                                     victim_key = k
                                     break
                         if victim_key is None:
-                            victim_key = next(iter(self._index.keys()))
+                            for k, entry in self._index.items():
+                                if not self._is_entry_protected(k, entry):
+                                    victim_key = k
+                                    break
+
+                        if victim_key is None:
+                            # ALL entries in cache are currently protected by active playback leases/readers.
+                            # ACTIVE PLAYBACK DATA > CACHE RETENTION: Refuse eviction to prevent buffer drops.
+                            self.eviction_refusals += 1
+                            logger.warning(
+                                "Cache LRU eviction refused: all {} entries ({:.1f} MB) are protected by active playback leases/readers. Target was {} bytes.",
+                                len(self._index),
+                                self._total_bytes / (1024 * 1024),
+                                target,
+                            )
+                            break
 
                         victim_entry = self._index.get(victim_key)
                         if victim_entry is None:
@@ -694,6 +980,8 @@ class Cache:
                             )
 
                         self._index.pop(victim_key, None)
+                        self._leases_by_key.pop(victim_key, None)
+                        self._active_readers.pop(victim_key, None)
 
                         lst = self._by_path.get(victim_entry.cache_key)
                         if lst:
@@ -732,21 +1020,27 @@ class Cache:
                     continue
 
                 if now - cache_entry.mtime > ttl:
-                    self._index.pop(k, None)
-                    lst = self._by_path.get(cache_entry.cache_key)
+                    with self._thread_lock:
+                        if self._is_entry_protected(k, cache_entry):
+                            continue
 
-                    if lst:
-                        idx = bisect_right(lst, cache_entry.start) - 1
+                        self._index.pop(k, None)
+                        self._leases_by_key.pop(k, None)
+                        self._active_readers.pop(k, None)
+                        lst = self._by_path.get(cache_entry.cache_key)
 
-                        if idx >= 0 and lst[idx] == cache_entry.start:
-                            del lst[idx]
+                        if lst:
+                            idx = bisect_right(lst, cache_entry.start) - 1
 
-                        if not lst:
-                            self._by_path.pop(cache_entry.cache_key, None)
+                            if idx >= 0 and lst[idx] == cache_entry.start:
+                                del lst[idx]
 
-                    self._total_bytes -= cache_entry.size
-                    if cache_entry.tier == "hot":
-                        self._hot_bytes -= cache_entry.size
+                            if not lst:
+                                self._by_path.pop(cache_entry.cache_key, None)
+
+                        self._total_bytes -= cache_entry.size
+                        if cache_entry.tier == "hot":
+                            self._hot_bytes -= cache_entry.size
                     to_unlink.append(k)
                     tiers[k] = cache_entry.tier
 
@@ -756,7 +1050,14 @@ class Cache:
             )
             self._metrics.record_evictions(len(to_unlink))
 
-    async def get(self, cache_key: str, start: int, end: int) -> bytes:
+    async def get(
+        self,
+        cache_key: str,
+        start: int,
+        end: int,
+        *,
+        stream_id: str | None = None,
+    ) -> bytes:
         needed_len = max(0, end - start + 1)
 
         if needed_len == 0:
@@ -816,12 +1117,13 @@ class Cache:
                 copy_end = end - chunk_start_offset
                 bytes_to_read = copy_end - copy_start + 1
 
-                result = await self._read_slice_from_tiers(
-                    chunk_key,
-                    preferred=chunk_tier,
-                    offset=copy_start,
-                    size=bytes_to_read,
-                )
+                with self.reading_chunk(chunk_key):
+                    result = await self._read_slice_from_tiers(
+                        chunk_key,
+                        preferred=chunk_tier,
+                        offset=copy_start,
+                        size=bytes_to_read,
+                    )
 
                 read_time = time.time() - read_start
 
@@ -832,6 +1134,14 @@ class Cache:
                     )
 
                 if len(result) == needed_len:
+                    if stream_id is not None:
+                        self.acquire_lease(
+                            stream_id=stream_id,
+                            cache_key=cache_key,
+                            start=chunk_start_offset,
+                            size=needed_len,
+                        )
+
                     # Priority 2: Probabilistic LRU update.
                     # Acquiring the global index lock on *every* cache hit serialises
                     # all concurrent stream reads. Under 6+ simultaneous titles this
@@ -944,16 +1254,26 @@ class Cache:
             chunks_used = list[tuple[str, float]]()
 
             for chunk_info in chunks_to_read:
-                chunk_slice = await self._read_slice_from_tiers(
-                    chunk_info.chunk_key,
-                    preferred=chunk_info.chunk_tier,
-                    offset=chunk_info.copy_start,
-                    size=chunk_info.bytes_to_read,
-                )
+                with self.reading_chunk(chunk_info.chunk_key):
+                    chunk_slice = await self._read_slice_from_tiers(
+                        chunk_info.chunk_key,
+                        preferred=chunk_info.chunk_tier,
+                        offset=chunk_info.copy_start,
+                        size=chunk_info.bytes_to_read,
+                    )
 
                 if len(chunk_slice) == chunk_info.bytes_to_read:
                     result_data.extend(chunk_slice)
                     chunks_used.append((chunk_info.chunk_key, chunk_info.chunk_ts))
+                    if stream_id is not None:
+                        entry = self._index.get(chunk_info.chunk_key)
+                        if entry:
+                            self.acquire_lease(
+                                stream_id=stream_id,
+                                cache_key=cache_key,
+                                start=entry.start,
+                                size=entry.size,
+                            )
                 else:
                     # Incomplete read, abort slow path
                     break
@@ -1039,7 +1359,15 @@ class Cache:
 
         return b""
 
-    async def put(self, cache_key: str, start: int, data: bytes) -> None:
+    async def put(
+        self,
+        cache_key: str,
+        start: int,
+        data: bytes,
+        *,
+        stream_id: str | None = None,
+        lease_seconds: float = 60.0,
+    ) -> None:
         if not data:
             return
 
@@ -1073,6 +1401,14 @@ class Cache:
                         break
 
             if existing_is_complete:
+                if stream_id is not None:
+                    self.acquire_lease(
+                        stream_id=stream_id,
+                        cache_key=cache_key,
+                        start=start,
+                        size=existing_size,
+                        lease_seconds=lease_seconds,
+                    )
                 return
 
             hot_reservation = 0
@@ -1138,6 +1474,15 @@ class Cache:
                         if write_tier == "hot":
                             self._hot_bytes += need
                         self._metrics.record_bytes_written(need)
+
+                if stream_id is not None:
+                    self.acquire_lease(
+                        stream_id=stream_id,
+                        cache_key=cache_key,
+                        start=start,
+                        size=need,
+                        lease_seconds=lease_seconds,
+                    )
             finally:
                 if hot_reservation:
                     await self._release_hot_capacity(hot_reservation)

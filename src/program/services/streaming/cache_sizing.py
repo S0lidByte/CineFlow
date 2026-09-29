@@ -84,6 +84,35 @@ def is_tmpfs_path(path: Path) -> bool:
         return False
 
 
+def get_cgroup_memory_limit() -> int | None:
+    """Read container memory limit from cgroup v2 (memory.max) or cgroup v1 (memory.limit_in_bytes)."""
+    # Check cgroup v2
+    v2_path = Path("/sys/fs/cgroup/memory.max")
+    if v2_path.exists():
+        try:
+            val = v2_path.read_text(encoding="utf-8").strip()
+            if val and val != "max":
+                limit = int(val)
+                if 0 < limit < (1 << 62):
+                    return limit
+        except Exception:
+            pass
+
+    # Check cgroup v1
+    v1_path = Path("/sys/fs/cgroup/memory/memory.limit_in_bytes")
+    if v1_path.exists():
+        try:
+            val = v1_path.read_text(encoding="utf-8").strip()
+            if val:
+                limit = int(val)
+                if 0 < limit < (1 << 60):
+                    return limit
+        except Exception:
+            pass
+
+    return None
+
+
 def resolve_cache_max_bytes(
     cache_dir: Path,
     configured_mb: int,
@@ -120,6 +149,13 @@ def resolve_cache_max_bytes(
         # Prefer the hard cap so a huge /dev/shm (or host shm) cannot authorize
         # multi-GiB RAM cache that OOMs the container.
         tmpfs_cap = tmpfs_hard_cap_bytes
+        cgroup_limit = get_cgroup_memory_limit()
+        if cgroup_limit is not None:
+            # Leave at least 1.5 GiB for Python application working set, pyfuse3, PostgreSQL, network buffers
+            reserved_app_headroom = 1536 * 1024 * 1024
+            safe_cgroup_tmpfs = max(0, cgroup_limit - reserved_app_headroom)
+            tmpfs_cap = min(tmpfs_cap, safe_cgroup_tmpfs)
+
         if has_free_space_measurement:
             tmpfs_cap = min(tmpfs_cap, int(free * TMPFS_FREE_FRACTION))
 
