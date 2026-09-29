@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.42.2](https://github.com/S0lidByte/CineFlow/compare/v1.42.1...v1.42.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* **vfs:** fence MediaStream and cache lease lifecycle to FUSE file handle (D75) ([a20305c](https://github.com/S0lidByte/CineFlow/commit/a20305c01dcadba0fd66bf0989c40cd10fe66515))
+
 ## [1.42.1](https://github.com/S0lidByte/CineFlow/compare/v1.42.0...v1.42.1) (2026-09-29)
 
 
