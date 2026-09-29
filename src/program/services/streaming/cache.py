@@ -795,6 +795,15 @@ class Cache:
         with self._thread_lock:
             return self._is_entry_protected(k)
 
+    def is_chunk_lease_protected(self, cache_key: str, start: int) -> bool:
+        """Alias for is_protected checking if chunk is lease or reader protected."""
+        return self.is_protected(cache_key, start)
+
+    @property
+    def eviction_refusal_counter(self) -> int:
+        """Alias for eviction_refusals counter."""
+        return self.eviction_refusals
+
     def protected_bytes(self) -> int:
         """Return total bytes of currently protected chunks."""
         with self._thread_lock:
