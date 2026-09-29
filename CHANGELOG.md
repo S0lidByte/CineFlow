@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.42.0](https://github.com/S0lidByte/CineFlow/compare/v1.41.3...v1.42.0) (2026-09-29)
+
+
+### Features
+
+* **vfs:** implement D74 active stream lease protection and safe cache eviction ([1e61c88](https://github.com/S0lidByte/CineFlow/commit/1e61c88378c4595d3dba8356b36662f3a97290b3))
+
+
+### Bug Fixes
+
+* **vfs:** add eviction_refusal_counter and is_chunk_lease_protected aliases on Cache ([8b7ac83](https://github.com/S0lidByte/CineFlow/commit/8b7ac8379d024b60a205565f142ef70daefe91f8))
+
 ## [1.41.3](https://github.com/S0lidByte/CineFlow/compare/v1.41.2...v1.41.3) (2026-09-28)
 
 
