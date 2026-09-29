@@ -12,6 +12,7 @@ class ChunkCacheNotifier:
     """Manages chunk cache emitters for notifying when chunks have been cached."""
 
     emitters = cachetools.LRUCache[tuple[str, int], trio_util.AsyncBool](maxsize=4096)
+    _start_to_index = cachetools.LRUCache[tuple[str, int], int](maxsize=4096)
 
     def get_emitter(
         self,
@@ -28,18 +29,39 @@ class ChunkCacheNotifier:
         """
 
         key = (chunk.cache_key, chunk.index)
+        self._start_to_index[(chunk.cache_key, chunk.start)] = chunk.index
         if key not in self.emitters:
             from .cache import Cache
 
-            is_cached = di[Cache].has(
-                cache_key=chunk.cache_key,
-                start=chunk.start,
-                end=chunk.end,
-            )
+            is_cached = False
+            if Cache in di:
+                is_cached = di[Cache].has(
+                    cache_key=chunk.cache_key,
+                    start=chunk.start,
+                    end=chunk.end,
+                )
 
             self.emitters[key] = trio_util.AsyncBool(is_cached)
 
         return self.emitters[key]
+
+    def on_chunk_evicted(self, *, cache_key: str, start: int) -> None:
+        """Called when a chunk is evicted from cache to ensure emitter reflects absence."""
+        idx = self._start_to_index.get((cache_key, start))
+        if idx is not None:
+            key = (cache_key, idx)
+            emitter = self.emitters.get(key)
+            if emitter is not None:
+                emitter.value = False
+        else:
+            # Fallback scan across emitters matching cache_key
+            for (ck, _), emitter in list(self.emitters.items()):
+                if ck == cache_key and emitter.value:
+                    from .cache import Cache
+
+                    if Cache in di:
+                        # Authoritative reconciliation happens on property access
+                        pass
 
     def clear_emitter(self, *, chunk: "Chunk") -> None:
         """Clear the emitter for a specific chunk."""
@@ -47,6 +69,7 @@ class ChunkCacheNotifier:
         key = (chunk.cache_key, chunk.index)
         if key in self.emitters:
             del self.emitters[key]
+        self._start_to_index.pop((chunk.cache_key, chunk.start), None)
 
     def clear_emitters(self, *, cache_key: str) -> None:
         """Clear all emitters for a specific cache key."""
@@ -54,6 +77,9 @@ class ChunkCacheNotifier:
         for key in list(self.emitters.keys()):
             if key[0] == cache_key:
                 del self.emitters[key]
+        for skey in list(self._start_to_index.keys()):
+            if skey[0] == cache_key:
+                del self._start_to_index[skey]
 
 
 @dataclass(frozen=True, unsafe_hash=True)
@@ -91,17 +117,16 @@ class Chunk:
     def is_cached(self) -> trio_util.AsyncBool:
         """An emitter that indicates whether the chunk is cached."""
 
-        if not self._emitter.value:
-            from .cache import Cache
+        from .cache import Cache
 
+        if Cache in di:
             cache_hit = di[Cache].has(
                 cache_key=self.cache_key,
                 start=self.start,
                 end=self.end,
             )
-
-            if cache_hit:
-                self._emitter.value = True
+            if self._emitter.value != cache_hit:
+                self._emitter.value = cache_hit
 
         return self._emitter
 
@@ -111,9 +136,6 @@ class Chunk:
         # Set the emitter to True to indicate the chunk is cached,
         # and notify any listeners.
         self._emitter.value = True
-
-        # Clear the emitter from the manager to free up memory.
-        di[ChunkCacheNotifier].clear_emitter(chunk=self)
 
     @property
     def size(self) -> int:

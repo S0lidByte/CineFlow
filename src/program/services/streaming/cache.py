@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Literal, NotRequired, Required, TypedDict
 
 import trio
+from kink import di
 from loguru import logger
 
 
@@ -277,7 +278,7 @@ class Cache:
         try:
             with path.open("rb") as f:
                 return f.read()
-        except FileNotFoundError:
+        except OSError:
             return None
 
     @staticmethod
@@ -729,7 +730,7 @@ class Cache:
         cache_key: str,
         playhead_byte: int,
         lookback_bytes: int = 16 * 1024 * 1024,
-        lookahead_bytes: int = 256 * 1024 * 1024,
+        lookahead_bytes: int = 384 * 1024 * 1024,
         lease_seconds: float = 60.0,
     ) -> int:
         """Protect chunks within [playhead - lookback, playhead + lookahead] for stream_id.
@@ -934,6 +935,7 @@ class Cache:
         to_unlink: list[str] = []
         tiers: dict[str, Literal["hot", "warm"]] = {}
         evicted = 0
+        evicted_entries: list[tuple[str, int]] = []
 
         try:
             async with self.locks():
@@ -1002,6 +1004,9 @@ class Cache:
 
                         to_unlink.append(victim_key)
                         tiers[victim_key] = victim_entry.tier
+                        evicted_entries.append(
+                            (victim_entry.cache_key, victim_entry.start)
+                        )
                         self._total_bytes -= victim_entry.size
                         if victim_entry.tier == "hot":
                             self._hot_bytes -= victim_entry.size
@@ -1014,12 +1019,21 @@ class Cache:
                 )
             if evicted:
                 self._metrics.record_evictions(evicted)
+            for ck, st in evicted_entries:
+                try:
+                    from .chunker import ChunkCacheNotifier
+
+                    if ChunkCacheNotifier in di:
+                        di[ChunkCacheNotifier].on_chunk_evicted(cache_key=ck, start=st)
+                except Exception:
+                    pass
 
     async def _evict_ttl(self) -> None:
         ttl = self.cfg.ttl_seconds
         now = time.time()
         to_unlink: list[str] = []
         tiers: dict[str, Literal["hot", "warm"]] = {}
+        evicted_entries: list[tuple[str, int]] = []
 
         async with self.locks():
             for k in list(self._index.keys()):
@@ -1052,12 +1066,21 @@ class Cache:
                             self._hot_bytes -= cache_entry.size
                     to_unlink.append(k)
                     tiers[k] = cache_entry.tier
+                    evicted_entries.append((cache_entry.cache_key, cache_entry.start))
 
         if to_unlink:
             await trio.to_thread.run_sync(
                 lambda: self._unlink_cache_files(to_unlink, tiers=tiers)
             )
             self._metrics.record_evictions(len(to_unlink))
+            for ck, st in evicted_entries:
+                try:
+                    from .chunker import ChunkCacheNotifier
+
+                    if ChunkCacheNotifier in di:
+                        di[ChunkCacheNotifier].on_chunk_evicted(cache_key=ck, start=st)
+                except Exception:
+                    pass
 
     async def get(
         self,
@@ -1314,55 +1337,101 @@ class Cache:
 
                     return bytes(result_data)
 
-        # Fallback: Direct probe for exact key on filesystem and rebuild index
-        k = self._key(cache_key, start)
-        data = None
+        # Fallback: Direct probe for chunk files on filesystem and rebuild index
+        found_data: bytes | None = None
         found_tier: Literal["hot", "warm"] = "warm"
-        for probe_tier in ("hot", "warm") if self.cfg.two_tier else ("warm",):
-            fp = self._file_for(k, tier=probe_tier)  # type: ignore[arg-type]
-            data = await trio.to_thread.run_sync(self._read_file_all, fp)
-            if data is not None:
-                found_tier = probe_tier  # type: ignore[assignment]
+        found_key: str = ""
+        found_start: int = start
+
+        # Probe candidate chunk start boundaries: exact start, common alignments, or header (0)
+        candidate_starts = [start]
+        if start > 0:
+            for cand_chunk_sz in (
+                8 * 1024 * 1024,
+                16 * 1024 * 1024,
+                4 * 1024 * 1024,
+                32 * 1024 * 1024,
+                1 * 1024 * 1024,
+                2 * 1024 * 1024,
+            ):
+                aligned_start = start - (start % cand_chunk_sz)
+                if aligned_start not in candidate_starts:
+                    candidate_starts.append(aligned_start)
+            if 0 not in candidate_starts and start < 64 * 1024 * 1024:
+                candidate_starts.append(0)
+
+        for cand_start in candidate_starts:
+            cand_k = self._key(cache_key, cand_start)
+            for probe_tier in ("hot", "warm") if self.cfg.two_tier else ("warm",):
+                fp = self._file_for(cand_k, tier=probe_tier)  # type: ignore[arg-type]
+                cand_data = await trio.to_thread.run_sync(self._read_file_all, fp)
+                if cand_data is not None:
+                    # Verify metadata sidecar if present
+                    meta = self._read_metadata(cand_k, tier=probe_tier)
+                    if meta is not None:
+                        meta_ck, meta_start = meta
+                        if meta_ck != cache_key or meta_start != cand_start:
+                            continue
+                    # Check if this candidate chunk covers the requested read range [start, end]
+                    cand_end = cand_start + len(cand_data) - 1
+                    if cand_start <= start and cand_end >= end:
+                        found_data = cand_data
+                        found_tier = probe_tier
+                        found_key = cand_k
+                        found_start = cand_start
+                        break
+            if found_data is not None:
                 break
 
-        if data is None:
+        if found_data is None:
             async with self.locks():
-                prev = self._index.pop(k, None)
+                prev = self._index.pop(self._key(cache_key, start), None)
                 if prev and prev.tier == "hot":
                     self._hot_bytes = max(0, self._hot_bytes - prev.size)
                 if prev:
                     self._total_bytes = max(0, self._total_bytes - prev.size)
 
             self._metrics.record_miss()
-            # No log for cache misses - reduces noise (misses are expected and normal)
             return b""
 
-        # If we got here but entry was missing in index, rebuild it
+        # Rebuild index entry from discovered chunk
         async with self.locks():
-            if k not in self._index:
-                sz = len(data)
-                self._index[k] = CacheEntry(
-                    key=k,
+            if found_key not in self._index:
+                sz = len(found_data)
+                self._index[found_key] = CacheEntry(
+                    key=found_key,
                     cache_key=cache_key,
-                    start=start,
+                    start=found_start,
                     size=sz,
                     mtime=time.time(),
                     tier=found_tier,
                 )
                 lst = self._by_path.setdefault(cache_key, [])
-                insort(lst, start)
+                if found_start not in lst:
+                    insort(lst, found_start)
                 self._total_bytes += sz
                 if found_tier == "hot":
                     self._hot_bytes += sz
 
+        if stream_id is not None:
+            self.acquire_lease(
+                stream_id=stream_id,
+                cache_key=cache_key,
+                start=found_start,
+                size=len(found_data),
+            )
+
         if end < start:
             return b""
 
-        length = end - start + 1
+        chunk_end = found_start + len(found_data) - 1
+        copy_start = start - found_start
+        copy_end = min(end, chunk_end) - found_start
+        slice_len = copy_end - copy_start + 1
 
-        if len(data) >= length:
-            self._metrics.record_hit(length)
-            return data[:length]
+        if slice_len == needed_len and len(found_data) >= copy_start + slice_len:
+            self._metrics.record_hit(slice_len)
+            return found_data[copy_start : copy_start + slice_len]
 
         self._metrics.record_miss()
 

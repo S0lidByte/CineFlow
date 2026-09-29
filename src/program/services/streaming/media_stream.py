@@ -1436,10 +1436,20 @@ class MediaStream:
             from .cache import Cache
 
             if Cache in di and hasattr(self, "stream_id"):
+                max_prefetch_chunks = (
+                    self.adaptive_prefetch.config.max_window_chunks
+                    if hasattr(self, "adaptive_prefetch")
+                    else self.config.prefetch_chunks
+                )
+                dynamic_lookahead = max(
+                    (max_prefetch_chunks + 2) * self.chunker.chunk_size,
+                    384 * 1024 * 1024,
+                )
                 di[Cache].reconcile_stream_playhead(
                     stream_id=self.stream_id,
                     cache_key=self.file_metadata.original_filename,
                     playhead_byte=request_start,
+                    lookahead_bytes=dynamic_lookahead,
                 )
         except Exception:
             pass
