@@ -488,11 +488,12 @@ async def get_stats() -> StatsResponse:
                 .limit(15)
             ).all()
             for item_id, title, last_state, scraped_times in attention_rows:
-                state_value = (
-                    last_state.value
-                    if hasattr(last_state, "value")
-                    else str(last_state)
-                )
+                if last_state is None:
+                    state_value = "Unknown"
+                elif hasattr(last_state, "value"):
+                    state_value = str(last_state.value)
+                else:
+                    state_value = str(last_state)
                 needs_attention.append(
                     NeedsAttentionItem(
                         id=int(item_id),
