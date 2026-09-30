@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.42.3](https://github.com/S0lidByte/CineFlow/compare/v1.42.2...v1.42.3) (2026-09-30)
+
+
+### Bug Fixes
+
+* **vfs:** harden VFS lifecycle teardown and reconfiguration (D76) ([eeb6364](https://github.com/S0lidByte/CineFlow/commit/eeb6364509b70a19441644bdb7b8d5439c986f94))
+
 ## [1.42.2](https://github.com/S0lidByte/CineFlow/compare/v1.42.1...v1.42.2) (2026-09-29)
 
 
