@@ -38,8 +38,10 @@ import shutil
 import subprocess
 import threading
 import time
+import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from enum import Enum
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -93,6 +95,19 @@ if TYPE_CHECKING:
     from program.media.filesystem_entry import FilesystemEntry
     from program.media.item import MediaItem
     from program.services.streaming.http_pool import TrioStreamingHttpPool
+
+
+class VFSState(str, Enum):
+    """Explicit lifecycle states for RivenVFS."""
+
+    CREATED = "CREATED"
+    MOUNTING = "MOUNTING"
+    MOUNTED = "MOUNTED"
+    SYNCING = "SYNCING"
+    READY = "READY"
+    STOPPING = "STOPPING"
+    STOPPED = "STOPPED"
+    FAILED = "FAILED"
 
 
 class FileHandle(TypedDict):
@@ -273,10 +288,17 @@ class RivenVFS(pyfuse3.Operations):
         # Opener statistics
         self.opener_stats = dict[str, dict[str, Any]]()
 
-        # Mount management
+        # Mount and lifecycle management
+        self.lifecycle_id = uuid.uuid4().hex[:8]
+        self.state: VFSState = VFSState.CREATED
         self.mounted = False
         self._mountpoint = os.path.abspath(mountpoint)
-        self._thread = None
+        self._thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+        self._mount_ready_event = threading.Event()
+        self._ready_event = threading.Event()
+        self._sync_thread: threading.Thread | None = None
+
         # NOTE: _unmount_requested is (re-)initialized inside _fuse_runner before each trio.run()
         # to avoid stale Trio primitives from a dead runner causing AssertionError on restart.
         # We use a threading.Event as a pre-flight placeholder so close() is safe before thread start.
@@ -286,10 +308,6 @@ class RivenVFS(pyfuse3.Operations):
         self.http_pool: TrioStreamingHttpPool | None = None
 
         def _fuse_runner():
-            # Track whether an unmount has been requested across restarts.
-            # We use a plain bool here (main thread sets it), and create fresh
-            # Trio primitives at the start of each trio.run() to avoid binding
-            # them to a dead runner (which causes AssertionError on restart).
             unmount_requested: bool = False
 
             async def _async_main() -> NoReturn:
@@ -299,30 +317,94 @@ class RivenVFS(pyfuse3.Operations):
                     ):
                         await trio.sleep_forever()
 
-            while not unmount_requested:
+            while not unmount_requested and not self._stop_event.is_set():
                 # Re-create Trio primitives fresh for each new runner.
                 self._active_streams_lock = trio.Lock()
-                self._unmount_requested = trio_util.AsyncBool(False)
+                self._unmount_requested = trio_util.AsyncBool(
+                    self._stop_event.is_set()
+                    or self._unmount_requested_preflight.is_set()
+                )
 
-                logger.trace("Starting FUSE main loop")
+                logger.trace(
+                    f"[{self.lifecycle_id}] Starting FUSE main loop (stop_requested={self._stop_event.is_set()})"
+                )
 
                 try:
                     # pyfuse3.main is a coroutine that needs to run in its own trio event loop
                     trio.run(_async_main)
-                except Exception:
-                    logger.exception("FUSE main loop error, restarting")
+                except Exception as exc:
+                    if self._stop_event.is_set():
+                        logger.debug(
+                            f"[{self.lifecycle_id}] FUSE main loop exited during intentional stop: {exc}"
+                        )
+                        break
+                    logger.exception(
+                        f"[{self.lifecycle_id}] FUSE main loop error, restarting"
+                    )
+                    self._set_state(VFSState.FAILED)
 
-                unmount_requested = cast(bool, self._unmount_requested.value)
+                unmount_requested = self._stop_event.is_set() or cast(
+                    bool, getattr(self._unmount_requested, "value", False)
+                )
 
-            logger.trace("FUSE main loop exited")
+            logger.trace(f"[{self.lifecycle_id}] FUSE main loop exited")
+            self._set_state(VFSState.STOPPED)
 
-        self._thread = threading.Thread(target=_fuse_runner, daemon=True)
+        self._set_state(VFSState.MOUNTING)
+        self._thread = threading.Thread(
+            target=_fuse_runner, name=f"RivenVFS-{self.lifecycle_id}", daemon=True
+        )
         self._thread.start()
 
-        logger.log("VFS", f"Starting RivenVFS for {self._mountpoint}")
+        logger.log(
+            "VFS",
+            f"[{self.lifecycle_id}] Starting RivenVFS for {self._mountpoint}",
+        )
 
-        # Synchronize library profiles with VFS structure
-        self.sync()
+        # Synchronize library profiles with VFS structure in background
+        self._sync_thread = threading.Thread(
+            target=self.sync,
+            name=f"RivenVFS-sync-{self.lifecycle_id}",
+            daemon=True,
+        )
+        self._sync_thread.start()
+
+    def _set_state(self, new_state: VFSState) -> None:
+        """Atomically transition VFS lifecycle state and signal synchronization events."""
+        old_state = getattr(self, "state", None)
+        self.state = new_state
+        if new_state in (VFSState.MOUNTED, VFSState.SYNCING, VFSState.READY):
+            self.mounted = True
+        elif new_state in (VFSState.STOPPING, VFSState.STOPPED, VFSState.FAILED):
+            self.mounted = False
+
+        logger.debug(
+            f"[{getattr(self, 'lifecycle_id', 'init')}] VFS lifecycle state transition: {old_state} -> {new_state}"
+        )
+        if new_state == VFSState.MOUNTED:
+            self._mount_ready_event.set()
+        elif new_state in (
+            VFSState.READY,
+            VFSState.STOPPING,
+            VFSState.STOPPED,
+            VFSState.FAILED,
+        ):
+            self._mount_ready_event.set()
+            self._ready_event.set()
+
+    def wait_until_ready(self, timeout: float | None = 30.0) -> bool:
+        """Wait until VFS reaches READY (or terminal failure) state."""
+        self._ready_event.wait(timeout=timeout)
+        return self.state == VFSState.READY
+
+    def wait_until_mounted(self, timeout: float | None = 10.0) -> bool:
+        """Wait until VFS completes pyfuse3.init() and enters MOUNTED state."""
+        self._mount_ready_event.wait(timeout=timeout)
+        return bool(getattr(self, "mounted", False)) and self.state in (
+            VFSState.MOUNTED,
+            VFSState.SYNCING,
+            VFSState.READY,
+        )
 
     @asynccontextmanager
     async def mountpoint_lifecycle(self) -> AsyncGenerator[None]:
@@ -341,7 +423,10 @@ class RivenVFS(pyfuse3.Operations):
             pyfuse3.init(self, self._mountpoint, fuse_options)
 
             self.mounted = True
-            logger.log("VFS", f"RivenVFS mounted at {self._mountpoint}")
+            self._set_state(VFSState.MOUNTED)
+            logger.log(
+                "VFS", f"[{self.lifecycle_id}] RivenVFS mounted at {self._mountpoint}"
+            )
 
             # Open stream nursery for handling streaming operations.
             # This is separate from the main FUSE loop,
@@ -367,15 +452,23 @@ class RivenVFS(pyfuse3.Operations):
                             # Keep the stream nursery alive and ready to spawn tasks
                             yield
                         finally:
+                            logger.debug(
+                                f"[{self.lifecycle_id}] Cancelling active stream tasks before exiting nursery"
+                            )
+                            nursery.cancel_scope.cancel()
                             register_stream_shed_callback(None)
                             self.http_pool = None
-                            await pool.teardown()
-
-                        # Cancel streams on exit
-                        nursery.cancel_scope.cancel()
+                            try:
+                                await pool.teardown()
+                            except Exception:
+                                logger.exception(
+                                    f"[{self.lifecycle_id}] Error tearing down HTTP pool"
+                                )
         finally:
             self._cleanup_mountpoint(self._mountpoint)
             self.mounted = False
+            if not self._stop_event.is_set():
+                self._set_state(VFSState.FAILED)
 
     async def _shed_stalled_streams(self) -> None:
         """Close timed-out or zero-progress streams to free httpx pool slots."""
@@ -723,7 +816,16 @@ class RivenVFS(pyfuse3.Operations):
         - After item metadata changes (individual sync)
         """
         if item is None:
-            self._sync_full()
+            self._set_state(VFSState.SYNCING)
+            try:
+                self._sync_full()
+                self._set_state(VFSState.READY)
+            except Exception as e:
+                logger.exception(
+                    f"[{getattr(self, 'lifecycle_id', 'init')}] Error during VFS full sync: {e}"
+                )
+                if not self._stop_event.is_set():
+                    self._set_state(VFSState.FAILED)
         else:
             self._sync_individual(item)
 
@@ -822,6 +924,22 @@ class RivenVFS(pyfuse3.Operations):
 
     def close(self) -> None:
         """Clean up and unmount the filesystem."""
+        logger.log(
+            "VFS",
+            f"[{getattr(self, 'lifecycle_id', 'init')}] Closing RivenVFS at {self._mountpoint}",
+        )
+        self._stop_event.set()
+        self._set_state(VFSState.STOPPING)
+
+        if (
+            self._sync_thread
+            and self._sync_thread is not self._thread
+            and self._sync_thread.is_alive()
+        ):
+            try:
+                self._sync_thread.join(timeout=3.0)
+            except Exception:
+                pass
 
         # pyfuse3 exposes one process-global Trio token/session. Once this
         # instance is fully closed, a repeated close must not terminate a
@@ -831,10 +949,14 @@ class RivenVFS(pyfuse3.Operations):
             and not self._thread.is_alive()
             and not self._is_mountpoint_mounted(self._mountpoint)
         ):
+            self._set_state(VFSState.STOPPED)
             return
 
         async def _request_unmount():
-            logger.log("VFS", f"Unmounting RivenVFS from {self._mountpoint}")
+            logger.log(
+                "VFS",
+                f"[{getattr(self, 'lifecycle_id', 'init')}] Unmounting RivenVFS from {self._mountpoint}",
+            )
 
             self._unmount_requested.value = True
             await self._terminate_async()
@@ -851,10 +973,12 @@ class RivenVFS(pyfuse3.Operations):
                 if getattr(self, "_unmount_requested", None) is not None:
                     trio.from_thread.run(_request_unmount, trio_token=trio_token)
             except Exception:
-                logger.exception("Failed to request graceful FUSE unmount")
+                logger.exception(
+                    f"[{getattr(self, 'lifecycle_id', 'init')}] Failed to request graceful FUSE unmount"
+                )
         else:
             logger.warning(
-                "pyfuse3 trio token unavailable during close; forcing unmount"
+                f"[{getattr(self, 'lifecycle_id', 'init')}] pyfuse3 trio token unavailable during close; forcing unmount"
             )
 
         if self._thread and self._thread.is_alive():
@@ -862,11 +986,13 @@ class RivenVFS(pyfuse3.Operations):
 
         if self._thread and self._thread.is_alive():
             logger.warning(
-                f"FUSE thread did not stop in time for {self._mountpoint}; forcing unmount"
+                f"[{getattr(self, 'lifecycle_id', 'init')}] FUSE thread did not stop in time for {self._mountpoint}; forcing unmount"
             )
 
         if self._is_mountpoint_mounted(self._mountpoint):
             self._force_unmount_mountpoint(self._mountpoint)
+
+        self._set_state(VFSState.STOPPED)
 
     def __del__(self):
         """Ensure cleanup on garbage collection."""
@@ -878,38 +1004,44 @@ class RivenVFS(pyfuse3.Operations):
     # Helper methods
 
     def _prepare_mountpoint(self, mountpoint: str) -> None:
-        """Prepare mountpoint by killing processes and unmounting if necessary."""
+        """Prepare mountpoint by verifying state and unmounting existing stale layers if necessary."""
+        # Fast exit if clean
+        if not self._is_mountpoint_mounted(mountpoint):
+            try:
+                os.makedirs(mountpoint, exist_ok=True)
+            except Exception:
+                pass
+            return
 
         # Attempt to unmount if already mounted or in a stale state
-        # We use a loop here to ensure all layers of a mountpoint are cleared.
-        max_attempts = 10
+        max_attempts = 5
         attempts = 0
 
         while attempts < max_attempts:
             attempts += 1
             try:
-                is_mounted = self._is_mountpoint_mounted(
+                if not self._is_mountpoint_mounted(
                     mountpoint, assume_mounted_on_failure=attempts == 1
-                )
-
-                if not is_mounted:
+                ):
                     break
 
                 logger.info(
-                    f"Detected existing mount at {mountpoint} (layer {attempts}), attempting to unmount..."
+                    f"[{getattr(self, 'lifecycle_id', 'init')}] Detected existing mount at {mountpoint} (layer {attempts}), attempting to unmount..."
                 )
 
                 self._force_unmount_mountpoint(mountpoint)
 
-                # Sleep briefly to give the kernel time to update /proc/mounts
-                time.sleep(0.5)
+                # Short sleep to give the kernel time to update /proc/mounts
+                time.sleep(0.1)
             except Exception as e:
-                logger.error(f"Error during mountpoint preparation: {e}")
+                logger.error(
+                    f"[{getattr(self, 'lifecycle_id', 'init')}] Error during mountpoint preparation: {e}"
+                )
                 break
 
-        if attempts >= max_attempts:
+        if attempts >= max_attempts and self._is_mountpoint_mounted(mountpoint):
             logger.warning(
-                f"Reached maximum unmount attempts ({max_attempts}) for {mountpoint}. Some stale mounts may remain."
+                f"[{getattr(self, 'lifecycle_id', 'init')}] Reached maximum unmount attempts ({max_attempts}) for {mountpoint}. Some stale mounts may remain."
             )
 
         # Ensure mountpoint directory exists (recreate if necessary)

@@ -106,7 +106,7 @@ class FilesystemService(Runner[FilesystemModel]):
         """Validate service state and configuration.
         Checks that:
         - mount path is set
-        - RivenVFS is initialized and mounted
+        - RivenVFS is initialized and mounted (waiting briefly for background mount thread)
 
         Note: Mount directory creation is handled by RivenVFS._prepare_mountpoint()
         """
@@ -120,8 +120,14 @@ class FilesystemService(Runner[FilesystemModel]):
             logger.error("FilesystemService: RivenVFS not initialized")
             return False
 
-        # Check RivenVFS is mounted
-        if not self.riven_vfs.mounted:
+        # Check RivenVFS is mounted, allowing a short wait for the background mount thread
+        if hasattr(self.riven_vfs, "wait_until_mounted"):
+            if not self.riven_vfs.wait_until_mounted(timeout=5.0):
+                logger.error(
+                    f"FilesystemService: RivenVFS not mounted (state={getattr(self.riven_vfs, 'state', None)})"
+                )
+                return False
+        elif not self.riven_vfs.mounted:
             logger.error("FilesystemService: RivenVFS not mounted")
             return False
 

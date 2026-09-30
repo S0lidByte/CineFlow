@@ -105,6 +105,7 @@ class Program(threading.Thread):
         self.initialized = False
         self.running = False
         self.services: Services | None = None
+        self._reconfig_lock = threading.Lock()
         self.enable_trace = settings_manager.settings.tracemalloc
         self.em = EventManager()
         self.scheduler_manager = ProgramScheduler(self)
@@ -159,112 +160,112 @@ class Program(threading.Thread):
         changed non-VFS keys (e.g. content.trakt lists). Unknown / full reloads
         (startup, setattr path) still remount.
         """
+        with self._reconfig_lock:
+            changed = settings_manager.last_changed_top_keys
+            previous = self.services
 
-        changed = settings_manager.last_changed_top_keys
-        previous = self.services
+            if previous is not None and changed and changed & {"logging", "log_level"}:
+                setup_logger(settings_manager.settings.log_level)
 
-        if previous is not None and changed and changed & {"logging", "log_level"}:
-            setup_logger(settings_manager.settings.log_level)
+            if (
+                previous is not None
+                and changed is not None
+                and changed.issubset(self._RUNTIME_ONLY_TOP_KEYS)
+            ):
+                logger.debug(
+                    f"No service rebuild required for settings keys: {sorted(changed)}"
+                )
+                return
 
-        if (
-            previous is not None
-            and changed is not None
-            and changed.issubset(self._RUNTIME_ONLY_TOP_KEYS)
-        ):
-            logger.debug(
-                f"No service rebuild required for settings keys: {sorted(changed)}"
-            )
-            return
-
-        remount_filesystem = changed is None or bool(
-            changed & self._VFS_REINIT_TOP_KEYS
-        )
-
-        if previous and remount_filesystem:
-            try:
-                previous.filesystem.close()
-            except Exception:
-                logger.exception("Failed to close previous filesystem service")
-        elif previous and not remount_filesystem:
-            logger.debug(
-                "Skipping VFS remount; changed settings keys do not affect "
-                f"filesystem/downloaders: {sorted(changed) if changed else []}"
+            remount_filesystem = changed is None or bool(
+                changed & self._VFS_REINIT_TOP_KEYS
             )
 
-        # Instantiate services fresh on each settings change; settings_manager observers handle reinit
-        if remount_filesystem or previous is None:
-            _downloader = Downloader()
-            _filesystem = FilesystemService(_downloader)
-        else:
-            # Keep mounted VFS + its downloader; rebuild everything else.
-            _downloader = previous.downloader
-            _filesystem = previous.filesystem
+            if previous and remount_filesystem:
+                try:
+                    previous.filesystem.close()
+                except Exception:
+                    logger.exception("Failed to close previous filesystem service")
+            elif previous and not remount_filesystem:
+                logger.debug(
+                    "Skipping VFS remount; changed settings keys do not affect "
+                    f"filesystem/downloaders: {sorted(changed) if changed else []}"
+                )
 
-        self.services = Services(
-            overseerr=Overseerr(),
-            plex_watchlist=PlexWatchlist(),
-            listrr=Listrr(),
-            mdblist=Mdblist(),
-            trakt=TraktContent(),
-            indexer=IndexerService(),
-            scraping=Scraping(),
-            updater=Updater(),
-            downloader=_downloader,
-            filesystem=_filesystem,
-            post_processing=PostProcessing(),
-            notifications=NotificationService(),
-        )
+            # Instantiate services fresh on each settings change; settings_manager observers handle reinit
+            if remount_filesystem or previous is None:
+                _downloader = Downloader()
+                _filesystem = FilesystemService(_downloader)
+            else:
+                # Keep mounted VFS + its downloader; rebuild everything else.
+                _downloader = previous.downloader
+                _filesystem = previous.filesystem
 
-        if (
-            len(
-                [
-                    service
-                    for service in self.services.enabled_services
-                    if service.initialized
-                ]
-            )
-            == 0
-        ):
-            logger.warning(
-                "No content services initialized, items need to be added manually."
+            self.services = Services(
+                overseerr=Overseerr(),
+                plex_watchlist=PlexWatchlist(),
+                listrr=Listrr(),
+                mdblist=Mdblist(),
+                trakt=TraktContent(),
+                indexer=IndexerService(),
+                scraping=Scraping(),
+                updater=Updater(),
+                downloader=_downloader,
+                filesystem=_filesystem,
+                post_processing=PostProcessing(),
+                notifications=NotificationService(),
             )
 
-        if not self.services.scraping.initialized:
-            logger.error(
-                "No Scraping service initialized, you must enable at least one."
-            )
+            if (
+                len(
+                    [
+                        service
+                        for service in self.services.enabled_services
+                        if service.initialized
+                    ]
+                )
+                == 0
+            ):
+                logger.warning(
+                    "No content services initialized, items need to be added manually."
+                )
 
-        if not self.services.downloader.initialized:
-            logger.error(
-                "No Downloader service initialized, you must enable at least one."
-            )
+            if not self.services.scraping.initialized:
+                logger.error(
+                    "No Scraping service initialized, you must enable at least one."
+                )
 
-        if not self.services.filesystem.initialized:
-            logger.error(
-                "Filesystem service failed to initialize, check your settings."
-            )
+            if not self.services.downloader.initialized:
+                logger.error(
+                    "No Downloader service initialized, you must enable at least one."
+                )
 
-        if not self.services.updater.initialized:
-            logger.info(
-                "No library updater initialized; manual request processing remains enabled."
-            )
+            if not self.services.filesystem.initialized:
+                logger.error(
+                    "Filesystem service failed to initialize, check your settings."
+                )
 
-        # Warn about optional content that failed init without blocking the pipeline
-        failed_content = [
-            s.key
-            for s in self.services.enabled_services
-            if s.is_content_service and not s.initialized
-        ]
-        if failed_content:
-            logger.warning(
-                "Content services failed to initialize and will be skipped: "
-                f"{', '.join(failed_content)}"
-            )
+            if not self.services.updater.initialized:
+                logger.info(
+                    "No library updater initialized; manual request processing remains enabled."
+                )
 
-        if self.enable_trace:
-            import tracemalloc
+            # Warn about optional content that failed init without blocking the pipeline
+            failed_content = [
+                s.key
+                for s in self.services.enabled_services
+                if s.is_content_service and not s.initialized
+            ]
+            if failed_content:
+                logger.warning(
+                    "Content services failed to initialize and will be skipped: "
+                    f"{', '.join(failed_content)}"
+                )
 
-            self.last_snapshot = tracemalloc.take_snapshot()
+            if self.enable_trace:
+                import tracemalloc
+
+                self.last_snapshot = tracemalloc.take_snapshot()
 
     @property
     def is_valid(self) -> bool:
