@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.42.4](https://github.com/S0lidByte/CineFlow/compare/v1.42.3...v1.42.4) (2026-09-30)
+
+
+### Bug Fixes
+
+* **vfs:** ensure close idempotency and isolate trio tokens against GC repeat teardown (D77-PRE) ([cf21c3f](https://github.com/S0lidByte/CineFlow/commit/cf21c3fe0de4fe57e381588d619d294366e4590f))
+
 ## [1.42.3](https://github.com/S0lidByte/CineFlow/compare/v1.42.2...v1.42.3) (2026-09-30)
 
 
