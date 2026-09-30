@@ -294,10 +294,13 @@ class RivenVFS(pyfuse3.Operations):
         self.mounted = False
         self._mountpoint = os.path.abspath(mountpoint)
         self._thread: threading.Thread | None = None
+        self._close_lock = threading.Lock()
+        self._closed: bool = False
         self._stop_event = threading.Event()
         self._mount_ready_event = threading.Event()
         self._ready_event = threading.Event()
         self._sync_thread: threading.Thread | None = None
+        self._trio_token: trio.lowlevel.TrioToken | None = None
 
         # NOTE: _unmount_requested is (re-)initialized inside _fuse_runner before each trio.run()
         # to avoid stale Trio primitives from a dead runner causing AssertionError on restart.
@@ -311,6 +314,7 @@ class RivenVFS(pyfuse3.Operations):
             unmount_requested: bool = False
 
             async def _async_main() -> NoReturn:
+                self._trio_token = trio.lowlevel.current_trio_token()
                 async with self.mountpoint_lifecycle():
                     async with trio_util.move_on_when(
                         lambda: self._unmount_requested.wait_value(True)
@@ -924,75 +928,87 @@ class RivenVFS(pyfuse3.Operations):
 
     def close(self) -> None:
         """Clean up and unmount the filesystem."""
-        logger.log(
-            "VFS",
-            f"[{getattr(self, 'lifecycle_id', 'init')}] Closing RivenVFS at {self._mountpoint}",
-        )
-        self._stop_event.set()
-        self._set_state(VFSState.STOPPING)
+        with self._close_lock:
+            if (
+                getattr(self, "_closed", False)
+                or getattr(self, "state", None) == VFSState.STOPPED
+            ):
+                logger.debug(
+                    f"[{getattr(self, 'lifecycle_id', 'init')}] RivenVFS is already closed/stopped; ignoring repeat close"
+                )
+                return
+            self._closed = True
 
-        if (
-            self._sync_thread
-            and self._sync_thread is not self._thread
-            and self._sync_thread.is_alive()
-        ):
-            try:
-                self._sync_thread.join(timeout=3.0)
-            except Exception:
-                pass
-
-        # pyfuse3 exposes one process-global Trio token/session. Once this
-        # instance is fully closed, a repeated close must not terminate a
-        # newer RivenVFS instance that now owns those globals.
-        if (
-            self._thread is not None
-            and not self._thread.is_alive()
-            and not self._is_mountpoint_mounted(self._mountpoint)
-        ):
-            self._set_state(VFSState.STOPPED)
-            return
-
-        async def _request_unmount():
             logger.log(
                 "VFS",
-                f"[{getattr(self, 'lifecycle_id', 'init')}] Unmounting RivenVFS from {self._mountpoint}",
+                f"[{getattr(self, 'lifecycle_id', 'init')}] Closing RivenVFS at {self._mountpoint}",
             )
+            self._stop_event.set()
+            self._set_state(VFSState.STOPPING)
 
-            self._unmount_requested.value = True
-            await self._terminate_async()
+            if (
+                self._sync_thread
+                and self._sync_thread is not self._thread
+                and self._sync_thread.is_alive()
+            ):
+                try:
+                    self._sync_thread.join(timeout=3.0)
+                except Exception:
+                    pass
 
-        # Signal the preflight event so close() is safe before the FUSE thread
-        # has a chance to initialize self._unmount_requested.
-        self._unmount_requested_preflight.set()
+            # If FUSE thread already terminated and path is not mounted, we are clean
+            if (
+                self._thread is not None
+                and not self._thread.is_alive()
+                and not self._is_mountpoint_mounted(self._mountpoint)
+            ):
+                self._set_state(VFSState.STOPPED)
+                return
 
-        trio_token = getattr(pyfuse3, "trio_token", None)
-
-        if trio_token is not None:
-            try:
-                # Only call if _unmount_requested has been initialized by _fuse_runner
-                if getattr(self, "_unmount_requested", None) is not None:
-                    trio.from_thread.run(_request_unmount, trio_token=trio_token)
-            except Exception:
-                logger.exception(
-                    f"[{getattr(self, 'lifecycle_id', 'init')}] Failed to request graceful FUSE unmount"
+            async def _request_unmount():
+                logger.log(
+                    "VFS",
+                    f"[{getattr(self, 'lifecycle_id', 'init')}] Unmounting RivenVFS from {self._mountpoint}",
                 )
-        else:
-            logger.warning(
-                f"[{getattr(self, 'lifecycle_id', 'init')}] pyfuse3 trio token unavailable during close; forcing unmount"
+
+                self._unmount_requested.value = True
+                await self._terminate_async()
+
+            # Signal the preflight event so close() is safe before the FUSE thread
+            # has a chance to initialize self._unmount_requested.
+            if hasattr(self, "_unmount_requested_preflight"):
+                self._unmount_requested_preflight.set()
+
+            trio_token = getattr(self, "_trio_token", None) or getattr(
+                pyfuse3, "trio_token", None
             )
 
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=10)
+            if trio_token is not None:
+                try:
+                    # Only call if _unmount_requested has been initialized by _fuse_runner
+                    if getattr(self, "_unmount_requested", None) is not None:
+                        trio.from_thread.run(_request_unmount, trio_token=trio_token)
+                except Exception:
+                    logger.exception(
+                        f"[{getattr(self, 'lifecycle_id', 'init')}] Failed to request graceful FUSE unmount"
+                    )
+            else:
+                logger.warning(
+                    f"[{getattr(self, 'lifecycle_id', 'init')}] pyfuse3 trio token unavailable during close; forcing unmount"
+                )
 
-        if self._thread and self._thread.is_alive():
-            logger.warning(
-                f"[{getattr(self, 'lifecycle_id', 'init')}] FUSE thread did not stop in time for {self._mountpoint}; forcing unmount"
-            )
+            if self._thread and self._thread.is_alive():
+                self._thread.join(timeout=10)
 
-        if self._is_mountpoint_mounted(self._mountpoint):
-            self._force_unmount_mountpoint(self._mountpoint)
+            if self._thread and self._thread.is_alive():
+                logger.warning(
+                    f"[{getattr(self, 'lifecycle_id', 'init')}] FUSE thread did not stop in time for {self._mountpoint}; forcing unmount"
+                )
 
-        self._set_state(VFSState.STOPPED)
+            if self._is_mountpoint_mounted(self._mountpoint):
+                self._force_unmount_mountpoint(self._mountpoint)
+
+            self._set_state(VFSState.STOPPED)
 
     def __del__(self):
         """Ensure cleanup on garbage collection."""
@@ -1057,12 +1073,13 @@ class RivenVFS(pyfuse3.Operations):
     def _cleanup_mountpoint(self, mountpoint: str) -> None:
         """Clean up mountpoint after unmounting."""
 
-        if self.mounted:
-            try:
-                # Close FUSE session after main loop has exited
-                pyfuse3.close(unmount=True)
-            except Exception:
-                logger.exception("Error closing FUSE session")
+        try:
+            # Close FUSE session after main loop has exited
+            pyfuse3.close(unmount=True)
+        except Exception:
+            logger.debug(
+                f"[{getattr(self, 'lifecycle_id', 'init')}] pyfuse3.close() completed or session already closed"
+            )
 
         self._force_unmount_mountpoint(mountpoint)
 
@@ -1073,7 +1090,11 @@ class RivenVFS(pyfuse3.Operations):
 
         try:
             with open("/proc/mounts", "r", encoding="utf-8") as mounts_file:
-                return any(f" {mountpoint} " in line for line in mounts_file)
+                for line in mounts_file:
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1].replace("\\040", " ") == mountpoint:
+                        return True
+            return False
         except Exception:
             return assume_mounted_on_failure
 

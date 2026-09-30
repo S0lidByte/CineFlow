@@ -317,3 +317,40 @@ class TestServiceCoordinationAndReconfigLock:
 
         assert len(execution_order) == 2
         assert set(execution_order) == {1, 2}
+
+    def test_close_idempotent_and_del_safe_when_new_instance_mounted(self):
+        """Closing an old RivenVFS instance is strictly idempotent and __del__ is a no-op even if a newer instance is mounted."""
+        vfs = RivenVFS.__new__(RivenVFS)
+        vfs._mountpoint = "/mnt/riven"
+        vfs.lifecycle_id = "test-idem-008"
+        vfs._close_lock = threading.Lock()
+        vfs._closed = False
+        vfs._stop_event = threading.Event()
+        vfs._mount_ready_event = threading.Event()
+        vfs._ready_event = threading.Event()
+        vfs._sync_thread = None
+        vfs._thread = None
+        vfs._trio_token = None
+        vfs.state = VFSState.MOUNTED
+        vfs.mounted = True
+
+        with (
+            patch.object(vfs, "_is_mountpoint_mounted", return_value=False),
+            patch.object(vfs, "_force_unmount_mountpoint") as mock_force_unmount,
+        ):
+            vfs.close()
+            assert vfs._closed is True
+            assert vfs.state == VFSState.STOPPED
+
+            # Second call to close() must be a no-op
+            vfs.close()
+            assert mock_force_unmount.call_count == 0
+
+        # Now simulate __del__ being called on the closed instance while a NEW instance is mounted at /mnt/riven
+        with (
+            patch.object(vfs, "_is_mountpoint_mounted", return_value=True),
+            patch.object(vfs, "_force_unmount_mountpoint") as mock_force_unmount,
+        ):
+            vfs.__del__()
+            # mock_force_unmount must NOT be called because _closed is True
+            assert mock_force_unmount.call_count == 0
