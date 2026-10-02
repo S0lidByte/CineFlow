@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.42.5](https://github.com/S0lidByte/CineFlow/compare/v1.42.4...v1.42.5) (2026-10-02)
+
+
+### Bug Fixes
+
+* **streaming:** preserve active cache headers and prevent recursive trim scan (D78) ([440b089](https://github.com/S0lidByte/CineFlow/commit/440b089bdb595fb511b29388a8dd141e874d252e))
+
 ## [1.42.4](https://github.com/S0lidByte/CineFlow/compare/v1.42.3...v1.42.4) (2026-09-30)
 
 
