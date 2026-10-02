@@ -1450,6 +1450,7 @@ class MediaStream:
                     cache_key=self.file_metadata.original_filename,
                     playhead_byte=request_start,
                     lookahead_bytes=dynamic_lookahead,
+                    header_bytes=self.config.header_size,
                 )
         except Exception:
             pass

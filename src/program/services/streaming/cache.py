@@ -732,9 +732,12 @@ class Cache:
         lookback_bytes: int = 16 * 1024 * 1024,
         lookahead_bytes: int = 384 * 1024 * 1024,
         lease_seconds: float = 60.0,
+        header_bytes: int = 0,
     ) -> int:
         """Protect chunks within [playhead - lookback, playhead + lookahead] for stream_id.
 
+        If header_bytes > 0, cached container header chunks with start < header_bytes
+        are also protected from eviction for the active stream.
         Releases obsolete leases for chunks outside this window.
         Returns count of protected chunks for this stream.
         """
@@ -744,12 +747,14 @@ class Cache:
 
         with self._thread_lock:
             # 1. Release existing leases for this stream that are outside [min_pos, max_pos]
+            # (preserving header chunks within [0, header_bytes) when header_bytes > 0)
             active_leases = self._leases_by_stream.get(stream_id, {})
             obsolete_keys = [
                 k
                 for k, lease in active_leases.items()
                 if lease.cache_key == cache_key
                 and (lease.start < min_pos or lease.start > max_pos)
+                and (header_bytes <= 0 or lease.start >= header_bytes)
             ]
             for k in obsolete_keys:
                 active_leases.pop(k, None)
@@ -763,6 +768,30 @@ class Cache:
             if not cached_starts:
                 return len(self._leases_by_stream.get(stream_id, {}))
 
+            def _lease_chunk(chunk_start: int) -> None:
+                chunk_key = self._key(cache_key, chunk_start)
+                entry = self._index.get(chunk_key)
+                if not entry:
+                    return
+                lease = StreamLease(
+                    stream_id=stream_id,
+                    cache_key=cache_key,
+                    start=chunk_start,
+                    size=entry.size,
+                    expires_at=now + lease_seconds,
+                    acquired_at=now,
+                    last_touched_at=now,
+                )
+                self._leases_by_key.setdefault(chunk_key, {})[stream_id] = lease
+                self._leases_by_stream.setdefault(stream_id, {})[chunk_key] = lease
+                self._index.move_to_end(chunk_key, last=True)
+
+            # Protect container header chunks if configured
+            if header_bytes > 0:
+                header_end_idx = bisect_right(cached_starts, header_bytes - 1)
+                for i in range(header_end_idx):
+                    _lease_chunk(cached_starts[i])
+
             start_idx = bisect_right(cached_starts, min_pos) - 1
             start_idx = max(start_idx, 0)
             end_idx = bisect_right(cached_starts, max_pos)
@@ -775,18 +804,7 @@ class Cache:
                     continue
                 chunk_end = chunk_start + entry.size - 1
                 if chunk_end >= min_pos and chunk_start <= max_pos:
-                    lease = StreamLease(
-                        stream_id=stream_id,
-                        cache_key=cache_key,
-                        start=chunk_start,
-                        size=entry.size,
-                        expires_at=now + lease_seconds,
-                        acquired_at=now,
-                        last_touched_at=now,
-                    )
-                    self._leases_by_key.setdefault(chunk_key, {})[stream_id] = lease
-                    self._leases_by_stream.setdefault(stream_id, {})[chunk_key] = lease
-                    self._index.move_to_end(chunk_key, last=True)
+                    _lease_chunk(chunk_start)
 
             return len(self._leases_by_stream.get(stream_id, {}))
 
@@ -1603,16 +1621,6 @@ class Cache:
             await self._evict_ttl()
         else:
             await self._evict_lru()
-
-        # Hard safety net: if our accounting drifted (e.g., external files), rebuild and prune
-        try:
-            async with self.locks():
-                over = self._total_bytes > self.cfg.max_size_bytes
-
-            if over:
-                await self._initial_scan()
-        except Exception:
-            pass
 
     def sync_size_snapshot(self) -> tuple[int, int]:
         """Thread-safe size/entry snapshot for asyncio callers (e.g. /metrics).

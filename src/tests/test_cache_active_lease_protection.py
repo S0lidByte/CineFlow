@@ -690,3 +690,303 @@ def test_long_duration_playback_simulation(tmp_path: Path) -> None:
                     nursery.start_soon(simulate_stream, s)
 
     trio.run(_run)
+
+
+def test_trim_recursion_eliminated_under_lease_saturation(tmp_path: Path) -> None:
+    """Verifies that trim() does not trigger mutual recursion with _initial_scan() when eviction is refused."""
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "cache",
+            max_size_bytes=150,
+            metrics_enabled=False,
+        )
+    )
+
+    scan_called = 0
+    original_sync_scan = cache._sync_initial_scan
+
+    def _tracking_scan() -> None:
+        nonlocal scan_called
+        scan_called += 1
+        original_sync_scan()
+
+    cache._sync_initial_scan = _tracking_scan
+
+    async def _run() -> None:
+        # Put 200 bytes under active lease (capacity = 150)
+        await cache.put("film.mkv", 0, b"A" * 100, stream_id="active_stream")
+        await cache.put("film.mkv", 100, b"B" * 100, stream_id="active_stream")
+
+        assert cache._total_bytes == 200
+        assert cache._total_bytes > cache.cfg.max_size_bytes
+
+        # Calling trim() must complete immediately with 0 recursive scans
+        start_t = time.monotonic()
+        with trio.fail_after(2.0):
+            await cache.trim()
+        elapsed = time.monotonic() - start_t
+
+        # Assert no mutual recursion occurred and execution took < 100ms
+        assert scan_called == 0
+        assert elapsed < 0.1
+        # Data is still safely preserved under active lease
+        assert cache._key("film.mkv", 0) in cache._index
+        assert cache._key("film.mkv", 100) in cache._index
+
+    trio.run(_run)
+
+
+def test_container_header_protection_on_playhead_advance(tmp_path: Path) -> None:
+    """Verifies that container header chunks remain protected throughout active stream playback."""
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "cache",
+            max_size_bytes=350,
+            metrics_enabled=False,
+        )
+    )
+
+    async def _run() -> None:
+        stream_id = "demuxer_stream"
+        cache_key = "feature_film.mkv"
+        header_chunk_size = 100
+        body_chunk_size = 100
+
+        # Chunk 0 is container header (0..99)
+        await cache.put(cache_key, 0, b"H" * header_chunk_size, stream_id=stream_id)
+        # Chunks 1, 2 are early body
+        await cache.put(cache_key, 100, b"B" * body_chunk_size, stream_id=stream_id)
+        await cache.put(cache_key, 200, b"B" * body_chunk_size, stream_id=stream_id)
+
+        # Advance playhead far ahead to 50,000 bytes with lookback 50 bytes and header_bytes=100
+        cache.reconcile_stream_playhead(
+            stream_id=stream_id,
+            cache_key=cache_key,
+            playhead_byte=50_000,
+            lookback_bytes=50,
+            lookahead_bytes=500,
+            header_bytes=header_chunk_size,
+        )
+
+        # Chunk 0 MUST remain protected despite playhead being far ahead of lookback
+        assert cache.is_chunk_lease_protected(cache_key, 0) is True
+
+        # Now put Chunk 3 (100 bytes) without lease to push cache over 350 budget (400 > 350)
+        # and trigger eviction under pressure
+        await cache.put(cache_key, 300, b"B" * body_chunk_size)
+
+        # Chunk 0 MUST still be present in cache and protected
+        assert cache._key(cache_key, 0) in cache._index
+        assert cache.is_chunk_lease_protected(cache_key, 0) is True
+
+        # When stream is torn down, header chunk lease is cleanly released
+        cache.release_stream(stream_id)
+        assert cache.is_chunk_lease_protected(cache_key, 0) is False
+
+    trio.run(_run)
+
+
+def test_compressed_time_long_play_saturation_and_late_header_read(
+    tmp_path: Path,
+) -> None:
+    """Deterministic regression simulating >=90 minutes of continuous playback under cache saturation.
+
+    Exercises:
+    - Cache cold start and sequential playback progression
+    - First-time cache saturation and continuous LRU eviction cycles
+    - Active StreamLease forward/backward lookahead movement
+    - Container header [0, header_bytes) protection
+    - Late backward reads hitting protected header data past saturation
+    - Mid-playback seek with playhead lease reconciliation
+    - Zero recursive filesystem scans during background eviction
+    """
+    import statistics
+
+    chunk_size = 5 * 1024
+    max_bytes = (
+        100 * chunk_size
+    )  # Capacity = 100 chunks; 900 chunks total = 9x cache capacity rollover
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "cache",
+            max_size_bytes=max_bytes,
+            metrics_enabled=False,
+        )
+    )
+
+    scan_count = 0
+    orig_scan = cache._sync_initial_scan
+
+    def _counting_scan() -> None:
+        nonlocal scan_count
+        scan_count += 1
+        orig_scan()
+
+    cache._sync_initial_scan = _counting_scan
+
+    stream_id = "long_play_sim_stream"
+    cache_key = "feature_film_90m.mkv"
+    header_bytes = chunk_size  # Chunk 0 covers container header
+
+    read_latencies: list[float] = []
+
+    async def _run() -> None:
+        await cache._initialize()
+        nonlocal scan_count
+        scan_count = 0
+
+        # Step 1: Write initial container header chunk 0
+        await cache.put(cache_key, 0, b"H" * chunk_size, stream_id=stream_id)
+
+        # Step 2: 900 continuous playback steps (representing 90 minutes at 10 chunks/min)
+        for i in range(1, 901):
+            pos = i * chunk_size
+            await cache.put(cache_key, pos, b"D" * chunk_size, stream_id=stream_id)
+
+            cache.reconcile_stream_playhead(
+                stream_id=stream_id,
+                cache_key=cache_key,
+                playhead_byte=pos,
+                lookback_bytes=2 * chunk_size,
+                lookahead_bytes=10 * chunk_size,
+                header_bytes=header_bytes,
+            )
+
+            # Timed foreground read of current chunk
+            t0 = time.monotonic()
+            data = await cache.get(
+                cache_key, pos, pos + chunk_size - 1, stream_id=stream_id
+            )
+            read_latencies.append(time.monotonic() - t0)
+            assert len(data) == chunk_size
+
+            # Late backward read at multiple saturation milestones (e.g. step 150, 600, 850)
+            if i in (150, 600, 850):
+                t_hdr = time.monotonic()
+                hdata = await cache.get(
+                    cache_key, 0, chunk_size - 1, stream_id=stream_id
+                )
+                read_latencies.append(time.monotonic() - t_hdr)
+                assert len(hdata) == chunk_size
+                assert cache.is_chunk_lease_protected(cache_key, 0) is True
+
+            # Mid-stream seek at step 750
+            if i == 750:
+                seek_pos = 820 * chunk_size
+                cache.reconcile_stream_playhead(
+                    stream_id=stream_id,
+                    cache_key=cache_key,
+                    playhead_byte=seek_pos,
+                    lookback_bytes=2 * chunk_size,
+                    lookahead_bytes=10 * chunk_size,
+                    header_bytes=header_bytes,
+                )
+
+        cache.release_stream(stream_id)
+
+        # Assertions
+        assert scan_count == 0, f"Expected 0 maintenance rescans, got {scan_count}"
+        p50 = statistics.median(read_latencies)
+        p95 = statistics.quantiles(read_latencies, n=100)[94]
+        p99 = statistics.quantiles(read_latencies, n=100)[98]
+        # Steady state read latencies must remain bounded (< 50ms)
+        assert p50 < 0.05, f"p50 read latency too high: {p50*1000:.2f}ms"
+        assert p95 < 0.05, f"p95 read latency too high: {p95*1000:.2f}ms"
+        assert p99 < 0.10, f"p99 read latency too high: {p99*1000:.2f}ms"
+
+    trio.run(_run)
+
+
+def test_lease_and_resource_leak_stress_100_sessions_and_concurrency(
+    tmp_path: Path,
+) -> None:
+    """Validates resource cleanup and eviction convergence across 100 sessions and 1, 4, 16 concurrent streams."""
+    chunk_size = 1024
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "cache",
+            max_size_bytes=100_000,
+            metrics_enabled=False,
+        )
+    )
+
+    async def _run() -> None:
+        await cache._initialize()
+
+        # Phase A: 100 sequential open/read/seek/close sessions
+        for s in range(100):
+            sid = f"sess_{s}"
+            key = f"media_{s % 5}.mkv"
+            await cache.put(key, 0, b"H" * chunk_size, stream_id=sid)
+            await cache.get(key, 0, chunk_size - 1, stream_id=sid)
+            cache.reconcile_stream_playhead(
+                stream_id=sid,
+                cache_key=key,
+                playhead_byte=10_000,
+                lookback_bytes=2_000,
+                lookahead_bytes=5_000,
+                header_bytes=chunk_size,
+            )
+            cache.reconcile_stream_playhead(
+                stream_id=sid,
+                cache_key=key,
+                playhead_byte=50_000,
+                lookback_bytes=2_000,
+                lookahead_bytes=5_000,
+                header_bytes=chunk_size,
+            )
+            cache.release_stream(sid)
+
+        assert (
+            len(cache._leases_by_stream) == 0
+        ), "Dangling stream leases in _leases_by_stream"
+        assert len(cache._leases_by_key) == 0, "Dangling key leases in _leases_by_key"
+        assert (
+            cache.protected_bytes() == 0
+        ), "Dangling protected_bytes after 100 sessions"
+
+        # Phase B: Concurrency stress with 1, 4, and 16 concurrent streams
+        for conc in (1, 4, 16):
+
+            async def run_client(cid: int) -> None:
+                sid = f"conc_{conc}_{cid}"
+                key = f"video_{cid}.mkv"
+                await cache.put(key, 0, b"H" * chunk_size, stream_id=sid)
+                for step in range(5):
+                    pos = step * chunk_size
+                    await cache.put(key, pos, b"D" * chunk_size, stream_id=sid)
+                    cache.reconcile_stream_playhead(
+                        stream_id=sid,
+                        cache_key=key,
+                        playhead_byte=pos,
+                        lookback_bytes=chunk_size,
+                        lookahead_bytes=2 * chunk_size,
+                        header_bytes=chunk_size,
+                    )
+                    await cache.get(key, pos, pos + chunk_size - 1, stream_id=sid)
+                    await trio.sleep(0.001)
+                cache.release_stream(sid)
+
+            async with trio.open_nursery() as nursery:
+                for c in range(conc):
+                    nursery.start_soon(run_client, c)
+
+            assert (
+                len(cache._leases_by_stream) == 0
+            ), f"Dangling stream leases after conc={conc}"
+            assert (
+                len(cache._leases_by_key) == 0
+            ), f"Dangling key leases after conc={conc}"
+            assert (
+                cache.protected_bytes() == 0
+            ), f"Dangling protected_bytes after conc={conc}"
+
+        # Phase C: Eviction convergence proof under capacity overflow
+        for i in range(150):
+            await cache.put("unprotected.mkv", i * chunk_size, b"U" * chunk_size)
+        await cache.trim()
+        assert (
+            cache._total_bytes <= cache.cfg.max_size_bytes
+        ), "Eviction failed to converge below capacity"
+
+    trio.run(_run)
