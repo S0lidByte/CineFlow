@@ -112,6 +112,7 @@ class Updater(Runner[None, BaseUpdater]):
             logger.debug(f"No refreshable VFS entries for {item.log_string}; skipping")
             return
 
+        item.updated = True
         logger.info(
             f"Updated {item.log_string} ({len(refreshed_paths)} unique paths refreshed)"
         )

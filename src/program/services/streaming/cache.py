@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import random
+import shutil
 import threading
 import time
 import uuid
@@ -210,6 +211,10 @@ class Cache:
         # boundary. Only one may trim and collect metrics; the rest must keep
         # serving reads rather than queueing behind eviction I/O.
         self._metrics_maintenance_lock = trio.Lock()
+
+        # Dedicated read thread limiter so FUSE cache hits never queue behind
+        # background chunk writes, demotions, or maintenance disk operations.
+        self._read_limiter = trio.CapacityLimiter(40)
 
         # Active Playback Protection:
         # key (composite chunk_key e.g. "hash_start") -> dict[stream_id, StreamLease]
@@ -485,6 +490,7 @@ class Cache:
                     self._file_for(key, tier=tier),
                     offset,
                     size,
+                    limiter=self._read_limiter,
                 )
             except FileNotFoundError:
                 continue
@@ -578,10 +584,12 @@ class Cache:
             os.replace(src, dst)
         except OSError:
             # Cross-device (tmpfs → disk): copy to .tmp then replace atomically
-            tmp_dst = dst.with_suffix(dst.suffix + ".tmp")
-            with src.open("rb") as rf, tmp_dst.open("wb") as wf:
-                wf.write(rf.read())
-            os.replace(tmp_dst, dst)
+            tmp_dst = dst.with_suffix(dst.suffix + f".{uuid.uuid4().hex}.tmp")
+            try:
+                shutil.copyfile(src, tmp_dst)
+                os.replace(tmp_dst, dst)
+            finally:
+                tmp_dst.unlink(missing_ok=True)
             src.unlink(missing_ok=True)
 
     def _demote_files_to_warm(self, key: str) -> None:

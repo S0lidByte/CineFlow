@@ -80,9 +80,9 @@ def test_initial_state(movie, show, season, episode):
     assert movie.state == States.Requested, "Movie should start in Requested state"
 
     # A show with only unaired seasons is unreleased; its child hierarchy is unknown.
-    assert show.state == States.Unreleased, (
-        "Show should start unreleased when its seasons have not aired"
-    )
+    assert (
+        show.state == States.Unreleased
+    ), "Show should start unreleased when its seasons have not aired"
     assert season.state == States.Unknown, "Season should start in Unknown state"
     assert episode.state == States.Unknown, "Episode should start in Unknown state"
 
@@ -102,9 +102,9 @@ def test_indexed_state(movie):
     movie.set("title", "Inception")
     movie.aired_at = datetime.now() - timedelta(days=1)
     # Then: The item's state should be Indexed
-    assert movie.state == States.Indexed, (
-        "Released movie metadata should transition to Indexed"
-    )
+    assert (
+        movie.state == States.Indexed
+    ), "Released movie metadata should transition to Indexed"
 
 
 def test_scraped_state(episode):
@@ -122,9 +122,9 @@ def test_downloaded_state(episode):
         Episode, "filesystem_entry", new_callable=PropertyMock, return_value=object()
     ):
         # Then: The item's state should be Downloaded
-        assert episode.state == States.Downloaded, (
-            "Episode should transition to Downloaded when it has a filesystem entry"
-        )
+        assert (
+            episode.state == States.Downloaded
+        ), "Episode should transition to Downloaded when it has a filesystem entry"
 
 
 def test_completed_state(movie):
@@ -132,9 +132,9 @@ def test_completed_state(movie):
     # Given: A media item (movie) marked updated after library processing
     movie.updated = True
     # Then: The item's state should be Completed
-    assert movie.state == States.Completed, (
-        "Updated movie should transition to Completed state"
-    )
+    assert (
+        movie.state == States.Completed
+    ), "Updated movie should transition to Completed state"
 
 
 def test_show_state_transitions(show):
@@ -154,6 +154,7 @@ def test_show_state_transitions(show):
         (States.Scraped, "StateTransition", "downloader"),
         (States.Downloaded, "StateTransition", "filesystem"),
         (States.Symlinked, "StateTransition", "updater"),
+        (States.Symlinked, "updater", None),
         (States.Completed, "StateTransition", "post_processing"),
         (States.Completed, "post_processing", None),
         (States.Paused, "StateTransition", None),

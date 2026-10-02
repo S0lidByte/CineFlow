@@ -114,6 +114,9 @@ def process_event(
         items_to_submit = [existing_item]
 
     elif existing_item and existing_item.last_state == States.Symlinked:
+        # Avoid infinite re-execution loops if Updater already ran or was skipped
+        if emitted_by == services.updater:
+            return no_further_processing
         next_service = services.updater
         items_to_submit = [existing_item]
 
