@@ -70,6 +70,7 @@ def test_settings_manager_recovers_missing_open_subtitles_credentials(
     settings_file = tmp_path / "settings.json"
     settings_file.write_text(json.dumps(settings_data), encoding="utf-8")
 
+    monkeypatch.delenv("CINEFLOW_SETTINGS_FILENAME", raising=False)
     monkeypatch.setenv("SETTINGS_FILENAME", "settings.json")
     monkeypatch.setattr("program.settings.data_dir_path", tmp_path)
     settings_manager = SettingsManager()

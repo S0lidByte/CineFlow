@@ -12,11 +12,12 @@ from ordered_set import OrderedSet
 
 from program.services.streaming.cache import Cache, CacheConfig
 from program.services.streaming.exceptions import EmptyDataException
-from program.services.streaming.media_stream import MediaStream
+from program.services.streaming.media_stream import MediaStream, _DeliveryRegistry
 
 
 def _bare_stream() -> MediaStream:
     stream = MediaStream.__new__(MediaStream)
+    stream._delivery_registry = _DeliveryRegistry()
     stream._trace_stream = MagicMock()  # type: ignore[method-assign]
     return stream
 

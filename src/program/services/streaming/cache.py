@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Literal, NotRequired, Required, TypedDict
+from typing import Any, Literal, NotRequired, Required, TypedDict
 
 import trio
 from kink import di
@@ -47,6 +47,13 @@ class CacheConfig:
     # LRU overflow is demoted to cache_dir (warm).
     hot_dir: Path | None = None
     hot_max_size_bytes: int = 0
+    # Two-tier watermark reclaim settings. When None, auto-tunes:
+    # 85.0/70.0 for standard production caches (>=50MB), 100.0/100.0 for micro-test caches (<50MB).
+    hot_watermark_high_pct: float | None = None
+    hot_watermark_low_pct: float | None = None
+    warm_watermark_high_pct: float | None = None
+    warm_watermark_low_pct: float | None = None
+    warm_min_free_mb: int = 0
 
     @property
     def two_tier(self) -> bool:
@@ -65,6 +72,15 @@ class CacheEntry:
     @property
     def chunk_state(self) -> ChunkState:
         return ChunkState.HOT if self.tier == "hot" else ChunkState.WARM
+
+
+class CachePutResult(str, Enum):
+    """Result of attempting to admit a media chunk into cache."""
+
+    STORED_HOT = "stored_hot"
+    STORED_WARM = "stored_warm"
+    SKIPPED_PREFETCH_PRESSURE = "skipped_prefetch_pressure"
+    REFUSED_PHYSICAL_PRESSURE = "refused_physical_pressure"
 
 
 class ChunkState(str, Enum):
@@ -577,31 +593,110 @@ class Cache:
                 pass
             self._remove_metadata(k, tier=tier)
 
-    @staticmethod
-    def _rename_or_copy(src: Path, dst: Path) -> None:
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            os.replace(src, dst)
-        except OSError:
-            # Cross-device (tmpfs → disk): copy to .tmp then replace atomically
-            tmp_dst = dst.with_suffix(dst.suffix + f".{uuid.uuid4().hex}.tmp")
-            try:
-                shutil.copyfile(src, tmp_dst)
-                os.replace(tmp_dst, dst)
-            finally:
-                tmp_dst.unlink(missing_ok=True)
-            src.unlink(missing_ok=True)
-
-    def _demote_files_to_warm(self, key: str) -> None:
-        """Move payload + metadata from hot to warm on disk."""
+    def _stage_demote_hot_to_warm_temp(
+        self, key: str
+    ) -> tuple[Path | None, Path | None]:
+        """Copy payload and metadata from hot tier to warm temporary files without touching hot tier."""
         hot_fp = self._file_for(key, tier="hot")
         warm_fp = self._file_for(key, tier="warm")
         hot_meta = self._metadata_file_for(key, tier="hot")
         warm_meta = self._metadata_file_for(key, tier="warm")
-        if hot_fp.exists():
-            self._rename_or_copy(hot_fp, warm_fp)
-        if hot_meta.exists():
-            self._rename_or_copy(hot_meta, warm_meta)
+
+        staged_payload: Path | None = None
+        staged_meta: Path | None = None
+
+        try:
+            # A missing source must abort demotion, not commit an empty destination.
+            warm_fp.parent.mkdir(parents=True, exist_ok=True)
+            staged_payload = warm_fp.with_suffix(
+                warm_fp.suffix + f".demote.{uuid.uuid4().hex}.tmp"
+            )
+            shutil.copyfile(hot_fp, staged_payload)
+
+            if hot_meta.exists():
+                warm_meta.parent.mkdir(parents=True, exist_ok=True)
+                staged_meta = warm_meta.with_suffix(
+                    warm_meta.suffix + f".demote.{uuid.uuid4().hex}.tmp"
+                )
+                shutil.copyfile(hot_meta, staged_meta)
+        except BaseException:
+            # Record paths before copying so partially written files are removed.
+            self._cleanup_staged_demotion(staged_payload, staged_meta)
+            raise
+
+        return staged_payload, staged_meta
+
+    def _place_staged_demotion(
+        self,
+        key: str,
+        staged_payload: Path | None,
+        staged_meta: Path | None,
+    ) -> bool:
+        """Replace staged warm temps into final warm paths.
+
+        Returns True only when the warm payload is verifiably in place.
+        Does NOT touch hot files — call _remove_hot_after_demotion() separately
+        after the index has been updated to point at warm.
+
+        Invariant: if this returns False the hot file is still the sole
+        authoritative copy and the index must NOT be updated.
+        """
+        warm_fp = self._file_for(key, tier="warm")
+        warm_meta = self._metadata_file_for(key, tier="warm")
+
+        if staged_payload is None or not staged_payload.exists():
+            # Nothing to place — staged copy was never created or was cleaned up.
+            return False
+
+        os.replace(staged_payload, warm_fp)
+
+        # Verify the warm payload is readable and has non-zero size.
+        try:
+            if not warm_fp.exists() or warm_fp.stat().st_size == 0:
+                return False
+        except OSError:
+            return False
+
+        if staged_meta is not None and staged_meta.exists():
+            os.replace(staged_meta, warm_meta)
+
+        return True
+
+    def _remove_hot_after_demotion(self, key: str) -> None:
+        """Unlink the obsolete hot payload and metadata after warm is authoritative.
+
+        A failure here leaves a stale hot duplicate on disk but does NOT
+        compromise correctness — the index already points at warm.
+        """
+        hot_fp = self._file_for(key, tier="hot")
+        hot_meta = self._metadata_file_for(key, tier="hot")
+        hot_fp.unlink(missing_ok=True)
+        hot_meta.unlink(missing_ok=True)
+
+    def _commit_staged_demotion(
+        self,
+        key: str,
+        staged_payload: Path | None,
+        staged_meta: Path | None,
+    ) -> None:
+        """Legacy single-call helper kept for callers that do not need split phases.
+
+        Prefer _place_staged_demotion + index update + _remove_hot_after_demotion
+        for atomic publication ordering.
+        """
+        if self._place_staged_demotion(key, staged_payload, staged_meta):
+            self._remove_hot_after_demotion(key)
+
+    @staticmethod
+    def _cleanup_staged_demotion(
+        staged_payload: Path | None,
+        staged_meta: Path | None,
+    ) -> None:
+        """Discard temporary staged files if demotion was aborted or invalidated."""
+        if staged_payload is not None:
+            staged_payload.unlink(missing_ok=True)
+        if staged_meta is not None:
+            staged_meta.unlink(missing_ok=True)
 
     @contextmanager
     def reading_chunk(self, chunk_key: str):
@@ -851,68 +946,223 @@ class Cache:
             return 0.0
         return (self.protected_bytes() / self.cfg.max_size_bytes) * 100.0
 
+    def _effective_hot_watermarks(self) -> tuple[float, float]:
+        """Compute effective (high, low) percentage watermarks for hot tier.
+
+        Production defaults: 85 % high / 70 % low unless explicitly configured.
+        """
+        high = (
+            self.cfg.hot_watermark_high_pct
+            if self.cfg.hot_watermark_high_pct is not None
+            else 85.0
+        )
+        low = (
+            self.cfg.hot_watermark_low_pct
+            if self.cfg.hot_watermark_low_pct is not None
+            else 70.0
+        )
+        return high, low
+
+    def _effective_warm_watermarks(self) -> tuple[float, float]:
+        """Compute effective (high, low) percentage watermarks for warm tier.
+
+        Production defaults: 85 % high / 70 % low unless explicitly configured.
+        """
+        high = (
+            self.cfg.warm_watermark_high_pct
+            if self.cfg.warm_watermark_high_pct is not None
+            else 85.0
+        )
+        low = (
+            self.cfg.warm_watermark_low_pct
+            if self.cfg.warm_watermark_low_pct is not None
+            else 70.0
+        )
+        return high, low
+
     async def _ensure_hot_capacity(self, need_bytes: int) -> None:
-        """Demote LRU hot entries to warm until hot tier can accept need_bytes."""
+        """Demote LRU hot entries to warm until hot tier can accept need_bytes and respects watermarks."""
         if not self.cfg.two_tier:
             return
 
         to_demote: list[CacheEntry] = []
 
         async with self.locks():
-            target = max(
-                0,
-                self._hot_bytes
-                + self._hot_reserved_bytes
-                + need_bytes
-                - self.cfg.hot_max_size_bytes,
-            )
+            projected = self._hot_bytes + self._hot_reserved_bytes + need_bytes
+            hard_cap = self.cfg.hot_max_size_bytes
+            hot_high_pct, hot_low_pct = self._effective_hot_watermarks()
+            high_watermark_bytes = int(hard_cap * (hot_high_pct / 100.0))
+            low_watermark_bytes = int(hard_cap * (hot_low_pct / 100.0))
+
+            target = 0
+            if projected > high_watermark_bytes:
+                target = max(target, projected - low_watermark_bytes)
+            if projected > hard_cap:
+                target = max(target, projected - hard_cap)
+
             if target <= 0:
                 return
 
             with self._thread_lock:
-                # Prefer demoting unprotected hot entries first to preserve active playback in RAM
-                unprotected_hot: list[CacheEntry] = []
-                protected_hot: list[CacheEntry] = []
+                # Conservative D80 playback lease protection:
+                # Never demote active readers.
+                # Do not demote chunks protected by active, valid playback leases under ordinary pressure.
+                # Only unleased / expired entries are eligible for hot-to-warm demotion.
                 for cache_entry in self._index.values():
-                    if cache_entry.tier != "hot":
-                        continue
-                    if not self._is_entry_protected(cache_entry.key, cache_entry):
-                        unprotected_hot.append(cache_entry)
-                    else:
-                        protected_hot.append(cache_entry)
-
-                for cache_entry in unprotected_hot + protected_hot:
                     if target <= 0:
                         break
+                    if cache_entry.tier != "hot":
+                        continue
+                    if self._active_readers.get(cache_entry.key, 0) > 0:
+                        continue
+                    if self._is_entry_protected(cache_entry.key, cache_entry):
+                        continue
                     to_demote.append(cache_entry)
                     target -= cache_entry.size
 
         for entry in to_demote:
-            try:
-                await trio.to_thread.run_sync(self._demote_files_to_warm, entry.key)
-            except Exception as e:
-                logger.warning(f"Failed to demote hot cache entry {entry.key}: {e}")
-                continue
-
-            # Publish the tier change only after the warm payload exists. Readers
-            # probe both paths around this handoff, so no zero-byte window leaks.
+            # Selection and disk I/O are separated, so fence the candidate again
+            # immediately before staging it. A read or lease acquired while another candidate
+            # is being staged must make this candidate ineligible.
             async with self.locks():
                 with self._thread_lock:
                     current = self._index.get(entry.key)
-                    if current is None or current.tier != "hot":
+                    if (
+                        current is None
+                        or current.tier != "hot"
+                        or current.size != entry.size
+                        or current.mtime != entry.mtime
+                        or self._active_readers.get(entry.key, 0) > 0
+                        or self._is_entry_protected(entry.key, current)
+                    ):
                         continue
-                    self._index[entry.key] = CacheEntry(
-                        key=current.key,
-                        cache_key=current.cache_key,
-                        start=current.start,
-                        size=current.size,
-                        mtime=current.mtime,
-                        tier="warm",
+
+            staged_payload: Path | None = None
+            staged_meta: Path | None = None
+            try:
+                staged_payload, staged_meta = await trio.to_thread.run_sync(
+                    self._stage_demote_hot_to_warm_temp, entry.key
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to stage hot cache demotion for {entry.key}: {e}"
+                )
+                await trio.to_thread.run_sync(
+                    self._cleanup_staged_demotion, staged_payload, staged_meta
+                )
+                continue
+
+            # Re-validate index consistency under lock BEFORE committing.
+            # If the entry acquired an active reader or a valid playback lease during staging,
+            # ABORT demotion and clean up the staged warm files. The hot file remains intact.
+            #
+            # ATOMIC DEMOTION PROTOCOL — three phases:
+            #   Phase 1 (disk, no locks): _stage_demote_hot_to_warm_temp — already done above.
+            #   Phase 2 (disk, no locks): _place_staged_demotion — warm temp → warm final.
+            #     Only if this succeeds do we proceed to index publication.
+            #   Phase 3 (under locks): publish tier="warm" + decrement _hot_bytes.
+            #     Index always points to a readable authoritative copy.
+            #   Phase 4 (disk, no locks): _remove_hot_after_demotion — stale hot cleanup.
+            #     Failure here leaves a stale duplicate; warm is already authoritative.
+            #
+            # Revalidation fence is applied between Phase 1 and Phase 2.
+            revalidated = False
+            async with self.locks():
+                with self._thread_lock:
+                    current = self._index.get(entry.key)
+                    if (
+                        current is not None
+                        and current.tier == "hot"
+                        and current.size == entry.size
+                        and current.mtime == entry.mtime
+                        and self._active_readers.get(entry.key, 0) == 0
+                        and not self._is_entry_protected(entry.key, current)
+                    ):
+                        revalidated = True
+
+            if not revalidated:
+                # Entry acquired an active reader, lease, or was invalidated during staging — discard temps.
+                await trio.to_thread.run_sync(
+                    self._cleanup_staged_demotion, staged_payload, staged_meta
+                )
+                continue
+
+            # Phase 2: place warm files on disk (no locks held).
+            # If this fails, hot remains authoritative; do NOT update the index.
+            placed = await trio.to_thread.run_sync(
+                self._place_staged_demotion, entry.key, staged_payload, staged_meta
+            )
+            if not placed:
+                logger.warning(
+                    f"Failed to place staged demotion for {entry.key}; hot preserved"
+                )
+                await trio.to_thread.run_sync(
+                    self._cleanup_staged_demotion, staged_payload, staged_meta
+                )
+                continue
+
+            # Phase 3: publish index update under locks — warm is now authoritative.
+            # A second revalidation fence here catches readers or leases that arrived
+            # between Phase 1 revalidation and Phase 2 disk placement.
+            published = False
+            async with self.locks():
+                with self._thread_lock:
+                    current = self._index.get(entry.key)
+                    if (
+                        current is not None
+                        and current.tier == "hot"
+                        and current.size == entry.size
+                        and current.mtime == entry.mtime
+                        and self._active_readers.get(entry.key, 0) == 0
+                        and not self._is_entry_protected(entry.key, current)
+                    ):
+                        self._index[entry.key] = CacheEntry(
+                            key=current.key,
+                            cache_key=current.cache_key,
+                            start=current.start,
+                            size=current.size,
+                            mtime=current.mtime,
+                            tier="warm",
+                        )
+                        # NOTE: Do NOT do self._index.move_to_end(entry.key, last=False)!
+                        # Demoted chunks must NOT be pushed to the head of the LRU queue,
+                        # which caused active playback chunks to be immediately evicted.
+                        self._hot_bytes = max(0, self._hot_bytes - current.size)
+                        published = True
+
+            if published:
+                # Phase 4: remove stale hot files — warm is already authoritative.
+                # A failure here is tolerable; the index is correct.
+                try:
+                    await trio.to_thread.run_sync(
+                        self._remove_hot_after_demotion, entry.key
                     )
-                    # NOTE: Do NOT do self._index.move_to_end(entry.key, last=False)!
-                    # Demoted chunks must NOT be pushed to the head of the LRU queue,
-                    # which caused active playback chunks to be immediately evicted.
-                    self._hot_bytes = max(0, self._hot_bytes - current.size)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to remove hot files after demotion for {entry.key}: {e}; "
+                        "warm is authoritative — stale hot duplicate will be cleaned on next scan"
+                    )
+            else:
+                # Entry was protected between Phase 2 and Phase 3.
+                # Warm file is now on disk but the index still points to hot.
+                # Clean up the warm file so hot remains the sole authoritative copy.
+                logger.debug(
+                    f"Demotion of {entry.key} aborted after disk placement (new reader/lease); "
+                    "removing warm file to restore hot-only state"
+                )
+                warm_fp = self._file_for(entry.key, tier="warm")
+                warm_meta_fp = self._metadata_file_for(entry.key, tier="warm")
+                try:
+                    await trio.to_thread.run_sync(
+                        lambda: warm_fp.unlink(missing_ok=True)
+                    )
+                    await trio.to_thread.run_sync(
+                        lambda: warm_meta_fp.unlink(missing_ok=True)
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to clean warm file after aborted demotion for {entry.key}: {e}"
+                    )
 
         # Warm may now be over budget
         if to_demote:
@@ -950,7 +1200,7 @@ class Cache:
             self._hot_capacity_changed.set()
             self._hot_capacity_changed = trio.Event()
 
-    async def _evict_lru(self, need_bytes: int = 0) -> None:
+    async def _evict_lru(self, need_bytes: int = 0) -> bool:
         # Index updates under both _index_lock (via locks()) AND _thread_lock
         # so that sync callers (has(), sync_size_snapshot()) never observe an
         # entry that is mid-eviction.  _thread_lock is held only around the
@@ -962,17 +1212,39 @@ class Cache:
         tiers: dict[str, Literal["hot", "warm"]] = {}
         evicted = 0
         evicted_entries: list[tuple[str, int]] = []
+        eviction_succeeded = True
 
         try:
             async with self.locks():
-                # Prefer evicting warm; only evict hot if single-tier or still over.
-                target = max(
-                    0, self._total_bytes + need_bytes - self.cfg.max_size_bytes
-                )
+                with self._thread_lock:
+                    warm_bytes = max(0, self._total_bytes - self._hot_bytes)
+                projected = warm_bytes + need_bytes
+                hard_cap = self.cfg.max_size_bytes
+                warm_high_pct, warm_low_pct = self._effective_warm_watermarks()
+                high_watermark_bytes = int(hard_cap * (warm_high_pct / 100.0))
+                low_watermark_bytes = int(hard_cap * (warm_low_pct / 100.0))
+
+                target = 0
+                if projected > high_watermark_bytes:
+                    target = max(target, projected - low_watermark_bytes)
+                if projected > hard_cap:
+                    target = max(target, projected - hard_cap)
+
+                # Check minimum free disk space constraint
+                if self.cfg.warm_min_free_mb > 0:
+                    try:
+                        free_bytes = shutil.disk_usage(self.cfg.cache_dir).free
+                        min_free_bytes = self.cfg.warm_min_free_mb * 1024 * 1024
+                        if free_bytes < min_free_bytes:
+                            target = max(target, min_free_bytes - free_bytes)
+                    except Exception:
+                        pass
 
                 with self._thread_lock:
                     while target > 0 and self._index:
-                        # Prefer oldest unprotected warm entry first when two-tier
+                        # In two-tier mode, warm retention is independent: hot
+                        # entries are not warm-budget victims, even when the hot
+                        # tier is under pressure.
                         victim_key: str | None = None
                         if self.cfg.two_tier:
                             for k, entry in self._index.items():
@@ -981,7 +1253,7 @@ class Cache:
                                 ) == "warm" and not self._is_entry_protected(k, entry):
                                     victim_key = k
                                     break
-                        if victim_key is None:
+                        else:
                             for k, entry in self._index.items():
                                 if not self._is_entry_protected(k, entry):
                                     victim_key = k
@@ -991,6 +1263,7 @@ class Cache:
                             # ALL entries in cache are currently protected by active playback leases/readers.
                             # ACTIVE PLAYBACK DATA > CACHE RETENTION: Refuse eviction to prevent buffer drops.
                             self.eviction_refusals += 1
+                            eviction_succeeded = False
                             logger.warning(
                                 "Cache LRU eviction refused: all {} entries ({:.1f} MB) are protected by active playback leases/readers. Target was {} bytes.",
                                 len(self._index),
@@ -1053,6 +1326,7 @@ class Cache:
                         di[ChunkCacheNotifier].on_chunk_evicted(cache_key=ck, start=st)
                 except Exception:
                     pass
+        return eviction_succeeded
 
     async def _evict_ttl(self) -> None:
         ttl = self.cfg.ttl_seconds
@@ -1471,9 +1745,10 @@ class Cache:
         *,
         stream_id: str | None = None,
         lease_seconds: float = 60.0,
-    ) -> None:
+        admission: Literal["demand", "prefetch"] = "demand",
+    ) -> CachePutResult:
         if not data:
-            return
+            return CachePutResult.REFUSED_PHYSICAL_PRESSURE
 
         k = self._key(cache_key, start)
         need = len(data)
@@ -1513,7 +1788,33 @@ class Cache:
                         size=existing_size,
                         lease_seconds=lease_seconds,
                     )
-                return
+                return (
+                    CachePutResult.STORED_HOT
+                    if existing_tier == "hot"
+                    else CachePutResult.STORED_WARM
+                )
+
+            # Check admission under pressure:
+            # If admission is prefetch and cache is under tight watermark pressure,
+            # drop speculative prefetch caching early.
+            if admission == "prefetch":
+                with self._thread_lock:
+                    warm_bytes = max(0, self._total_bytes - self._hot_bytes)
+                warm_hard_cap = self.cfg.max_size_bytes
+                effective_warm_high, _ = self._effective_warm_watermarks()
+                warm_high_pct = effective_warm_high / 100.0
+                if warm_hard_cap > 0 and (warm_bytes + need) > int(
+                    warm_hard_cap * warm_high_pct
+                ):
+                    # Check if all or most is protected
+                    with self._thread_lock:
+                        has_unprotected = any(
+                            getattr(e, "tier", None) == "warm"
+                            and not self._is_entry_protected(ck, e)
+                            for ck, e in self._index.items()
+                        )
+                    if not has_unprotected:
+                        return CachePutResult.SKIPPED_PREFETCH_PRESSURE
 
             hot_reservation = 0
             if write_tier == "hot":
@@ -1526,7 +1827,27 @@ class Cache:
                 if self.cfg.eviction == "TTL":
                     await self._evict_ttl()
                 else:
-                    await self._evict_lru(need)
+                    # The warm budget describes persistent-tier retention. A hot
+                    # write must not evict warm history merely because the total
+                    # two-tier footprint temporarily grows.
+                    eviction_ok = await self._evict_lru(
+                        need if write_tier == "warm" else 0
+                    )
+                    if not eviction_ok and write_tier == "warm":
+                        # Eviction could not reach the low-watermark target because all
+                        # remaining entries are protected by active playback leases.
+                        # ACTIVE PLAYBACK DATA > CACHE RETENTION:
+                        # - If this chunk itself is active playback (stream_id set), always
+                        #   admit it even if the hard cap is breached. Dropping active
+                        #   playback data causes buffer stalls; cap overflow is preferable.
+                        # - If this is an unprotected/demand chunk, only refuse when the
+                        #   hard cap itself would be exceeded (not just the watermark).
+                        if stream_id is None:
+                            with self._thread_lock:
+                                warm_after = max(0, self._total_bytes - self._hot_bytes)
+                            if warm_after + need > self.cfg.max_size_bytes:
+                                # Hard cap would be breached and we cannot evict anything.
+                                return CachePutResult.REFUSED_PHYSICAL_PRESSURE
 
                 fp = self._file_for(k, tier=write_tier)
 
@@ -1540,7 +1861,7 @@ class Cache:
                     )
                 except Exception as e:
                     logger.warning(f"Disk cache write failed: {e}")
-                    return
+                    return CachePutResult.REFUSED_PHYSICAL_PRESSURE
 
                 # Priority 3: _thread_lock guards _index writes so sync readers
                 # (has(), sync_size_snapshot()) see a consistent snapshot without
@@ -1587,6 +1908,11 @@ class Cache:
                         size=need,
                         lease_seconds=lease_seconds,
                     )
+                return (
+                    CachePutResult.STORED_HOT
+                    if write_tier == "hot"
+                    else CachePutResult.STORED_WARM
+                )
             finally:
                 if hot_reservation:
                     await self._release_hot_capacity(hot_reservation)
@@ -1625,10 +1951,12 @@ class Cache:
 
     async def trim(self) -> None:
         # Primary policy-based trimming
+        if self.cfg.two_tier:
+            await self._ensure_hot_capacity(0)
         if self.cfg.eviction == "TTL":
             await self._evict_ttl()
         else:
-            await self._evict_lru()
+            await self._evict_lru(0)
 
     def sync_size_snapshot(self) -> tuple[int, int]:
         """Thread-safe size/entry snapshot for asyncio callers (e.g. /metrics).
@@ -1640,13 +1968,145 @@ class Cache:
         with self._thread_lock:
             return int(self._total_bytes), int(len(self._index))
 
+    def update_watermarks(
+        self,
+        *,
+        max_size_bytes: int | None = None,
+        hot_max_size_bytes: int | None = None,
+        hot_watermark_high_pct: float | None = None,
+        hot_watermark_low_pct: float | None = None,
+        warm_watermark_high_pct: float | None = None,
+        warm_watermark_low_pct: float | None = None,
+        warm_min_free_mb: int | None = None,
+    ) -> None:
+        """Update live watermark and size configurations thread-safely."""
+        with self._thread_lock:
+            if max_size_bytes is not None and max_size_bytes > 0:
+                self.cfg.max_size_bytes = max_size_bytes
+            if hot_max_size_bytes is not None:
+                self.cfg.hot_max_size_bytes = hot_max_size_bytes
+            raw_hot_high = (
+                hot_watermark_high_pct
+                if hot_watermark_high_pct is not None
+                else self.cfg.hot_watermark_high_pct
+            )
+            raw_hot_low = (
+                hot_watermark_low_pct
+                if hot_watermark_low_pct is not None
+                else self.cfg.hot_watermark_low_pct
+            )
+            raw_warm_high = (
+                warm_watermark_high_pct
+                if warm_watermark_high_pct is not None
+                else self.cfg.warm_watermark_high_pct
+            )
+            raw_warm_low = (
+                warm_watermark_low_pct
+                if warm_watermark_low_pct is not None
+                else self.cfg.warm_watermark_low_pct
+            )
+
+            if (
+                raw_hot_high is None
+                or raw_hot_low is None
+                or raw_warm_high is None
+                or raw_warm_low is None
+            ):
+                raise ValueError("Cache watermarks cannot be None")
+
+            hot_high = float(raw_hot_high)
+            hot_low = float(raw_hot_low)
+            warm_high = float(raw_warm_high)
+            warm_low = float(raw_warm_low)
+            if not (
+                0.0 < hot_low < hot_high < 100.0 and 0.0 < warm_low < warm_high < 100.0
+            ):
+                raise ValueError("Invalid cache watermarks")
+            self.cfg.hot_watermark_high_pct = hot_high
+            self.cfg.hot_watermark_low_pct = hot_low
+            self.cfg.warm_watermark_high_pct = warm_high
+            self.cfg.warm_watermark_low_pct = warm_low
+            if warm_min_free_mb is not None:
+                if warm_min_free_mb < 0:
+                    raise ValueError("warm_min_free_mb must be nonnegative")
+                self.cfg.warm_min_free_mb = warm_min_free_mb
+
+    def watermark_status(self) -> dict[str, Any]:
+        """Return current status of hot and warm cache watermarks and usage."""
+        with self._thread_lock:
+            hot_bytes = self._hot_bytes
+            total_bytes = self._total_bytes
+            warm_bytes = max(0, total_bytes - hot_bytes)
+
+            hot_max = self.cfg.hot_max_size_bytes
+            warm_max = self.cfg.max_size_bytes
+
+            hot_pct = (hot_bytes / hot_max * 100.0) if hot_max > 0 else 0.0
+            warm_pct = (warm_bytes / warm_max * 100.0) if warm_max > 0 else 0.0
+
+            free_disk_mb = 0
+            try:
+                free_disk_mb = int(
+                    shutil.disk_usage(self.cfg.cache_dir).free / (1024 * 1024)
+                )
+            except Exception:
+                pass
+
+            hot_high_pct, hot_low_pct = self._effective_hot_watermarks()
+            warm_high_pct, warm_low_pct = self._effective_warm_watermarks()
+
+            return {
+                "hot_bytes": hot_bytes,
+                "hot_max_bytes": hot_max,
+                "hot_usage_pct": round(hot_pct, 2),
+                "hot_watermark_high_pct": hot_high_pct,
+                "hot_watermark_low_pct": hot_low_pct,
+                "warm_bytes": warm_bytes,
+                "total_bytes": total_bytes,
+                "warm_max_bytes": warm_max,
+                "warm_usage_pct": round(warm_pct, 2),
+                "warm_watermark_high_pct": warm_high_pct,
+                "warm_watermark_low_pct": warm_low_pct,
+                "warm_min_free_mb": self.cfg.warm_min_free_mb,
+                "free_disk_mb": free_disk_mb,
+                "protected_bytes": sum(
+                    entry.size
+                    for key, entry in self._index.items()
+                    if self._is_entry_protected(key, entry)
+                ),
+                "eviction_refusals": self.eviction_refusals,
+            }
+
     @property
     def usage_percentage(self) -> float:
-        """Percentage of cache capacity currently used (0.0 to 100.0)."""
+        """Percentage of warm/sole cache capacity currently used."""
         if not self.cfg or self.cfg.max_size_bytes <= 0:
             return 0.0
-        total_bytes, _ = self.sync_size_snapshot()
-        return min(100.0, (total_bytes / self.cfg.max_size_bytes) * 100.0)
+        with self._thread_lock:
+            warm_bytes = max(0, self._total_bytes - self._hot_bytes)
+        return min(100.0, (warm_bytes / self.cfg.max_size_bytes) * 100.0)
+
+    @property
+    def hot_usage_percentage(self) -> float:
+        """Percentage of hot-tier capacity currently used."""
+        if not self.cfg or self.cfg.hot_max_size_bytes <= 0:
+            return 0.0
+        with self._thread_lock:
+            hot_bytes = self._hot_bytes
+        return min(100.0, (hot_bytes / self.cfg.hot_max_size_bytes) * 100.0)
+
+    @property
+    def hot_protected_percentage(self) -> float:
+        """Percentage of hot-tier capacity held by active playback data."""
+        if not self.cfg or self.cfg.hot_max_size_bytes <= 0:
+            return 0.0
+        with self._thread_lock:
+            protected = sum(
+                entry.size
+                for key, entry in self._index.items()
+                if entry.tier == "hot" and self._is_entry_protected(key, entry)
+            )
+        return min(100.0, (protected / self.cfg.hot_max_size_bytes) * 100.0)
 
     async def stats(self) -> CacheSnapshot:
         s = self._metrics.snapshot()

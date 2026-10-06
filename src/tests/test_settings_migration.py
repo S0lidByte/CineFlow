@@ -29,7 +29,7 @@ old_settings_data = {
 }
 
 
-def test_load_and_migrate_settings(tmp_path):
+def test_load_and_migrate_settings(tmp_path, monkeypatch):
     data_path = tmp_path / "data"
     data_path.mkdir()
     temp_settings_file = data_path / "settings.json"
@@ -40,6 +40,8 @@ def test_load_and_migrate_settings(tmp_path):
 
     import program.settings.models
 
+    monkeypatch.delenv("CINEFLOW_SETTINGS_FILENAME", raising=False)
+    monkeypatch.delenv("SETTINGS_FILENAME", raising=False)
     program.settings.data_dir_path = data_path
     program.settings.models.version_file_path = version_file
     settings_manager = SettingsManager()

@@ -85,31 +85,19 @@ def is_tmpfs_path(path: Path) -> bool:
 
 
 def get_cgroup_memory_limit() -> int | None:
-    """Read container memory limit from cgroup v2 (memory.max) or cgroup v1 (memory.limit_in_bytes)."""
-    # Check cgroup v2
-    v2_path = Path("/sys/fs/cgroup/memory.max")
-    if v2_path.exists():
-        try:
-            val = v2_path.read_text(encoding="utf-8").strip()
-            if val and val != "max":
-                limit = int(val)
-                if 0 < limit < (1 << 62):
-                    return limit
-        except Exception:
-            pass
+    """Read container memory limit from cgroup v2 (memory.max) or cgroup v1 (memory.limit_in_bytes)
+    via normalized CgroupCapabilities detection.
+    """
+    from program.services.streaming.runtime_profile import (
+        CgroupCapabilities,
+        LimitState,
+    )
 
-    # Check cgroup v1
-    v1_path = Path("/sys/fs/cgroup/memory/memory.limit_in_bytes")
-    if v1_path.exists():
-        try:
-            val = v1_path.read_text(encoding="utf-8").strip()
-            if val:
-                limit = int(val)
-                if 0 < limit < (1 << 60):
-                    return limit
-        except Exception:
-            pass
-
+    caps = CgroupCapabilities.detect()
+    if caps.memory_hard_boundary.state is LimitState.FINITE and isinstance(
+        caps.memory_hard_boundary.value, int
+    ):
+        return caps.memory_hard_boundary.value
     return None
 
 

@@ -113,7 +113,7 @@ def test_eviction_refusal_when_all_chunks_protected(tmp_path: Path) -> None:
 
 
 def test_safe_hot_to_warm_demotion_preserves_leases(tmp_path: Path) -> None:
-    """Hot-to-warm demotion moves chunk to disk tier while keeping active lease and avoiding eviction bias."""
+    """Under D80 conservative policy, leased hot chunks remain HOT under ordinary pressure; once lease is released, entry becomes eligible for demotion."""
     warm_dir = tmp_path / "warm"
     hot_dir = tmp_path / "hot"
     cache = Cache(
@@ -123,6 +123,7 @@ def test_safe_hot_to_warm_demotion_preserves_leases(tmp_path: Path) -> None:
             hot_dir=hot_dir,
             hot_max_size_bytes=150,
             metrics_enabled=False,
+            warm_min_free_mb=0,
         )
     )
 
@@ -136,15 +137,22 @@ def test_safe_hot_to_warm_demotion_preserves_leases(tmp_path: Path) -> None:
         assert cache._index[key1].tier == "hot"
         assert cache._is_entry_protected(key1, cache._index[key1])
 
-        # Put chunk2, overflowing hot tier (200 > 150)
-        await cache.put("film.mkv", 100, chunk2)
-
-        # chunk1 should be demoted to warm tier, but STILL leased and protected!
-        assert cache._index[key1].tier == "warm"
+        # Under D80, chunk1 has an active playback lease.
+        # Hot-to-warm demotion does not demote actively leased playback data.
+        await cache._ensure_hot_capacity(200)
+        assert cache._index[key1].tier == "hot"
         assert cache._is_entry_protected(key1, cache._index[key1])
+
+        # Release stream lease: chunk1 is now unleased
+        cache.release_stream("active_user")
+        assert not cache._is_entry_protected(key1, cache._index[key1])
+
+        # Now hot tier pressure demotes the unleased chunk to warm tier
+        await cache._ensure_hot_capacity(200)
+        assert cache._index[key1].tier == "warm"
         assert cache._index[key1].chunk_state == ChunkState.WARM
 
-        # Can still read chunk1 cleanly
+        # Can still read chunk1 cleanly from warm tier
         data = await cache.get("film.mkv", 0, 99)
         assert data == chunk1
 
@@ -319,6 +327,8 @@ def test_eviction_pressure_mixed_leases_and_refusal(tmp_path: Path) -> None:
             cache_dir=tmp_path / "cache",
             max_size_bytes=300,
             metrics_enabled=False,
+            warm_watermark_high_pct=100.0,
+            warm_watermark_low_pct=100.0,
         )
     )
 
@@ -386,7 +396,7 @@ def test_eviction_pressure_mixed_leases_and_refusal(tmp_path: Path) -> None:
 def test_hot_tier_pressure_unprotected_before_protected_demotion(
     tmp_path: Path,
 ) -> None:
-    """Hot tier demotes unprotected hot chunks to warm before touching protected hot chunks."""
+    """Hot tier demotes unprotected hot chunks to warm while preserving protected hot chunks in RAM."""
     cache = Cache(
         CacheConfig(
             cache_dir=tmp_path / "warm",
@@ -394,6 +404,7 @@ def test_hot_tier_pressure_unprotected_before_protected_demotion(
             hot_dir=tmp_path / "hot",
             hot_max_size_bytes=200,
             metrics_enabled=False,
+            warm_min_free_mb=0,
         )
     )
 
@@ -410,22 +421,29 @@ def test_hot_tier_pressure_unprotected_before_protected_demotion(
         assert cache._index[ku].tier == "hot"
         assert cache._hot_bytes == 200
 
-        # Put third chunk into hot (100B) with protection -> pushes hot to 300 > 200 cap.
-        # Demotion must pick unprot.mkv FIRST because prot.mkv is protected!
-        await cache.put("new.mkv", 0, b"N" * 100, stream_id="stream_live2")
-        kn = cache._key("new.mkv", 0)
-
+        # Trigger hot capacity check: demotion must pick unprot.mkv FIRST because prot.mkv is protected!
+        await cache._ensure_hot_capacity(100)
         assert cache._index[ku].tier == "warm"
         assert cache._index[kp].tier == "hot"
-        assert cache._index[kn].tier == "hot"
-        assert cache._hot_bytes == 200
+        assert cache._hot_bytes == 100
 
-        # Now put fourth chunk into hot (100B).
-        # Unprotected hot chunks are exhausted, so protected chunk CAN demote to warm disk tier safely.
-        await cache.put("new2.mkv", 0, b"N2" * 50)
-        assert cache._index[kp].tier == "warm"
-        # Crucially: it demoted to warm, but is STILL protected by active lease!
+        # Additional hot pressure when unprotected chunks are exhausted:
+        # Under D80, the protected chunk remains HOT rather than being demoted without runway evidence.
+        await cache._ensure_hot_capacity(100)
+        assert cache._index[kp].tier == "hot"
         assert cache._is_entry_protected(kp, cache._index[kp])
+
+        # Once lease is released, entry becomes eligible for demotion
+        cache.release_stream("stream_live")
+        assert not cache._is_entry_protected(kp, cache._index[kp])
+
+        await cache._ensure_hot_capacity(100)
+        assert cache._index[kp].tier == "warm"
+        assert cache._hot_bytes == 0
+
+        # Data remains readable throughout
+        assert await cache.get("prot.mkv", 0, 99) == b"P" * 100
+        assert await cache.get("unprot.mkv", 0, 99) == b"U" * 100
 
     trio.run(_run)
 

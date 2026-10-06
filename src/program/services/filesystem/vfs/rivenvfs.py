@@ -41,6 +41,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import (
@@ -115,6 +116,13 @@ class FileHandle(TypedDict):
     path: str | None
     last_read_end: int
     subtitle_content: bytes | None
+
+
+@dataclass(frozen=True)
+class VfsMediaHandleState:
+    has_open_handles: bool
+    total_handles: int
+    open_paths: list[str]
 
 
 class CachedDirectoryEntry(TypedDict):
@@ -234,6 +242,13 @@ class RivenVFS(pyfuse3.Operations):
                 metrics_enabled=self.fs.cache_metrics,
                 hot_dir=hot_dir,
                 hot_max_size_bytes=hot_max_bytes,
+                hot_watermark_high_pct=getattr(
+                    self.fs, "hot_cache_watermark_high_pct", 85.0
+                ),
+                hot_watermark_low_pct=self.fs.hot_cache_watermark_low_pct,
+                warm_watermark_high_pct=self.fs.warm_cache_watermark_high_pct,
+                warm_watermark_low_pct=self.fs.warm_cache_watermark_low_pct,
+                warm_min_free_mb=self.fs.warm_cache_min_free_mb,
             )
         )
 
@@ -2889,3 +2904,21 @@ class RivenVFS(pyfuse3.Operations):
             and (now - s.session_statistics.last_body_read_timestamp <= 10.0)
             for s in streams
         )
+
+    def has_open_media_handles(self) -> bool:
+        """Check whether there are currently open file handles under VFS tree lock."""
+        with self._tree_lock:
+            return bool(self._file_handles)
+
+    def get_media_handle_state(self) -> VfsMediaHandleState:
+        """Snapshot open file handles under VFS tree lock for safe maintenance/tuning checks."""
+        with self._tree_lock:
+            open_paths = [
+                h.get("path") or f"inode:{h.get('inode')}"
+                for h in self._file_handles.values()
+            ]
+            return VfsMediaHandleState(
+                has_open_handles=bool(self._file_handles),
+                total_handles=len(self._file_handles),
+                open_paths=open_paths,
+            )

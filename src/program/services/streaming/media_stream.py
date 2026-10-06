@@ -2,7 +2,8 @@ import re
 import threading
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from functools import cached_property
 from http import HTTPStatus
 from time import monotonic
@@ -55,6 +56,171 @@ from .streaming_constants import PROXY_REQUIRED_PROVIDERS
 # Guard against transient short scan reads from unstable debrid/CDN responses.
 DISCRETE_SCAN_MAX_INTEGRITY_ATTEMPTS = 3
 DISCRETE_SCAN_RETRY_BACKOFF_SECONDS = [0.1, 0.25]
+
+
+class _DeliveryState(str, Enum):
+    """State of a transient in-flight delivery entry."""
+
+    PENDING = "pending"  # Chunk is being fetched; waiters are blocked
+    READY_TRANSIENT = (
+        "ready_transient"  # Payload available in-memory; not yet in persistent cache
+    )
+    RETIRED = "retired"  # Seek or close invalidated this entry; waiters must re-probe
+
+
+@dataclass
+class _DeliveryEntry:
+    """Lossless in-memory delivery slot for a single chunk offset."""
+
+    start: int
+    state: _DeliveryState = _DeliveryState.PENDING
+    payload: bytes | None = None
+    ready: trio.Event = field(default_factory=trio.Event)
+    waiter_count: int = 0
+    borrower_count: int = 0
+
+
+class _DeliveryRegistry:
+    """
+    Per-MediaStream transient delivery registry.
+
+    When Cache.put returns REFUSED_PHYSICAL_PRESSURE the producer publishes
+    the already-fetched bytes here so waiting readers can consume them without
+    issuing a second HTTP request (one-provider-fetch invariant).
+
+    Thread-safety: all mutations happen inside the Trio event loop; the
+    internal dict is protected by a Trio lock so concurrent waiters are safe.
+    """
+
+    def __init__(self) -> None:
+        self._lock = trio.Lock()
+        self._entries: dict[int, _DeliveryEntry] = {}
+
+    async def register_pending(self, start: int) -> _DeliveryEntry:
+        """Register a new PENDING slot before the fetch begins, or increment waiters on an existing active slot."""
+        async with self._lock:
+            existing = self._entries.get(start)
+            if existing is not None and existing.state in (
+                _DeliveryState.PENDING,
+                _DeliveryState.READY_TRANSIENT,
+            ):
+                existing.waiter_count += 1
+                return existing
+            entry = _DeliveryEntry(start=start, waiter_count=1)
+            self._entries[start] = entry
+            return entry
+
+    async def publish(self, start: int, payload: bytes) -> None:
+        """Transition a PENDING entry to READY_TRANSIENT and wake waiters."""
+        async with self._lock:
+            entry = self._entries.get(start)
+            if entry is None or entry.state != _DeliveryState.PENDING:
+                return
+            entry.payload = payload
+            entry.state = _DeliveryState.READY_TRANSIENT
+            entry.ready.set()
+
+    async def retire(self, start: int) -> None:
+        """Retire an entry (seek or close). Waiters will re-probe persistent cache."""
+        async with self._lock:
+            entry = self._entries.get(start)
+            if entry is None:
+                return
+            entry.state = _DeliveryState.RETIRED
+            entry.ready.set()  # Unblock any waiters so they can re-probe
+
+    async def retire_all(self) -> None:
+        """Retire all entries (stream close or seek past all pending chunks)."""
+        async with self._lock:
+            for entry in list(self._entries.values()):
+                entry.state = _DeliveryState.RETIRED
+                entry.ready.set()
+            self._entries.clear()
+
+    async def get_ready_payload(self, start: int) -> bytes | None:
+        """
+        Return payload if READY_TRANSIENT, None if RETIRED or not present.
+        Does NOT wait — callers must await entry.ready first.
+        """
+        async with self._lock:
+            entry = self._entries.get(start)
+            if entry is None or entry.state != _DeliveryState.READY_TRANSIENT:
+                return None
+            entry.borrower_count += 1
+            return entry.payload
+
+    async def release_borrow(self, start: int) -> None:
+        """Decrement waiter/borrower count; remove entry when no more active consumers."""
+        async with self._lock:
+            entry = self._entries.get(start)
+            if entry is None:
+                return
+            entry.borrower_count = max(0, entry.borrower_count - 1)
+            entry.waiter_count = max(0, entry.waiter_count - 1)
+            if (
+                entry.borrower_count == 0
+                and entry.waiter_count == 0
+                and entry.state
+                in (_DeliveryState.READY_TRANSIENT, _DeliveryState.RETIRED)
+            ):
+                self._entries.pop(start, None)
+
+    async def release_reservation(self, entry: _DeliveryEntry) -> None:
+        """Release only the reservation generation owned by this reader."""
+        async with self._lock:
+            entry.waiter_count = max(0, entry.waiter_count - 1)
+            if entry.waiter_count == 0 and entry.borrower_count == 0:
+                entry.state = _DeliveryState.RETIRED
+                entry.ready.set()
+                if self._entries.get(entry.start) is entry:
+                    self._entries.pop(entry.start)
+
+    async def cancel_pending(self, start: int) -> None:
+        """Cancel a pending registration if the read was aborted before delivery."""
+        async with self._lock:
+            entry = self._entries.get(start)
+            if entry is None:
+                return
+            entry.waiter_count = max(0, entry.waiter_count - 1)
+            if (
+                entry.waiter_count == 0
+                and entry.borrower_count == 0
+                and entry.state == _DeliveryState.PENDING
+            ):
+                entry.state = _DeliveryState.RETIRED
+                entry.ready.set()
+                self._entries.pop(start, None)
+
+    async def wait_for_delivery(
+        self, start: int, timeout_seconds: float = 5.0
+    ) -> bytes | None:
+        """Wait for pending delivery and return the payload if ready, or None on timeout/retire."""
+        async with self._lock:
+            entry = self._entries.get(start)
+        if entry is None:
+            return None
+        with trio.move_on_after(timeout_seconds):
+            await entry.ready.wait()
+            return await self.get_ready_payload(start)
+        return None
+
+    def has_pending(self, start: int) -> bool:
+        """Sync check: is there a PENDING or READY_TRANSIENT entry for this offset?"""
+        entry = self._entries.get(start)
+        return entry is not None and entry.state != _DeliveryState.RETIRED
+
+    def get_entry(self, start: int) -> _DeliveryEntry | None:
+        """Sync access to an entry (for waiting on entry.ready)."""
+        return self._entries.get(start)
+
+    def get_pending_starts(self) -> list[int]:
+        """Return sorted starts of entries that are actively PENDING or waiting."""
+        return sorted(
+            start
+            for start, entry in self._entries.items()
+            if entry.state == _DeliveryState.PENDING and entry.waiter_count > 0
+        )
+
 
 _CONTENT_RANGE_PATTERN = re.compile(
     r"^(?P<unit>[a-zA-Z]+)\s+(?P<start>\d+)-(?P<end>\d+)/(?P<total>\d+|\*)$"
@@ -323,6 +489,11 @@ class MediaStream:
         )
         self.enable_tracing = settings_manager.settings.enable_stream_tracing
         self._hot_trace_counter = 0
+        # Transient delivery registry: provides in-memory chunk handoff when
+        # persistent cache admission is refused (REFUSED_PHYSICAL_PRESSURE).
+        # Ensures the one-provider-fetch invariant: bytes fetched by the producer
+        # are delivered directly to waiting readers without a second HTTP request.
+        self._delivery_registry = _DeliveryRegistry()
 
         # Store initial URL to avoid redundant unrestrict calls
         self.target_url: trio_util.AsyncValue[str] = trio_util.AsyncValue(initial_url)
@@ -870,6 +1041,33 @@ class MediaStream:
                                     await _process_chunks(seek_range.uncached_chunks)
                                     seek_range = None
 
+                                # Read.current_read is intentionally a latest-value
+                                # signal, not a queue. Drain every registered body
+                                # reservation first so a rapid subsequent read cannot
+                                # erase an earlier producer demand.
+                                for (
+                                    pending_start
+                                ) in self._delivery_registry.get_pending_starts():
+                                    pending_range = self.chunker.get_chunk_range(
+                                        position=pending_start, size=1
+                                    )
+                                    pending_chunks = pending_range.uncached_chunks
+                                    if not pending_chunks:
+                                        continue
+                                    first_pending = pending_chunks[0]
+                                    if (
+                                        connection.current_read_position
+                                        < first_pending.start
+                                    ):
+                                        connection.seek(chunk_range=pending_range)
+                                        break
+                                    if (
+                                        first_pending.start
+                                        < connection.current_read_position
+                                    ):
+                                        continue
+                                    await _process_chunks(OrderedSet([first_pending]))
+
                                 async for (
                                     read
                                 ) in self.recent_reads.current_read.eventual_values(
@@ -953,6 +1151,34 @@ class MediaStream:
                                             break
 
                                         await _process_chunks(uncached_chunks)
+
+                                    # Drain any other concurrently queued demands that arrived
+                                    # while processing this read before waiting for the next
+                                    # event, ensuring older or parallel demands are never starved.
+                                    for (
+                                        pending_start
+                                    ) in self._delivery_registry.get_pending_starts():
+                                        pending_range = self.chunker.get_chunk_range(
+                                            position=pending_start, size=1
+                                        )
+                                        pending_chunks = pending_range.uncached_chunks
+                                        if not pending_chunks:
+                                            continue
+                                        first_pending = pending_chunks[0]
+                                        if (
+                                            connection.current_read_position
+                                            < first_pending.start
+                                        ):
+                                            connection.seek(chunk_range=pending_range)
+                                            break
+                                        if (
+                                            first_pending.start
+                                            < connection.current_read_position
+                                        ):
+                                            continue
+                                        await _process_chunks(
+                                            OrderedSet([first_pending])
+                                        )
 
                                     # Sequential playhead prefetch: fill ahead without
                                     # blocking the current VFS read (already returned /
@@ -1237,6 +1463,10 @@ class MediaStream:
         # Always attempt to free the httpx pool slot even if kill timed out.
         await self._force_aclose_active_response()
 
+        # Retire all pending transient delivery entries so any blocked readers
+        # are unblocked and can fall through to the HTTP fallback path.
+        await self._delivery_registry.retire_all()
+
         # Free active playback lease reservations for this stream in the VFS cache
         try:
             from .cache import Cache
@@ -1332,6 +1562,7 @@ class MediaStream:
     ) -> AsyncGenerator[ReadType, None]:
         """Context manager for managing read lifecycle."""
 
+        reservations: list[_DeliveryEntry] = []
         try:
             read_type = await self._detect_read_type(
                 chunk_range=chunk_range,
@@ -1342,6 +1573,10 @@ class MediaStream:
             # or else the stream will not receive the value.
             start_pos: int | None = None
             if read_type == "body_read":
+                for chunk in chunk_range.chunks:
+                    reservations.append(
+                        await self._delivery_registry.register_pending(chunk.start)
+                    )
                 start_pos = chunk_range.position
             elif read_type == "cache_hit" and self._is_sequential_cache_playback(
                 chunk_range
@@ -1401,6 +1636,9 @@ class MediaStream:
 
             yield read_type
         finally:
+            with trio.CancelScope(shield=True):
+                for entry in reservations:
+                    await self._delivery_registry.release_reservation(entry)
             self.recent_reads.previous_read.value = self.recent_reads.current_read.value
 
     def _is_sequential_cache_playback(self, chunk_range: ChunkRange) -> bool:
@@ -1510,7 +1748,9 @@ class MediaStream:
                     case "body_read":
                         self.session_statistics.body_read_count += 1
                         self.session_statistics.last_body_read_timestamp = monotonic()
-                        data = await self.read_bytes(chunk_range=read_range)
+                        data = await self.read_bytes(
+                            chunk_range=read_range, delivery_reserved=True
+                        )
                         try:
                             from program.services.streaming.telemetry import (
                                 playback_telemetry_collector,
@@ -1531,29 +1771,89 @@ class MediaStream:
     async def read_bytes(
         self,
         chunk_range: ChunkRange,
+        *,
+        delivery_reserved: bool = False,
     ) -> bytes:
-        """Read a specific number of bytes from the stream."""
-
+        """Assemble exact per-chunk slices while retaining delivery reservations."""
         start, end = chunk_range.request_range
+        reservations: list[_DeliveryEntry] = []
+        try:
+            if not delivery_reserved:
+                for chunk in chunk_range.chunks:
+                    reservations.append(
+                        await self._delivery_registry.register_pending(chunk.start)
+                    )
+            await self._wait_until_chunks_ready(chunk_range=chunk_range)
+            parts: list[bytes] = []
+            for chunk in chunk_range.chunks:
+                slice_start = max(start, chunk.start)
+                slice_end = min(end, chunk.end)
+                if slice_start <= slice_end:
+                    parts.append(
+                        await self._read_cached_or_fallback(
+                            start=slice_start,
+                            end=slice_end,
+                            chunk_start=chunk.start,
+                        )
+                    )
+            return b"".join(parts)
+        finally:
+            with trio.CancelScope(shield=True):
+                for entry in reservations:
+                    await self._delivery_registry.release_reservation(entry)
 
-        await self._wait_until_chunks_ready(chunk_range=chunk_range)
-
-        return await self._read_cached_or_fallback(
-            start=start,
-            end=end,
-        )
-
-    async def _read_cached_or_fallback(self, *, start: int, end: int) -> bytes:
+    async def _read_cached_or_fallback(
+        self,
+        *,
+        start: int,
+        end: int,
+        chunk_start: int | None = None,
+    ) -> bytes:
         """Never expose a transient cache miss as a zero-byte VFS read."""
         cached_data = await self._read_cache(start=start, end=end)
 
-        if cached_data:
+        if len(cached_data) == end - start + 1:
             self._trace_stream(
                 f"Found data {start}-{end} ({len(cached_data)} bytes) from cache",
                 hot=True,
             )
 
             return cached_data
+
+        # Check transient delivery registry before issuing a second HTTP request.
+        # The producer may have published bytes here when persistent cache admission
+        # was refused (REFUSED_PHYSICAL_PRESSURE). This preserves the one-provider-fetch
+        # invariant: we never re-fetch bytes that were already downloaded.
+        lookup_start = chunk_start if chunk_start is not None else start
+        entry = self._delivery_registry.get_entry(lookup_start)
+        if entry is None and lookup_start != start:
+            entry = self._delivery_registry.get_entry(start)
+
+        if entry is not None:
+            if entry.state == _DeliveryState.PENDING:
+                # Wait for the producer to publish or retire
+                await entry.ready.wait()
+            lookup_key = entry.start
+            transient_payload = (
+                entry.payload if entry.state == _DeliveryState.READY_TRANSIENT else None
+            )
+            if (
+                transient_payload is not None
+                and start - lookup_key >= 0
+                and end - lookup_key < len(transient_payload)
+            ):
+                # Slice the exact requested byte range from the chunk payload.
+                # start is the requested start offset; lookup_key is the chunk start offset.
+                offset_in_payload = max(0, start - lookup_key)
+                needed_len = end - start + 1
+                result_bytes = transient_payload[
+                    offset_in_payload : offset_in_payload + needed_len
+                ]
+                self._trace_stream(
+                    f"Delivered {start}-{end} ({len(result_bytes)} bytes) from transient registry",
+                    hot=True,
+                )
+                return result_bytes
 
         # Fallback: if cache read returns empty (e.g. transient cache write delay or eviction),
         # fetch the requested range directly from the provider HTTP endpoint rather than failing the VFS read.
@@ -2036,16 +2336,31 @@ class MediaStream:
         *,
         chunk_range: ChunkRange,
     ) -> None:
-        """Wait until all the given chunks are cached."""
+        """Wait for persistent admission or a transient delivery notification."""
+
+        async def wait_one(chunk: Chunk) -> None:
+            entry = self._delivery_registry.get_entry(chunk.start)
+            if entry is None:
+                await chunk.is_cached.wait_value(True)
+                return
+            async with trio.open_nursery() as nursery:
+
+                async def wait_cache() -> None:
+                    await chunk.is_cached.wait_value(True)
+                    nursery.cancel_scope.cancel()
+
+                async def wait_delivery() -> None:
+                    await entry.ready.wait()
+                    nursery.cancel_scope.cancel()
+
+                nursery.start_soon(wait_cache)
+                nursery.start_soon(wait_delivery)
 
         try:
             with trio.fail_after(self.config.chunk_wait_timeout_seconds):
-                await trio_util.wait_all(
-                    *[
-                        (lambda chunk=chunk: chunk.is_cached.wait_value(True))
-                        for chunk in chunk_range.chunks
-                    ]
-                )
+                async with trio.open_nursery() as nursery:
+                    for chunk in chunk_range.chunks:
+                        nursery.start_soon(wait_one, chunk)
         except trio.TooSlowError:
             if len(chunk_range.uncached_chunks) > 0:
                 raise ChunksTooSlowException(
@@ -2086,17 +2401,33 @@ class MediaStream:
         *,
         start: int,
         data: bytes,
-    ) -> None:
-        """Cache the given chunk of data."""
+        admission: Literal["demand", "prefetch"] = "demand",
+    ) -> Any:
+        """Cache the given chunk of data. Returns a CachePutResult enum value."""
 
-        from .cache import Cache
+        from .cache import Cache, CachePutResult
 
-        await di[Cache].put(
+        result: CachePutResult = await di[Cache].put(
             cache_key=self.file_metadata.original_filename,
             start=start,
             data=data,
             stream_id=getattr(self, "stream_id", None),
+            admission=admission,
         )
+
+        if result == CachePutResult.REFUSED_PHYSICAL_PRESSURE:
+            # Persistent cache cannot admit this chunk. Publish bytes directly
+            # into the delivery registry so waiting readers get the data without
+            # issuing a second HTTP request (one-provider-fetch invariant).
+            await self._delivery_registry.publish(start=start, payload=data)
+            logger.debug(
+                self.build_log_message(
+                    f"Cache admission refused for start={start} ({len(data)} bytes); "
+                    "published to transient delivery registry"
+                )
+            )
+
+        return result
 
     async def _refresh_download_url(self, failed_url: str | None = None) -> bool:
         """

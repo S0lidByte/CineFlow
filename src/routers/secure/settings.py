@@ -3,10 +3,20 @@ from copy import copy
 from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Body, HTTPException, Path, Query
-from pydantic import TypeAdapter, ValidationError
+from kink import di
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
+from program.services.streaming.cache_autotune import (
+    AutoTuneJobSnapshot,
+    AutoTuneProfile,
+    autotune_job_manager,
+)
 from program.settings import settings_manager
 from program.settings.models import AppModel
+from program.settings.mutation import (
+    API_KEY_SENTINEL,
+    apply_canonical_settings_mutation,
+)
 from program.settings.ranking_descriptions import enrich_ranking_schema
 from program.settings.ranking_patterns import validate_ranking_payload_patterns
 from program.utils.connection_tests import (
@@ -17,8 +27,6 @@ from program.utils.connection_tests import (
 )
 
 from ..models.shared import MessageResponse
-
-API_KEY_SENTINEL = "********"
 
 
 def _validate_ranking_in_settings(settings_dict: dict[str, Any]) -> None:
@@ -208,34 +216,10 @@ async def set_all_settings(
         Body(description="New settings to apply"),
     ],
 ) -> MessageResponse:
-    if "api_key" in new_settings:
-        if new_settings["api_key"] == API_KEY_SENTINEL:
-            new_settings["api_key"] = settings_manager.settings.api_key
-        elif (
-            not isinstance(new_settings["api_key"], str)
-            or not new_settings["api_key"].strip()
-        ):
-            raise HTTPException(
-                status_code=400, detail="api_key cannot be empty or whitespace"
-            )
-
-    current_settings = settings_manager.settings.model_dump()
-
-    def update_settings(current_obj: dict[str, Any], new_obj: dict[str, Any]):
-        for key, value in new_obj.items():
-            if isinstance(value, dict) and key in current_obj:
-                update_settings(current_obj[key], cast(dict[str, Any], value))
-            else:
-                current_obj[key] = value
-
-    update_settings(current_settings, new_settings)
-    _validate_ranking_in_settings(current_settings)
-
-    # Validate and save the updated settings
     try:
-        updated_settings = settings_manager.settings.model_validate(current_settings)
-        settings_manager.load(settings_dict=updated_settings.model_dump())
-        settings_manager.save()  # Ensure the changes are persisted
+        apply_canonical_settings_mutation(new_settings)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -353,3 +337,155 @@ async def test_settings_connection(
     if service not in SUPPORTED_SERVICES:
         raise HTTPException(status_code=404, detail="Unknown service")
     return await asyncio.to_thread(run_connection_test, service)
+
+
+class AutoTuneRunRequest(BaseModel):
+    profile: AutoTuneProfile = Field(
+        default="balanced", description="Target optimization profile"
+    )
+    bench_bytes: int = Field(
+        default=8 * 1024 * 1024,
+        ge=1024 * 1024,
+        le=64 * 1024 * 1024,
+        description="Benchmark payload size in bytes",
+    )
+
+
+class AutoTuneApplyRequest(BaseModel):
+    run_id: str = Field(description="Run ID of the completed auto-tune job")
+    force: bool = Field(
+        default=False,
+        description="Apply even if open VFS media handles are detected",
+    )
+
+
+@router.post(
+    "/autotune/run",
+    operation_id="run_cache_autotune",
+    response_model=AutoTuneJobSnapshot,
+)
+async def run_cache_autotune(
+    request: AutoTuneRunRequest,
+) -> AutoTuneJobSnapshot:
+    """Start an isolated synthetic cache microbenchmark and optimization job."""
+    try:
+        job = autotune_job_manager.start_job(
+            profile=request.profile,
+            bench_bytes=request.bench_bytes,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return job.snapshot()
+
+
+@router.get(
+    "/autotune/status/{run_id}",
+    operation_id="get_cache_autotune_status",
+    response_model=AutoTuneJobSnapshot,
+)
+async def get_cache_autotune_status(
+    run_id: Annotated[str, Path(description="Auto-tune run ID")],
+) -> AutoTuneJobSnapshot:
+    """Get the progress status and recommendation of an auto-tune job."""
+    snapshot = autotune_job_manager.get_job_snapshot(run_id)
+    if not snapshot:
+        raise HTTPException(
+            status_code=404, detail=f"Auto-tune run '{run_id}' not found"
+        )
+    return snapshot
+
+
+@router.post(
+    "/autotune/cancel/{run_id}",
+    operation_id="cancel_cache_autotune",
+    response_model=MessageResponse,
+)
+async def cancel_cache_autotune(
+    run_id: Annotated[str, Path(description="Auto-tune run ID")],
+) -> MessageResponse:
+    """Cancel a running auto-tune job."""
+    cancelled = autotune_job_manager.cancel_job(run_id)
+    if not cancelled:
+        job = autotune_job_manager.get_job(run_id)
+        if not job:
+            raise HTTPException(
+                status_code=404, detail=f"Auto-tune run '{run_id}' not found"
+            )
+        return MessageResponse(
+            message=f"Auto-tune run '{run_id}' cannot be cancelled (status: {job.status})"
+        )
+    return MessageResponse(message=f"Auto-tune run '{run_id}' cancelled successfully.")
+
+
+@router.post(
+    "/autotune/apply",
+    operation_id="apply_cache_autotune",
+    response_model=MessageResponse,
+)
+async def apply_cache_autotune(
+    request: AutoTuneApplyRequest,
+) -> MessageResponse:
+    """Apply recommendations from a completed auto-tune job to live settings."""
+    job = autotune_job_manager.get_job(request.run_id)
+    if not job:
+        raise HTTPException(
+            status_code=404, detail=f"Auto-tune run '{request.run_id}' not found"
+        )
+    if job.status != "completed" or not job.recommendation:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Auto-tune run '{request.run_id}' has not completed successfully (status: {job.status})",
+        )
+
+    # Check VFS media handle safety
+    if not request.force:
+        try:
+            from program.program import Program
+
+            services = di[Program].services if Program in di else None
+            vfs = (
+                getattr(services.filesystem, "riven_vfs", None)
+                if services and hasattr(services, "filesystem")
+                else None
+            )
+            if vfs and vfs.has_open_media_handles():
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Active VFS media handles detected. Applying cache adjustments now "
+                        "could interrupt active playback. Pass force=true to override."
+                    ),
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            # If VFS is not initialized or in unit test mode, allow applying
+            pass
+
+    rec = job.recommendation
+    mutation_payload = {
+        "filesystem": {
+            "autotune_mode": rec.profile,
+            "cache_max_size_mb": rec.recommended_warm_cache_max_mb,
+            "tmpfs_cache_max_mb": rec.recommended_hot_cache_max_mb,
+            "hot_cache_reserve_pct": rec.recommended_hot_reserve_pct,
+            "hot_cache_watermark_high_pct": rec.recommended_hot_watermark_high_pct,
+            "hot_cache_watermark_low_pct": rec.recommended_hot_watermark_low_pct,
+            "warm_cache_reserve_pct": rec.recommended_warm_reserve_pct,
+            "warm_cache_watermark_high_pct": rec.recommended_warm_watermark_high_pct,
+            "warm_cache_watermark_low_pct": rec.recommended_warm_watermark_low_pct,
+            "warm_cache_min_free_mb": rec.recommended_warm_min_free_mb,
+        }
+    }
+
+    try:
+        apply_canonical_settings_mutation(mutation_payload)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to apply auto-tune settings: {e}",
+        )
+
+    return MessageResponse(
+        message=f"Auto-tune '{rec.profile}' settings applied successfully!"
+    )

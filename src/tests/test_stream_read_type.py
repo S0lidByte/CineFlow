@@ -40,6 +40,9 @@ def _make_stream(
     cache_hit: bool = False,
 ) -> MediaStream:
     stream = MediaStream.__new__(MediaStream)
+    from program.services.streaming.media_stream import _DeliveryRegistry
+
+    stream._delivery_registry = _DeliveryRegistry()
     stream.config = Config(
         chunk_size=1024 * 1024,
         activity_timeout_seconds=60,

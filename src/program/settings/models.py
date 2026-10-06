@@ -387,6 +387,50 @@ class FilesystemModel(Observable):
             "(GET /api/v1/metrics when authenticated)"
         ),
     )
+    autotune_mode: Literal["disabled", "conservative", "balanced", "aggressive"] = (
+        Field(default="disabled", description="Cache auto-tune operational mode")
+    )
+    hot_cache_reserve_pct: float = Field(
+        default=10.0,
+        ge=0.0,
+        le=50.0,
+        description="Hot cache headroom reserve percentage",
+    )
+    hot_cache_watermark_high_pct: float = Field(
+        default=85.0,
+        ge=10.0,
+        le=95.0,
+        description="Hot cache high watermark trigger percentage",
+    )
+    hot_cache_watermark_low_pct: float = Field(
+        default=70.0,
+        ge=5.0,
+        le=90.0,
+        description="Hot cache low watermark target percentage",
+    )
+    warm_cache_reserve_pct: float = Field(
+        default=10.0,
+        ge=0.0,
+        le=50.0,
+        description="Warm cache headroom reserve percentage",
+    )
+    warm_cache_watermark_high_pct: float = Field(
+        default=85.0,
+        ge=10.0,
+        le=95.0,
+        description="Warm cache high watermark trigger percentage",
+    )
+    warm_cache_watermark_low_pct: float = Field(
+        default=70.0,
+        ge=5.0,
+        le=90.0,
+        description="Warm cache low watermark target percentage",
+    )
+    warm_cache_min_free_mb: int = Field(
+        default=1024,
+        ge=0,
+        description="Minimum free space in MB to maintain on the warm cache disk volume",
+    )
 
     # VFS Naming Templates
     movie_dir_template: str = Field(
@@ -546,6 +590,45 @@ class FilesystemModel(Observable):
             return v
         except Exception as e:
             raise ValueError(f"Invalid naming template syntax: {e}")
+
+    @model_validator(mode="after")
+    def validate_watermark_invariants(self) -> "FilesystemModel":
+        if self.hot_cache_watermark_low_pct >= self.hot_cache_watermark_high_pct:
+            raise ValueError(
+                f"hot_cache_watermark_low_pct ({self.hot_cache_watermark_low_pct}) must be less than "
+                f"hot_cache_watermark_high_pct ({self.hot_cache_watermark_high_pct})"
+            )
+        if (self.hot_cache_watermark_high_pct - self.hot_cache_watermark_low_pct) < 5.0:
+            raise ValueError(
+                f"Hot cache watermark gap must be at least 5% (high: {self.hot_cache_watermark_high_pct}, "
+                f"low: {self.hot_cache_watermark_low_pct})"
+            )
+        max_allowed_hot_high = 100.0 - self.hot_cache_reserve_pct
+        if self.hot_cache_watermark_high_pct > max_allowed_hot_high:
+            raise ValueError(
+                f"hot_cache_watermark_high_pct ({self.hot_cache_watermark_high_pct}) exceeds maximum allowed "
+                f"threshold with reserve ({max_allowed_hot_high}%)"
+            )
+
+        if self.warm_cache_watermark_low_pct >= self.warm_cache_watermark_high_pct:
+            raise ValueError(
+                f"warm_cache_watermark_low_pct ({self.warm_cache_watermark_low_pct}) must be less than "
+                f"warm_cache_watermark_high_pct ({self.warm_cache_watermark_high_pct})"
+            )
+        if (
+            self.warm_cache_watermark_high_pct - self.warm_cache_watermark_low_pct
+        ) < 5.0:
+            raise ValueError(
+                f"Warm cache watermark gap must be at least 5% (high: {self.warm_cache_watermark_high_pct}, "
+                f"low: {self.warm_cache_watermark_low_pct})"
+            )
+        max_allowed_warm_high = 100.0 - self.warm_cache_reserve_pct
+        if self.warm_cache_watermark_high_pct > max_allowed_warm_high:
+            raise ValueError(
+                f"warm_cache_watermark_high_pct ({self.warm_cache_watermark_high_pct}) exceeds maximum allowed "
+                f"threshold with reserve ({max_allowed_warm_high}%)"
+            )
+        return self
 
 
 # Content Services

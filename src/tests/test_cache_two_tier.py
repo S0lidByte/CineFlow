@@ -79,13 +79,14 @@ def test_demotion_publishes_warm_tier_after_payload_move(tmp_path: Path) -> None
         )
     )
     observed_moves: list[tuple[str, bool, bool, bool, bool]] = []
-    real_demote = cache._demote_files_to_warm
+    real_demote = cache._place_staged_demotion
 
-    def observe_demotion(key: str) -> None:
+    def observe_demotion(key: str, payload: Path, meta: Path) -> bool:
         before_hot = cache._file_for(key, tier="hot").exists()
         before_warm = cache._file_for(key, tier="warm").exists()
         observed_tier = cache._index[key].tier
-        real_demote(key)
+        result = real_demote(key, payload, meta)
+        assert cache._index[key].tier == "hot"
         observed_moves.append(
             (
                 observed_tier,
@@ -96,7 +97,9 @@ def test_demotion_publishes_warm_tier_after_payload_move(tmp_path: Path) -> None
             )
         )
 
-    cache._demote_files_to_warm = observe_demotion  # type: ignore[method-assign]
+        return result
+
+    cache._place_staged_demotion = observe_demotion  # type: ignore[method-assign]
 
     async def _run() -> None:
         await cache.put("movie.mkv", 0, b"a" * 100)
@@ -104,7 +107,11 @@ def test_demotion_publishes_warm_tier_after_payload_move(tmp_path: Path) -> None
 
     trio.run(_run)
 
-    assert observed_moves == [("hot", True, False, False, True)]
+    assert observed_moves == [("hot", True, False, True, True)]
+    key = cache._key("movie.mkv", 0)
+    assert cache._index[key].tier == "warm"
+    assert not cache._file_for(key, tier="hot").exists()
+    assert cache._file_for(key, tier="warm").read_bytes() == b"a" * 100
 
 
 def test_partial_read_survives_hot_to_warm_index_handoff(tmp_path: Path) -> None:
@@ -189,10 +196,10 @@ def test_failed_hot_demotion_falls_back_to_warm(tmp_path: Path) -> None:
     async def _run() -> None:
         await cache.put("movie.mkv", 0, b"a" * 100)
 
-        def fail_demotion(key: str) -> None:
-            raise OSError(f"cannot demote {key}")
+        def fail_demotion(key: str, payload: Path, meta: Path) -> bool:
+            return False
 
-        cache._demote_files_to_warm = fail_demotion  # type: ignore[method-assign]
+        cache._place_staged_demotion = fail_demotion  # type: ignore[method-assign]
         await cache.put("movie.mkv", 1000, b"b" * 100)
 
         second_key = cache._key("movie.mkv", 1000)
