@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.43.0](https://github.com/S0lidByte/CineFlow/compare/v1.42.5...v1.43.0) (2026-10-06)
+
+
+### Features
+
+* **streaming:** implement D80 runtime profile, cache autotune, and delivery pipeline ([01da91e](https://github.com/S0lidByte/CineFlow/commit/01da91ec7fd65e45fc884f2cf91a060a3ec7ffb1))
+
+
+### Bug Fixes
+
+* **vfs:** isolate read concurrency and prevent updater runaway loop (D79) ([810162a](https://github.com/S0lidByte/CineFlow/commit/810162ad9f1e7cac52ff5280678f89fc3d7f1fc0))
+
 ## [1.42.5](https://github.com/S0lidByte/CineFlow/compare/v1.42.4...v1.42.5) (2026-10-02)
 
 
