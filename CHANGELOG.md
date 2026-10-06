@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.2](https://github.com/S0lidByte/CineFlow/compare/v1.43.1...v1.43.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **streaming:** preserve playback priority under Plex analysis ([97ce47d](https://github.com/S0lidByte/CineFlow/commit/97ce47d06f00a717fd39f54c5b8e6028e24436e2))
+
 ## [1.43.1](https://github.com/S0lidByte/CineFlow/compare/v1.43.0...v1.43.1) (2026-10-06)
 
 
