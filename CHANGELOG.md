@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.1](https://github.com/S0lidByte/CineFlow/compare/v1.43.0...v1.43.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **streaming:** protect foreground playback runway against background admission contention ([f072e40](https://github.com/S0lidByte/CineFlow/commit/f072e405cf4006449c05e588faa14bc13681c3cc))
+
 ## [1.43.0](https://github.com/S0lidByte/CineFlow/compare/v1.42.5...v1.43.0) (2026-10-06)
 
 
