@@ -104,94 +104,118 @@ def test_correlate_plex_session_matching_file_and_ip():
     )
 
 
-@pytest.mark.asyncio
-async def test_plex_webhook_endpoint_session_attribution():
-    # Start an active stream to be correlated
-    playback_telemetry_collector.register_stream_start(
-        stream_id="stream-endpoint-1",
-        media_item_id=303,
-        title="Severance.S01E01.1080p.mkv",
-        provider="realdebrid",
-        client_ip="192.168.1.120",
-    )
+def test_plex_webhook_endpoint_session_attribution():
+    import asyncio
+    from pathlib import Path
 
-    plex_payload = {
-        "event": "media.play",
-        "user": True,
-        "owner": True,
-        "Account": {"id": 1, "title": "Carol"},
-        "Player": {
-            "title": "Safari Web",
-            "publicAddress": "192.168.1.120",
-        },
-        "Metadata": {
-            "title": "Good News About Hell",
-            "grandparentTitle": "Severance",
-            "type": "episode",
-            "Media": [
-                {
-                    "videoResolution": "1080",
-                    "bitrate": 8000,
-                    "Part": [
-                        {
-                            "file": "/riven/vfs/tv/Severance/Severance.S01E01.1080p.mkv",
-                            "decision": "directplay",
-                        }
-                    ],
-                }
+    from program.settings import settings_manager
+
+    async def _test() -> None:
+        # Start an active stream to be correlated
+        playback_telemetry_collector.register_stream_start(
+            stream_id="stream-endpoint-1",
+            media_item_id=303,
+            title="Supergirl.mkv",
+            provider="realdebrid",
+            client_ip="192.168.1.120",
+        )
+
+        orig_mount = settings_manager.settings.filesystem.mount_path
+        settings_manager.settings.filesystem.mount_path = Path("/mnt/rivenfs")
+
+        plex_payload = {
+            "event": "media.play",
+            "user": True,
+            "owner": True,
+            "Server": {"uuid": "srv-endpoint-test"},
+            "Player": {
+                "uuid": "player-endpoint-test",
+                "title": "Safari Web",
+                "publicAddress": "192.168.1.120",
+            },
+            "Account": {"id": 1, "title": "Carol"},
+            "Metadata": {
+                "ratingKey": "999",
+                "title": "Supergirl",
+                "type": "movie",
+                "Media": [
+                    {
+                        "videoResolution": "1080",
+                        "bitrate": 8000,
+                        "Part": [
+                            {
+                                "file": "/mnt/rivenfs/movies/Supergirl.mkv",
+                                "decision": "directplay",
+                            }
+                        ],
+                    }
+                ],
+            },
+        }
+
+        body = json.dumps(plex_payload).encode("utf-8")
+        boundary = "----WebKitFormBoundaryTest123"
+        form_body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="payload"\r\n\r\n'
+            f"{json.dumps(plex_payload)}\r\n"
+            f"--{boundary}--\r\n"
+        ).encode()
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/api/v1/webhooks/plex",
+            "raw_path": b"/api/v1/webhooks/plex",
+            "query_string": b"",
+            "headers": [
+                (
+                    b"content-type",
+                    f"multipart/form-data; boundary={boundary}".encode("latin-1"),
+                ),
+                (b"content-length", str(len(form_body)).encode("latin-1")),
             ],
-        },
-    }
+            "client": ("127.0.0.1", 12345),
+        }
 
-    body = json.dumps(plex_payload).encode("utf-8")
-    boundary = "----WebKitFormBoundaryTest123"
-    form_body = (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="payload"\r\n\r\n'
-        f"{json.dumps(plex_payload)}\r\n"
-        f"--{boundary}--\r\n"
-    ).encode()
+        async def receive():
+            return {"type": "http.request", "body": form_body, "more_body": False}
 
-    scope = {
-        "type": "http",
-        "asgi": {"version": "3.0"},
-        "http_version": "1.1",
-        "method": "POST",
-        "scheme": "http",
-        "path": "/api/v1/webhooks/plex",
-        "raw_path": b"/api/v1/webhooks/plex",
-        "query_string": b"",
-        "headers": [
-            (
-                b"content-type",
-                f"multipart/form-data; boundary={boundary}".encode("latin-1"),
-            ),
-            (b"content-length", str(len(form_body)).encode("latin-1")),
-        ],
-        "client": ("127.0.0.1", 12345),
-    }
+        try:
+            req = Request(scope, receive)
+            res = await plex_webhook(req)
+            assert res.success is True
+            assert res.event == "media.play"
+            assert "session attributed" in res.message
 
-    async def receive():
-        return {"type": "http.request", "body": form_body, "more_body": False}
+            snapshot = playback_telemetry_collector.get_snapshot()
+            stream_m = next(
+                (
+                    s
+                    for s in snapshot.active_streams
+                    if s.stream_id == "stream-endpoint-1"
+                ),
+                None,
+            )
+            assert stream_m is not None
+            assert stream_m.user_name == "Carol"
+            assert stream_m.player_device == "Safari Web"
+            assert stream_m.playback_state == "playing"
 
-    req = Request(scope, receive)
-    res = await plex_webhook(req)
-    assert res.success is True
-    assert res.event == "media.play"
-    assert "session attributed" in res.message
+            # Verify that stripped VFS path is now foreground
+            assert playback_telemetry_collector.is_media_foreground(
+                "/movies/Supergirl.mkv"
+            )
+        finally:
+            settings_manager.settings.filesystem.mount_path = orig_mount
+            playback_telemetry_collector.register_stream_complete(
+                "stream-endpoint-1", title="Supergirl.mkv"
+            )
 
-    snapshot = playback_telemetry_collector.get_snapshot()
-    stream_m = next(
-        (s for s in snapshot.active_streams if s.stream_id == "stream-endpoint-1"), None
-    )
-    assert stream_m is not None
-    assert stream_m.user_name == "Carol"
-    assert stream_m.player_device == "Safari Web"
-    assert stream_m.playback_state == "playing"
-
-    playback_telemetry_collector.register_stream_complete(
-        "stream-endpoint-1", title="Severance.S01E01.1080p.mkv"
-    )
+    asyncio.run(_test())
 
 
 def test_multi_session_isolated_attribution_alice_and_bob():
@@ -393,3 +417,55 @@ def test_plex_playback_intent_registry_and_media_foreground_isolation():
     assert not playback_telemetry_collector.is_media_foreground(
         "/movies/Supergirl.2024.mkv"
     )
+
+
+def test_plex_vfs_path_contract_and_posix_case_sensitivity():
+    """Plex mount prefix stripping, case sensitivity, and distinct subdirectory isolation."""
+    from pathlib import Path
+
+    from program.settings import settings_manager
+
+    with playback_telemetry_collector._lock:
+        playback_telemetry_collector._plex_playbacks.clear()
+
+    # Configure mount path to /mnt/rivenfs
+    orig_mount = settings_manager.settings.filesystem.mount_path
+    settings_manager.settings.filesystem.mount_path = Path("/mnt/rivenfs")
+    try:
+        playback_telemetry_collector.update_plex_playback(
+            event="media.play",
+            server_uuid="srv-1",
+            player_uuid="player-1",
+            rating_key="201",
+            media_path="/mnt/rivenfs/movies/Supergirl.mkv",
+        )
+
+        # 1. Mount prefix stripped matches VFS internal path
+        assert playback_telemetry_collector.is_media_foreground("/movies/Supergirl.mkv")
+
+        # 2. Distinct subdirectory must NOT match
+        assert not playback_telemetry_collector.is_media_foreground(
+            "/movies/B/Supergirl.mkv"
+        )
+
+        # 3. Two different files with same basename
+        playback_telemetry_collector.update_plex_playback(
+            event="media.play",
+            server_uuid="srv-1",
+            player_uuid="player-1",
+            rating_key="202",
+            media_path="/mnt/rivenfs/movies/libraryA/Movie.mkv",
+        )
+        assert playback_telemetry_collector.is_media_foreground(
+            "/movies/libraryA/Movie.mkv"
+        )
+        assert not playback_telemetry_collector.is_media_foreground(
+            "/movies/libraryB/Movie.mkv"
+        )
+
+        # 4. Linux/POSIX case sensitivity: Movie.mkv != movie.mkv
+        assert not playback_telemetry_collector.is_media_foreground(
+            "/movies/libraryA/movie.mkv"
+        )
+    finally:
+        settings_manager.settings.filesystem.mount_path = orig_mount

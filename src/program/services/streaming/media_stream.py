@@ -45,6 +45,7 @@ from .file_metadata import FileMetadata
 from .http_pool import (
     GenerationLease,
     TrioStreamingHttpPool,
+    Workload,
     admit_stream_request,
     heal_on_pool_timeout,
 )
@@ -1955,18 +1956,19 @@ class MediaStream:
         backoffs = [0.2, 0.5, 1.0]
         request_kind = "scan" if end is not None else "body"
 
-        workload = "neutral"
-        try:
-            from program.services.streaming.telemetry import (
-                playback_telemetry_collector,
-            )
+        def _resolve_stream_workload() -> Workload:
+            try:
+                from program.services.streaming.telemetry import (
+                    playback_telemetry_collector,
+                )
 
-            if playback_telemetry_collector.is_media_foreground(
-                self.file_metadata.path
-            ):
-                workload = "foreground"
-        except Exception:
-            workload = "neutral"
+                if playback_telemetry_collector.is_media_foreground(
+                    self.file_metadata.path
+                ):
+                    return "foreground"
+            except Exception:
+                pass
+            return "neutral"
 
         while transport_attempt < max_transport_attempts:
             lease: GenerationLease | None = None
@@ -1976,7 +1978,7 @@ class MediaStream:
                     failed_generation = self._http_pool.generation
                     try:
                         admit_ctx = self._http_pool.admit(
-                            request_kind, workload=workload
+                            request_kind, workload=_resolve_stream_workload
                         )
                     except TypeError as exc:
                         # Preserve compatibility with test doubles and older injected

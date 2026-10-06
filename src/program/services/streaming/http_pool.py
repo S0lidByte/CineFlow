@@ -31,6 +31,7 @@ from program.utils.stream_http import (
 
 RequestKind = Literal["body", "scan"]
 Workload = Literal["foreground", "background", "neutral"]
+WorkloadResolver = Workload | Callable[[], Workload]
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,9 +109,30 @@ class TrioStreamingHttpPool:
     ) -> None:
         self._foreground_pressure = callback
 
-    async def _wait_for_background_pressure(self) -> None:
-        """Wait cooperatively with cancellation and a bounded pressure poll interval."""
+    @staticmethod
+    def _resolve_workload(workload: WorkloadResolver) -> Workload:
+        if callable(workload):
+            try:
+                return workload()
+            except Exception:
+                return "neutral"
+        return workload
+
+    async def _wait_for_background_pressure(
+        self, kind: RequestKind, workload: WorkloadResolver
+    ) -> None:
+        """Wait cooperatively with cancellation and a bounded pressure poll interval.
+
+        If a waiting neutral request promotes to foreground while waiting, break the wait
+        immediately so legitimate new playbacks are never serialized behind older runway pressure.
+        """
         while self._foreground_pressure is not None and self._foreground_pressure():
+            current_workload = self._resolve_workload(workload)
+            if not (
+                current_workload == "background"
+                or (kind == "body" and current_workload != "foreground")
+            ):
+                break
             # Polling avoids a shared event reset race between multiple waiters. The
             # short interval bounds recovery latency while Trio cancellation remains
             # effective at the sleep checkpoint.
@@ -170,11 +192,14 @@ class TrioStreamingHttpPool:
 
     @asynccontextmanager
     async def admit(
-        self, kind: RequestKind, *, workload: Workload = "neutral"
+        self, kind: RequestKind, *, workload: WorkloadResolver = "neutral"
     ) -> AsyncGenerator[None]:
         """Bound remote acquisition and cooperatively yield background requests."""
-        if workload == "background":
-            await self._wait_for_background_pressure()
+        current_workload = self._resolve_workload(workload)
+        if current_workload == "background" or (
+            kind == "body" and current_workload != "foreground"
+        ):
+            await self._wait_for_background_pressure(kind, workload)
         total = self._total_limiter
         body = self._body_limiter
 
