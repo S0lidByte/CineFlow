@@ -596,6 +596,43 @@ class MediaStream:
 
         return di[AsyncClient]
 
+    def _update_runway_observation(self, position: int) -> None:
+        """Publish contiguous cached runway for the generic mount pressure signal."""
+        manager = getattr(self, "adaptive_prefetch", None)
+        if manager is None:
+            return
+        try:
+            window = self.chunker.get_chunk_range(
+                position=position,
+                size=self.config.chunk_size * manager.config.max_window_chunks,
+            )
+            cached_bytes = 0
+            for chunk in window.chunks:
+                if not chunk.is_cached.value:
+                    break
+                cached_bytes += chunk.size
+
+            in_flight_bytes = 0
+            expected_start = position
+            for pending_start in self._delivery_registry.get_pending_starts():
+                if pending_start != expected_start:
+                    continue
+                pending_range = self.chunker.get_chunk_range(
+                    position=pending_start, size=self.config.chunk_size
+                )
+                if not pending_range.chunks:
+                    break
+                pending_chunk = pending_range.chunks[0]
+                in_flight_bytes += pending_chunk.size
+                expected_start = pending_chunk.end + 1
+            manager.record_runway(
+                cached_bytes=cached_bytes,
+                in_flight_bytes=in_flight_bytes,
+            )
+        except Exception:
+            # Runway telemetry must never affect delivery correctness.
+            return
+
     async def _force_aclose_active_response(self) -> None:
         """Best-effort close of an in-flight httpx response to free pool slots."""
 
@@ -936,6 +973,7 @@ class MediaStream:
                                                     else None
                                                 )
                                             ):
+                                                fetch_started = monotonic()
                                                 chunk_buffer = bytearray()
                                                 while len(chunk_buffer) < chunk.size:
                                                     if (
@@ -970,6 +1008,10 @@ class MediaStream:
                                                         break
                                                     chunk_buffer.extend(raw_part)
                                                 data = bytes(chunk_buffer)
+                                                if hasattr(self, "adaptive_prefetch"):
+                                                    self.adaptive_prefetch.record_provider_fetch(
+                                                        monotonic() - fetch_started
+                                                    )
 
                                             if not data:
                                                 # Signal the outer loop to refresh the URL
@@ -1031,6 +1073,9 @@ class MediaStream:
 
                                                 position = (
                                                     connection.current_read_position
+                                                )
+                                                self._update_runway_observation(
+                                                    position
                                                 )
 
                                                 self.session_statistics.bytes_transferred += len(
@@ -1573,6 +1618,8 @@ class MediaStream:
             # or else the stream will not receive the value.
             start_pos: int | None = None
             if read_type == "body_read":
+                if hasattr(self, "adaptive_prefetch"):
+                    self.adaptive_prefetch.record_starvation()
                 for chunk in chunk_range.chunks:
                     reservations.append(
                         await self._delivery_registry.register_pending(chunk.start)
@@ -1908,13 +1955,35 @@ class MediaStream:
         backoffs = [0.2, 0.5, 1.0]
         request_kind = "scan" if end is not None else "body"
 
+        workload = "neutral"
+        try:
+            from program.services.streaming.telemetry import (
+                playback_telemetry_collector,
+            )
+
+            if playback_telemetry_collector.is_media_foreground(
+                self.file_metadata.path
+            ):
+                workload = "foreground"
+        except Exception:
+            workload = "neutral"
+
         while transport_attempt < max_transport_attempts:
             lease: GenerationLease | None = None
             failed_generation: int | None = None
             try:
                 if self._http_pool is not None:
                     failed_generation = self._http_pool.generation
-                    admit_ctx = self._http_pool.admit(request_kind)
+                    try:
+                        admit_ctx = self._http_pool.admit(
+                            request_kind, workload=workload
+                        )
+                    except TypeError as exc:
+                        # Preserve compatibility with test doubles and older injected
+                        # pool implementations that predate workload-aware admission.
+                        if "workload" not in str(exc):
+                            raise
+                        admit_ctx = self._http_pool.admit(request_kind)
                 else:
                     admit_ctx = admit_stream_request(request_kind)
 

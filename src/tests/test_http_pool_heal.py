@@ -174,6 +174,34 @@ def test_trio_streaming_http_pool_initialization_and_di_isolation():
     trio.run(_run)
 
 
+def test_trio_streaming_http_pool_foreground_bypasses_pressure_and_background_waits():
+    async def _run() -> None:
+        pool = http_pool.TrioStreamingHttpPool()
+        pressure = {"active": True}
+        pool.register_foreground_pressure_callback(lambda: pressure["active"])
+        try:
+            async with pool.admit("scan", workload="foreground"):
+                pass
+
+            completed = {"value": False}
+
+            async def _background() -> None:
+                async with pool.admit("scan", workload="background"):
+                    completed["value"] = True
+
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(_background)
+                await trio.sleep(0.3)
+                assert not completed["value"]
+                pressure["active"] = False
+
+            assert completed["value"]
+        finally:
+            await pool.teardown()
+
+    trio.run(_run)
+
+
 def test_trio_streaming_http_pool_admission_limits():
     """TrioStreamingHttpPool enforces total and body capacity limiters."""
 

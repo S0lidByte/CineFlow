@@ -463,6 +463,9 @@ class RivenVFS(pyfuse3.Operations):
                         proxy_url = settings_manager.settings.downloaders.proxy_url
                         pool = TrioStreamingHttpPool(proxy_url=proxy_url)
                         pool.register_stream_shed_callback(self._shed_stalled_streams)
+                        pool.register_foreground_pressure_callback(
+                            self._foreground_pressure_active
+                        )
                         self.http_pool = pool
 
                         register_stream_shed_callback(self._shed_stalled_streams)
@@ -544,6 +547,25 @@ class RivenVFS(pyfuse3.Operations):
                         self._active_stream_count = len(self._active_streams)
             except Exception:
                 logger.exception(f"Error shedding stalled stream {stream_key}")
+
+    def _foreground_pressure_active(self) -> bool:
+        """Return true only when a confirmed foreground stream lacks runway."""
+        for stream in tuple(self._active_streams.values()):
+            try:
+                from program.services.streaming.telemetry import (
+                    playback_telemetry_collector,
+                )
+
+                if (
+                    playback_telemetry_collector.is_media_foreground(
+                        stream.file_metadata.path
+                    )
+                    and stream.adaptive_prefetch.should_prefetch_now()
+                ):
+                    return True
+            except Exception:
+                continue
+        return False
 
     async def _monitor_stream_timeouts(self) -> None:
         """Background task to monitor and close timed-out streams to clean up resources."""

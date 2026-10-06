@@ -248,8 +248,14 @@ def test_multi_session_isolated_attribution_alice_and_bob():
     snapshot = playback_telemetry_collector.get_snapshot()
     assert len(snapshot.active_streams) == 2
 
-    alice_m = next((s for s in snapshot.active_streams if s.stream_id == "stream-alice-session"), None)
-    bob_m = next((s for s in snapshot.active_streams if s.stream_id == "stream-bob-session"), None)
+    alice_m = next(
+        (s for s in snapshot.active_streams if s.stream_id == "stream-alice-session"),
+        None,
+    )
+    bob_m = next(
+        (s for s in snapshot.active_streams if s.stream_id == "stream-bob-session"),
+        None,
+    )
 
     assert alice_m is not None
     assert bob_m is not None
@@ -276,8 +282,22 @@ def test_multi_session_isolated_attribution_alice_and_bob():
     )
 
     snapshot_after_pause = playback_telemetry_collector.get_snapshot()
-    alice_paused = next((s for s in snapshot_after_pause.active_streams if s.stream_id == "stream-alice-session"), None)
-    bob_unmutated = next((s for s in snapshot_after_pause.active_streams if s.stream_id == "stream-bob-session"), None)
+    alice_paused = next(
+        (
+            s
+            for s in snapshot_after_pause.active_streams
+            if s.stream_id == "stream-alice-session"
+        ),
+        None,
+    )
+    bob_unmutated = next(
+        (
+            s
+            for s in snapshot_after_pause.active_streams
+            if s.stream_id == "stream-bob-session"
+        ),
+        None,
+    )
 
     assert alice_paused is not None and alice_paused.playback_state == "paused"
     assert bob_unmutated is not None and bob_unmutated.playback_state == "playing"
@@ -299,4 +319,77 @@ def test_multi_session_isolated_attribution_alice_and_bob():
 
     playback_telemetry_collector.register_stream_complete(
         "stream-endpoint-1", title="Severance.S01E01.1080p.mkv"
+    )
+
+
+def test_plex_playback_intent_registry_and_media_foreground_isolation():
+    """Verify strong Plex playback intent tracking and media path foreground isolation."""
+    with playback_telemetry_collector._lock:
+        playback_telemetry_collector._plex_playbacks.clear()
+
+    assert playback_telemetry_collector.active_plex_playback_count == 0
+    assert not playback_telemetry_collector.is_media_foreground(
+        "/movies/Supergirl.2024.mkv"
+    )
+
+    playback_telemetry_collector.update_plex_playback(
+        event="media.play",
+        server_uuid="srv-1",
+        player_uuid="player-1",
+        rating_key="101",
+        media_path="/movies/Supergirl.2024.mkv",
+    )
+    assert playback_telemetry_collector.active_plex_playback_count == 1
+    assert playback_telemetry_collector.is_media_foreground(
+        "/movies/Supergirl.2024.mkv"
+    )
+    assert not playback_telemetry_collector.is_media_foreground(
+        "/other/Supergirl.2024.mkv"
+    )
+
+    # Missing strong identity is neutral and cannot claim a media path.
+    playback_telemetry_collector.update_plex_playback(
+        event="media.play",
+        server_uuid="",
+        player_uuid="player-missing",
+        rating_key="101",
+        media_path="/movies/unknown.mkv",
+    )
+    assert playback_telemetry_collector.active_plex_playback_count == 1
+    assert not playback_telemetry_collector.is_media_foreground("/movies/unknown.mkv")
+
+    playback_telemetry_collector.update_plex_playback(
+        event="media.play",
+        server_uuid="srv-1",
+        player_uuid="player-2",
+        rating_key="101",
+        media_path="/movies/Supergirl.2024.mkv",
+    )
+    assert playback_telemetry_collector.active_plex_playback_count == 2
+    assert playback_telemetry_collector.is_media_foreground(
+        "/movies/Supergirl.2024.mkv"
+    )
+
+    playback_telemetry_collector.update_plex_playback(
+        event="media.pause",
+        server_uuid="srv-1",
+        player_uuid="player-1",
+        rating_key="101",
+        media_path="/movies/Supergirl.2024.mkv",
+    )
+    assert playback_telemetry_collector.active_plex_playback_count == 1
+    assert playback_telemetry_collector.is_media_foreground(
+        "/movies/Supergirl.2024.mkv"
+    )
+
+    playback_telemetry_collector.update_plex_playback(
+        event="media.stop",
+        server_uuid="srv-1",
+        player_uuid="player-2",
+        rating_key="101",
+        media_path="/movies/Supergirl.2024.mkv",
+    )
+    assert playback_telemetry_collector.active_plex_playback_count == 0
+    assert not playback_telemetry_collector.is_media_foreground(
+        "/movies/Supergirl.2024.mkv"
     )

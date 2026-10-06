@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import collections
+import posixpath
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -18,6 +20,14 @@ from schemas.playback_telemetry import (
     PlaybackTelemetrySnapshot,
     StreamSessionMetric,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class PlexPlaybackIdentity:
+    server_uuid: str | None
+    player_uuid: str | None
+    rating_key: str | None
+    media_path: str | None
 
 
 class StreamSessionTracker:
@@ -290,6 +300,7 @@ class PlaybackTelemetryCollector:
             return
         self._lock = threading.Lock()
         self._sessions: dict[str, StreamSessionTracker] = {}
+        self._plex_playbacks: dict[tuple[str, str, str], PlexPlaybackIdentity] = {}
         self._events: collections.deque[PlaybackTelemetryEvent] = collections.deque(
             maxlen=50
         )
@@ -307,6 +318,56 @@ class PlaybackTelemetryCollector:
 
         self._initialized = True
         logger.info("PlaybackTelemetryCollector initialized")
+
+    @staticmethod
+    def _normalize_media_path(path: str | None) -> str | None:
+        if not path:
+            return None
+        normalized = path.replace("\\", "/")
+        return posixpath.normpath(normalized).casefold()
+
+    def update_plex_playback(
+        self,
+        *,
+        event: str,
+        server_uuid: str | None,
+        player_uuid: str | None,
+        rating_key: str | None,
+        media_path: str | None,
+    ) -> None:
+        """Track Plex playback intent without assigning intent to FUSE handles."""
+        server = (server_uuid or "").strip()
+        player = (player_uuid or "").strip()
+        rating = (rating_key or "").strip()
+        if not server or not player or not rating:
+            return
+        key = (server, player, rating)
+        identity = PlexPlaybackIdentity(
+            server_uuid=server,
+            player_uuid=player,
+            rating_key=rating,
+            media_path=self._normalize_media_path(media_path),
+        )
+        normalized_event = event.strip().lower()
+        with self._lock:
+            if normalized_event in {"media.play", "media.resume"}:
+                self._plex_playbacks[key] = identity
+            elif normalized_event in {"media.pause", "media.stop", "media.scrobble"}:
+                self._plex_playbacks.pop(key, None)
+
+    def is_media_foreground(self, media_path: str | None) -> bool:
+        normalized = self._normalize_media_path(media_path)
+        if normalized is None:
+            return False
+        with self._lock:
+            return any(
+                item.media_path == normalized for item in self._plex_playbacks.values()
+            )
+
+    @property
+    def active_plex_playback_count(self) -> int:
+        with self._lock:
+            return len(self._plex_playbacks)
 
     def register_stream_start(
         self,

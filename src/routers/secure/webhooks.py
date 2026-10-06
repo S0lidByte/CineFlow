@@ -303,8 +303,11 @@ async def plex_webhook(request: Request) -> PlexWebhookResponse:
         player_raw = cast(object, payload.get("Player"))
         player_device: str | None = None
         client_ip: str | None = None
+        player_uuid: str | None = None
         if isinstance(player_raw, dict):
             player_dict = cast(dict[str, Any], player_raw)
+            raw_player_uuid = player_dict.get("uuid")
+            player_uuid = str(raw_player_uuid) if raw_player_uuid else None
             raw_player_title = player_dict.get("title")
             player_device = str(raw_player_title) if raw_player_title else None
             raw_player_ip = player_dict.get("publicAddress")
@@ -313,11 +316,14 @@ async def plex_webhook(request: Request) -> PlexWebhookResponse:
         # Extract media attributes
         title: str | None = None
         file_path: str | None = None
+        rating_key: str | None = None
         media_resolution: str | None = None
         media_bitrate_kbps: int | None = None
         decision: str | None = None
 
         if metadata:
+            raw_rating_key = metadata.get("ratingKey")
+            rating_key = str(raw_rating_key) if raw_rating_key is not None else None
             raw_title = metadata.get("title") or metadata.get("originalTitle")
             title = str(raw_title) if raw_title else None
             media_raw = cast(object, metadata.get("Media"))
@@ -358,12 +364,25 @@ async def plex_webhook(request: Request) -> PlexWebhookResponse:
         guids = sanitize_plex_guids(metadata)
         media_type = plex_media_kind(metadata)
 
+        server_raw = cast(object, payload.get("Server"))
+        server_uuid: str | None = None
+        if isinstance(server_raw, dict):
+            raw_server_uuid = cast(dict[str, Any], server_raw).get("uuid")
+            server_uuid = str(raw_server_uuid) if raw_server_uuid else None
+
         # Correlate session attribution with active VFS/HTTP streams in PlaybackTelemetryCollector
         try:
             from program.services.streaming.telemetry import (
                 playback_telemetry_collector,
             )
 
+            playback_telemetry_collector.update_plex_playback(
+                event=event,
+                server_uuid=server_uuid,
+                player_uuid=player_uuid,
+                rating_key=rating_key,
+                media_path=file_path,
+            )
             playback_telemetry_collector.correlate_plex_session(
                 event=event,
                 user_name=user_name,

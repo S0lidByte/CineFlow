@@ -30,6 +30,7 @@ from program.utils.stream_http import (
 )
 
 RequestKind = Literal["body", "scan"]
+Workload = Literal["foreground", "background", "neutral"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +88,7 @@ class TrioStreamingHttpPool:
         self._heal_finished.set()
         self._pool_timeout_last_warn = 0.0
         self._shed_callback: Callable[[], Awaitable[None]] | None = None
+        self._foreground_pressure: Callable[[], bool] | None = None
         self._closed = False
 
         self._clients = self._create_generation_clients()
@@ -100,6 +102,19 @@ class TrioStreamingHttpPool:
     def active_leases(self) -> int:
         """Total active leased connections across all generations."""
         return sum(self._active_leases_by_gen.values())
+
+    def register_foreground_pressure_callback(
+        self, callback: Callable[[], bool] | None
+    ) -> None:
+        self._foreground_pressure = callback
+
+    async def _wait_for_background_pressure(self) -> None:
+        """Wait cooperatively with cancellation and a bounded pressure poll interval."""
+        while self._foreground_pressure is not None and self._foreground_pressure():
+            # Polling avoids a shared event reset race between multiple waiters. The
+            # short interval bounds recovery latency while Trio cancellation remains
+            # effective at the sleep checkpoint.
+            await trio.sleep(0.25)
 
     def register_stream_shed_callback(
         self,
@@ -154,12 +169,12 @@ class TrioStreamingHttpPool:
         await self._close_idle_retired_generations()
 
     @asynccontextmanager
-    async def admit(self, kind: RequestKind) -> AsyncGenerator[None]:
-        """
-        Bound concurrent streaming HTTP requests under the httpx max_connections cap.
-
-        Fail-fast with PoolTimeout when saturated so callers shed instead of wedging.
-        """
+    async def admit(
+        self, kind: RequestKind, *, workload: Workload = "neutral"
+    ) -> AsyncGenerator[None]:
+        """Bound remote acquisition and cooperatively yield background requests."""
+        if workload == "background":
+            await self._wait_for_background_pressure()
         total = self._total_limiter
         body = self._body_limiter
 

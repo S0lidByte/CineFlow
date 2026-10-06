@@ -19,6 +19,7 @@ class AdaptivePrefetchConfig:
         32  # Start scaling down if active leases > 32 (of 64 limit)
     )
     cache_pressure_threshold_pct: float = 85.0
+    min_safe_runway_seconds: float = 4.0
 
 
 class AdaptivePrefetchManager:
@@ -51,6 +52,11 @@ class AdaptivePrefetchManager:
         self.seek_count: int = 0
         self.consecutive_sequential_reads: int = 0
         self.aborted_prefetches: int = 0
+        self._recent_fetch_durations: list[float] = []
+        self._starvation_count: int = 0
+        self._last_consumption_bps: float = 0.0
+        self._cached_runway_bytes: int = 0
+        self._inflight_runway_bytes: int = 0
 
     def set_metadata_bitrate(self, bitrate: int | None) -> None:
         """Set known bitrate from media metadata or prober (in bits per second)."""
@@ -98,6 +104,7 @@ class AdaptivePrefetchManager:
                                 alpha * instant_bitrate
                                 + (1.0 - alpha) * self.estimated_bitrate
                             )
+                        self._last_consumption_bps = instant_bitrate
 
         if not is_sequential and self.last_read_end is not None:
             # Non-sequential jump detected: Player sought
@@ -114,6 +121,77 @@ class AdaptivePrefetchManager:
         self.last_read_end = end
         self.last_read_time = current_time
         return is_sequential
+
+    def record_provider_fetch(self, duration_seconds: float) -> None:
+        """Record upstream fetch duration to observe provider latency tail."""
+        if duration_seconds > 0:
+            self._recent_fetch_durations.append(duration_seconds)
+            if len(self._recent_fetch_durations) > 20:
+                self._recent_fetch_durations.pop(0)
+
+    def record_runway(self, *, cached_bytes: int, in_flight_bytes: int = 0) -> None:
+        """Record contiguous runway observations for pressure decisions."""
+        self._cached_runway_bytes = max(0, cached_bytes)
+        self._inflight_runway_bytes = max(0, in_flight_bytes)
+
+    def cached_runway_seconds(self) -> float:
+        """Return cached contiguous runway using observed consumption rate."""
+        bitrate = self.get_effective_bitrate()
+        if bitrate <= 0:
+            return 0.0
+        return self._cached_runway_bytes * 8.0 / bitrate
+
+    def effective_runway_seconds(self) -> float:
+        """Return cached plus known in-flight contiguous runway."""
+        bitrate = self.get_effective_bitrate()
+        if bitrate <= 0:
+            return 0.0
+        return (self._cached_runway_bytes + self._inflight_runway_bytes) * 8.0 / bitrate
+
+    def should_prefetch_now(self) -> bool:
+        """Indicate whether observed runway is approaching the fetch-latency tail."""
+        bitrate = self.get_effective_bitrate()
+        if bitrate <= 0:
+            return False
+        return self.cached_runway_seconds() < max(
+            self.config.min_safe_runway_seconds,
+            self.get_fetch_p95() + 0.5,
+        ) and self.effective_runway_seconds() < max(
+            self.config.min_safe_runway_seconds,
+            self.get_fetch_p95() + 0.5,
+        )
+
+    def record_starvation(self) -> None:
+        """Record event where foreground consumer awaited an uncached chunk."""
+        self._starvation_count += 1
+
+    @property
+    def starvation_count(self) -> int:
+        return self._starvation_count
+
+    def get_fetch_p95(self) -> float:
+        if not self._recent_fetch_durations:
+            return 2.5
+        sorted_d = sorted(self._recent_fetch_durations)
+        idx = math.ceil(0.95 * len(sorted_d)) - 1
+        return sorted_d[idx]
+
+    def is_runway_under_pressure(
+        self,
+        *,
+        cached_runway_bytes: int,
+        in_flight_bytes: int = 0,
+    ) -> bool:
+        """Return True if contiguous playback runway is nearing provider fetch tail."""
+        bitrate = self.get_effective_bitrate()
+        if bitrate <= 0:
+            return False
+        total_runway_bytes = cached_runway_bytes + in_flight_bytes
+        runway_seconds = (total_runway_bytes * 8.0) / bitrate
+        required_safety = max(
+            self.config.min_safe_runway_seconds, self.get_fetch_p95() * 1.5
+        )
+        return runway_seconds < required_safety
 
     def calculate_window(
         self,

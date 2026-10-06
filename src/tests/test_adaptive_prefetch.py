@@ -142,3 +142,45 @@ def test_post_seek_ramp_up():
     assert mgr.consecutive_sequential_reads == 3
     # Fully ramped up back to full 48 chunks!
     assert mgr.calculate_window() == 48
+
+
+def test_time_aware_runway_under_pressure_detection():
+    # 20 Mbps bitrate = 2,500,000 bytes/sec
+    mgr = AdaptivePrefetchManager(initial_bitrate=20_000_000)
+
+    # Simulated fetch latency p95 = 2.0s -> required safety = 2.0 * 1.5 = 3.0s
+    # min_safe_runway_seconds is 4.0s -> target is max(4.0, 3.0) = 4.0s
+    # 4.0s * 2,500,000 bytes/sec = 10,000,000 bytes (~10 MB)
+
+    # 1. Healthy runway: 15 MB cached -> ~6.0s runway -> not under pressure
+    assert not mgr.is_runway_under_pressure(cached_runway_bytes=15_000_000)
+
+    # 2. Dangerous runway: 5 MB cached -> 2.0s runway -> under pressure
+    assert mgr.is_runway_under_pressure(cached_runway_bytes=5_000_000)
+
+    # 3. Dangerous cached runway but in-flight request pending (5 MB + 6 MB in-flight = 11 MB -> 4.4s) -> not under pressure
+    assert not mgr.is_runway_under_pressure(
+        cached_runway_bytes=5_000_000, in_flight_bytes=6_000_000
+    )
+
+    # 4. Record a high-latency distribution (p95 is 4.0s -> required safety = 6.0s = 15 MB)
+    for _ in range(19):
+        mgr.record_provider_fetch(4.0)
+    mgr.record_provider_fetch(1.5)
+    # Now 12 MB total runway (4.8s) is under pressure because fetch tail requires 6.0s
+    assert mgr.is_runway_under_pressure(cached_runway_bytes=12_000_000)
+
+
+def test_runway_observation_uses_inflight_contiguous_bytes():
+    mgr = AdaptivePrefetchManager(initial_bitrate=20_000_000)
+    mgr.record_runway(cached_bytes=5_000_000, in_flight_bytes=6_000_000)
+    assert mgr.effective_runway_seconds() == pytest.approx(4.4, abs=0.01)
+    assert not mgr.should_prefetch_now()
+
+
+def test_provider_fetch_and_starvation_observations():
+    mgr = AdaptivePrefetchManager(initial_bitrate=20_000_000)
+    mgr.record_provider_fetch(1.25)
+    mgr.record_starvation()
+    assert mgr.get_fetch_p95() == pytest.approx(1.25)
+    assert mgr.starvation_count == 1
