@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.44.0](https://github.com/S0lidByte/CineFlow/compare/v1.43.2...v1.44.0) (2026-10-09)
+
+
+### Features
+
+* **vfs:** enhance streaming cache durability, transport recovery, and downloader deadlines ([45b905f](https://github.com/S0lidByte/CineFlow/commit/45b905fa2767217109c74708db209c1f153c1ce1))
+
+## [1.43.2](https://github.com/S0lidByte/CineFlow/compare/v1.43.1...v1.43.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **streaming:** preserve playback priority under Plex analysis ([97ce47d](https://github.com/S0lidByte/CineFlow/commit/97ce47d06f00a717fd39f54c5b8e6028e24436e2))
+
 ## [1.43.1](https://github.com/S0lidByte/CineFlow/compare/v1.43.0...v1.43.1) (2026-10-06)
 
 

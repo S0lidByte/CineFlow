@@ -1,0 +1,81 @@
+name: cineflow-e2e
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: e2e-only-disposable
+      POSTGRES_DB: riven
+    volumes:
+      - pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d riven"]
+      interval: 3s
+      retries: 40
+  fixture:
+    image: python:3.13-alpine
+    working_dir: /fixtures
+    volumes:
+      - ./e2e/fixture_server.py:/fixtures/fixture_server.py:ro
+    command: ["python", "-u", "fixture_server.py"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health',timeout=2)"]
+      interval: 3s
+      retries: 30
+  backend:
+    build: .
+    environment:
+      PUID: "0"
+      PGID: "0"
+      CINEFLOW_SETTINGS_FILENAME: e2e-settings.json
+      CINEFLOW_DATABASE_HOST: postgresql+psycopg2://postgres:e2e-only-disposable@db/riven
+      RIVEN_API_KEY: 0123456789abcdef0123456789abcdef
+      API_KEY: 0123456789abcdef0123456789abcdef
+      BFF_API_KEY: 0123456789abcdef0123456789abcdef
+      ACTOR_CONTEXT_SECRET: e2e-disposable-actor-context-secret
+      CINEFLOW_E2E_FIXTURES: "true"
+      CINEFLOW_E2E_ALLDEBRID_ORIGIN: http://fixture:8765
+      CINEFLOW_DOWNLOADERS_ALL_DEBRID_API_KEY: e2e-premium-fixture
+      CINEFLOW_DOWNLOADERS_PROXY_URL: ""
+      CINEFLOW_SCRAPING_ZILEAN_URL: http://fixture:8765
+      CINEFLOW_UPDATERS_PLEX_URL: http://fixture:8765
+      CINEFLOW_UPDATERS_PLEX_TOKEN: e2e-plex-fixture
+    cap_add: [SYS_ADMIN]
+    security_opt: ["apparmor:unconfined"]
+    devices: ["/dev/fuse:/dev/fuse"]
+    volumes:
+      - data:/riven/data
+      - ./src:/riven/src
+      - ./src/tests:/riven/src/tests:ro
+    ports: ["127.0.0.1:18080:8080"]
+    depends_on:
+      db: {condition: service_healthy}
+      fixture: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/docs >/dev/null"]
+      interval: 5s
+      start_period: 90s
+      retries: 40
+  frontend:
+    build: ../Triven_frontend
+    environment:
+      BACKEND_URL: http://backend:8080
+      BFF_API_KEY: 0123456789abcdef0123456789abcdef
+      ACTOR_CONTEXT_SECRET: e2e-disposable-actor-context-secret
+      AUTH_SECRET: e2e-disposable-auth-secret-not-for-production
+      ORIGIN: http://localhost:3000
+      CINEFLOW_DATABASE_URL: /riven/data/cineflow.db
+    ports: ["127.0.0.1:3000:3000"]
+    volumes:
+      - frontend_data:/riven/data
+    depends_on:
+      backend: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/auth/login"]
+      interval: 5s
+      start_period: 40s
+      retries: 40
+volumes:
+  pg:
+  data:
+  frontend_data:

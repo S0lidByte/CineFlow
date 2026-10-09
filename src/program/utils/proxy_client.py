@@ -19,12 +19,21 @@ class ProxyClient(httpx.AsyncClient):
     """
 
     def __init__(self, *, proxy_url: str) -> None:
+        try:
+            from program.settings import settings_manager
+
+            connect_timeout = float(
+                settings_manager.settings.stream.connect_timeout_seconds
+            )
+        except Exception:
+            connect_timeout = None
+
         super().__init__(
             http2=True,
             follow_redirects=True,
             proxy=proxy_url,
             limits=stream_http_limits(),
-            timeout=stream_http_timeout(),
+            timeout=stream_http_timeout(connect_timeout=connect_timeout),
         )
 
     async def send(

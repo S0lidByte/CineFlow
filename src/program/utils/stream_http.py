@@ -29,11 +29,20 @@ def stream_http_limits() -> httpx.Limits:
     )
 
 
-def stream_http_timeout() -> httpx.Timeout:
-    """Timeouts including pool acquire — fail fast when saturated."""
+def stream_http_timeout(connect_timeout: float | None = None) -> httpx.Timeout:
+    """Timeouts including pool acquire — fail fast when saturated.
+
+    Args:
+        connect_timeout: Optional override for connection timeout in seconds.
+            If omitted or None, defaults to STREAM_CONNECT_TIMEOUT (5.0s).
+    """
 
     return httpx.Timeout(
-        connect=STREAM_CONNECT_TIMEOUT,
+        connect=(
+            STREAM_CONNECT_TIMEOUT
+            if connect_timeout is None
+            else float(connect_timeout)
+        ),
         read=STREAM_READ_TIMEOUT,
         write=STREAM_WRITE_TIMEOUT,
         pool=STREAM_POOL_TIMEOUT,

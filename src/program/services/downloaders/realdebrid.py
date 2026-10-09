@@ -774,7 +774,11 @@ class RealDebridDownloader(DownloaderBase):
             retry_after_seconds=remaining or 300.0,
         )
 
-    def unrestrict_link(self, link: str) -> UnrestrictedLink | None:
+    def unrestrict_link(
+        self,
+        link: str,
+        operation_deadline: float | None = None,
+    ) -> UnrestrictedLink | None:
         """
         Unrestrict a link using direct requests library, bypassing SmartSession rate limiting.
 
@@ -793,11 +797,19 @@ class RealDebridDownloader(DownloaderBase):
             if self._fair_usage_remaining() > 0:
                 self._raise_fair_usage(from_api=False)
 
-            response = self.api.session.post(
-                f"{self.api.BASE_URL}/unrestrict/link",
-                data={"link": link},
-                timeout=10,
-            )
+            if operation_deadline is not None:
+                response = self.api.session.post(
+                    f"{self.api.BASE_URL}/unrestrict/link",
+                    data={"link": link},
+                    timeout=10,
+                    operation_deadline=operation_deadline,
+                )
+            else:
+                response = self.api.session.post(
+                    f"{self.api.BASE_URL}/unrestrict/link",
+                    data={"link": link},
+                    timeout=10,
+                )
 
             if not response.ok:
                 # FIX-10: Cloudflare/gateway HTML error bodies cause JSONDecodeError,
