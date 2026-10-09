@@ -1655,7 +1655,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.12.0,<3" },
     { name = "pyfuse3", marker = "sys_platform == 'linux'", specifier = ">=3.4.0,<4" },
     { name = "python-dotenv", specifier = ">=1.2.3,<2" },
-    { name = "python-multipart", specifier = ">=0.0.31" },
+    { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "rank-torrent-name", specifier = ">=1.11.1,<2" },
     { name = "requests", extras = ["socks"], specifier = ">=2.34.2,<3" },
     { name = "requests-cache", specifier = ">=1.3.3,<2" },
