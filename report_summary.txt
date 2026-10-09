@@ -1,0 +1,65 @@
+tests/test_stream_resume_safety.py::test_empty_prefetch_does_not_fail_active_stream: passed
+tests/test_stream_resume_safety.py::test_successful_prefetch_reports_success: passed
+tests/test_stream_resume_safety.py::test_non_empty_prefetch_error_is_not_suppressed: passed
+tests/test_stream_resume_safety.py::test_cache_hit_miss_falls_back_instead_of_returning_zero_bytes: passed
+tests/test_stream_resume_safety.py::test_exit_and_resume_same_video_from_hybrid_cache: passed
+tests/test_stream_resume_safety.py::test_response_context_includes_range_headers: passed
+tests/test_stream_resume_safety.py::test_empty_prefetch_closes_exhausted_connection_before_reconnect: failed
+  FAILURE: + Exception Group Traceback (most recent call last):
+  |   File "e:\Dev\Triven_riven-fork\Triven_backend\src\tests\test_stream_resume_safety.py", line 268, in test_empty_prefetch_closes_exhausted_connection_before_reconnect
+  |     trio.run(_run)
+  |     ~~~~~~~~^^^^^^
+  |   File "E:\Dev\Triven_riven-fork\Triven_backend\.venv\Lib\site-packages\trio\_core\_run.py", line 2543, in run
+  |     raise runner.main_task_outcome.error
+  |   File "e:\Dev\Triven_riven-fork\Triven_backend\src\tests\test_stream_resume_safety.py", line 266, in _run
+  |     await stream.run(0)
+  |   File "E:\Dev\Triven_riven-fork\Triven_backend\src\program\services\streaming\media_stream.py", line 879, in run
+  |     async with trio_util.move_on_when(lambda: self.is_killed.wait_value(True)):
+  |                ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "C:\Users\colds\AppData\Local\Programs\Python\Python313\Lib\contextlib.py", line 235, in __aexit__
+  |     await self.gen.athrow(value)
+  |   File "E:\Dev\Triven_riven-fork\Triven_backend\.venv\Lib\site-packages\trio_util\_cancel_scopes.py", line 26, in move_on_when
+  |     async with trio.open_nursery() as nursery:
+  |                ~~~~~~~~~~~~~~~~~^^
+  |   File "E:\Dev\Triven_riven-fork\Triven_backend\.venv\Lib\site-packages\trio\_core\_run.py", line 1117, in __aexit__
+  |     raise combined_error_from_nursery
+  | ExceptionGroup: Exceptions from Trio nursery (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Exception Group Traceback (most recent call last):
+    |   File "E:\Dev\Triven_riven-fork\Triven_backend\src\program\services\streaming\media_stream.py", line 900, in run
+    |     async with trio_util.move_on_when(
+    |                ~~~~~~~~~~~~~~~~~~~~~~^
+    |         lambda connection=connection: trio_util.wait_any(
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |     ...<9 lines>...
+    |         )
+    |         ^
+    |     ) as reconnect_scope:
+    |     ^
+    |   File "C:\Users\colds\AppData\Local\Programs\Python\Python313\Lib\contextlib.py", line 235, in __aexit__
+    |     await self.gen.athrow(value)
+    |   File "E:\Dev\Triven_riven-fork\Triven_backend\.venv\Lib\site-packages\trio_util\_cancel_scopes.py", line 26, in move_on_when
+    |     async with trio.open_nursery() as nursery:
+    |                ~~~~~~~~~~~~~~~~~^^
+    |   File "E:\Dev\Triven_riven-fork\Triven_backend\.venv\Lib\site-packages\trio\_core\_run.py", line 1117, in __aexit__
+    |     raise combined_error_from_nursery
+    | ExceptionGroup: Exceptions from Trio nursery (1 sub-exception)
+    +-+---------------- 1 ----------------
+      | Traceback (most recent call last):
+      |   File "E:\Dev\Triven_riven-fork\Triven_backend\.venv\Lib\site-packages\trio_util\_cancel_scopes.py", line 31, in move_on_when
+      |     yield cancel_scope
+      |   File "E:\Dev\Triven_riven-fork\Triven_backend\src\program\services\streaming\media_stream.py", line 1304, in run
+      |     and self._consumer_end is not None
+      |         ^^^^^^^^^^^^^^^^^^
+      | AttributeError: 'MediaStream' object has no attribute '_consumer_end'
+      +------------------------------------
+    |
+    | During handling of the above exception, another exception occurred:
+    |
+    | Traceback (most recent call last):
+    |   File "E:\Dev\Triven_riven-fork\Triven_backend\.venv\Lib\site-packages\trio_util\_cancel_scopes.py", line 31, in move_on_when
+    |     yield cancel_scope
+    |   File "E:\Dev\Triven_riven-fork\Triven_backend\src\program\services\streaming\media_stream.py", line 1512, in run
+    |     self._stream_error.value = e
+    |     ^^^^^^^^^^^^^^^^^^
+    | AttributeError: 'MediaStream' object has no attribute '_stream_error'

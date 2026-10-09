@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
 from http import HTTPStatus
+from math import ceil
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -57,6 +58,29 @@ from .streaming_constants import PROXY_REQUIRED_PROVIDERS
 # Guard against transient short scan reads from unstable debrid/CDN responses.
 DISCRETE_SCAN_MAX_INTEGRITY_ATTEMPTS = 3
 DISCRETE_SCAN_RETRY_BACKOFF_SECONDS = [0.1, 0.25]
+
+
+class StreamRecoveryPhase(str, Enum):
+    """Phases of transport-level connection and URL recovery."""
+
+    IDLE = "idle"
+    TRANSPORT_RETRY = "transport_retry"
+    URL_REFRESH = "url_refresh"
+
+
+@dataclass
+class StreamRecoveryState:
+    """Snapshot of active transport recovery on a stream."""
+
+    phase: StreamRecoveryPhase = StreamRecoveryPhase.IDLE
+    generation: int = 0
+    chunk_start: int | None = None
+    failed_url: str | None = None
+    attempt: int = 0
+    start_time: float = 0.0
+    timeout_bound: float = 0.0
+    recovery_deadline: float | None = None
+    recovery_episode: int = 0
 
 
 class _DeliveryState(str, Enum):
@@ -133,7 +157,7 @@ class _DeliveryRegistry:
     async def retire_all(self) -> None:
         """Retire all entries (stream close or seek past all pending chunks)."""
         async with self._lock:
-            for entry in list(self._entries.values()):
+            for entry in tuple(self._entries.values()):
                 entry.state = _DeliveryState.RETIRED
                 entry.ready.set()
             self._entries.clear()
@@ -495,6 +519,15 @@ class MediaStream:
         # Ensures the one-provider-fetch invariant: bytes fetched by the producer
         # are delivered directly to waiting readers without a second HTTP request.
         self._delivery_registry = _DeliveryRegistry()
+        self._consumer_end: int | None = None
+        self._inflight_chunk: tuple[int, int] | None = None
+        # Per-failed-URL transport recovery budget: allows re-arming after progression on new URL
+        self._last_recovered_url: str | None = None
+        self._bytes_transferred_at_last_recovery: int = 0
+        # Active recovery coordination (D90/D91): signals foreground reader chunk wait
+        self._recovery_state: StreamRecoveryState = StreamRecoveryState()
+        self._recovery_event: trio.Event = trio.Event()
+        self._recovery_episode: int = 0
 
         # Store initial URL to avoid redundant unrestrict calls
         self.target_url: trio_util.AsyncValue[str] = trio_util.AsyncValue(initial_url)
@@ -608,24 +641,18 @@ class MediaStream:
                 size=self.config.chunk_size * manager.config.max_window_chunks,
             )
             cached_bytes = 0
-            for chunk in window.chunks:
-                if not chunk.is_cached.value:
-                    break
-                cached_bytes += chunk.size
-
             in_flight_bytes = 0
-            expected_start = position
-            for pending_start in self._delivery_registry.get_pending_starts():
-                if pending_start != expected_start:
-                    continue
-                pending_range = self.chunker.get_chunk_range(
-                    position=pending_start, size=self.config.chunk_size
-                )
-                if not pending_range.chunks:
+            inflight = getattr(self, "_inflight_chunk", None)
+            for chunk in window.chunks:
+                remaining = chunk.end - max(position, chunk.start) + 1
+                if chunk.is_cached.value:
+                    cached_bytes += remaining
+                elif inflight == (manager.current_generation, chunk.start):
+                    # Only the chunk actually being fetched, never reader reservations.
+                    in_flight_bytes += remaining
                     break
-                pending_chunk = pending_range.chunks[0]
-                in_flight_bytes += pending_chunk.size
-                expected_start = pending_chunk.end + 1
+                else:
+                    break
             manager.record_runway(
                 cached_bytes=cached_bytes,
                 in_flight_bytes=in_flight_bytes,
@@ -633,6 +660,25 @@ class MediaStream:
         except Exception:
             # Runway telemetry must never affect delivery correctness.
             return
+
+    def _prefetch_window(self) -> int:
+        """Keep the existing adaptive resource bounds on every refill turn."""
+        from .cache import Cache
+
+        cache = di[Cache] if Cache in di else None
+
+        def pressure(name: str) -> float:
+            value = getattr(cache, name, 0.0)
+            result = value() if callable(value) else value
+            if isinstance(result, (int, float)):
+                return float(result)
+            return 0.0
+
+        return self.adaptive_prefetch.calculate_window(
+            active_leases=getattr(self._http_pool, "active_leases", 0),
+            cache_usage_pct=pressure("usage_percentage"),
+            cache_protected_pct=pressure("protected_usage_percentage"),
+        )
 
     async def _force_aclose_active_response(self) -> None:
         """Best-effort close of an in-flight httpx response to free pool slots."""
@@ -709,7 +755,7 @@ class MediaStream:
             # Plex scan / intro-detection read that was served entirely from
             # the /dev/shm cache.  Time it out quickly so it does not hold
             # an _active_streams slot and falsely block the Downloader.
-            if self._created_at == 0.0:
+            if self._created_at <= 0.0:
                 return False  # Safety: no trio context at construction.
             scan_timeout = min(30.0, float(self.config.activity_timeout_seconds))
             return current_time - self._created_at > scan_timeout
@@ -758,7 +804,58 @@ class MediaStream:
     ) -> bool:
         """Run prefetch without poisoning reads when an idle CDN socket is empty."""
         try:
-            await process_chunks(chunks, is_prefetch=True, prefetch_gen=prefetch_gen)
+            # Re-evaluate after every publication; never hold a stale batch while
+            # foreground cache hits advance the consumer. No extra task/socket.
+            manager = getattr(self, "adaptive_prefetch", None)
+            consumer_end = getattr(self, "_consumer_end", None)
+
+            # Fallback for bare test doubles or streams without active consumer context:
+            # execute the provided chunks directly.
+            if manager is None or consumer_end is None:
+                await process_chunks(chunks)
+                return True
+
+            while chunks and not getattr(self.is_killed, "value", False):
+                if prefetch_gen is not None and manager.should_abort_prefetch(
+                    prefetch_gen
+                ):
+                    break
+                consumer_end = getattr(self, "_consumer_end", None)
+                if consumer_end is None:
+                    break
+                self._update_runway_observation(consumer_end + 1)
+                window = self._prefetch_window()
+                if label != "Prefetch gap-fill":
+                    chunks = self.chunker.get_prefetch_uncached(
+                        after_end=consumer_end,
+                        count=window,
+                    )
+                if not chunks:
+                    break
+                chunk = chunks[0]
+                # Foreground reservations elsewhere always get the next turn.
+                if any(
+                    start != chunk.start
+                    and not self.chunker.get_chunk_range(
+                        position=start
+                    ).first_chunk.is_cached.value
+                    for start in self._delivery_registry.get_pending_starts()
+                ):
+                    break
+                await process_chunks(
+                    OrderedSet([chunk]),
+                    is_prefetch=True,
+                    prefetch_gen=prefetch_gen,
+                )
+                connection = self._active_stream_connection
+                if connection is not None and connection.seek_required.value:
+                    break
+                if not chunk.is_cached.value:
+                    # Refused admission is not runway. Stop rather than spin or
+                    # fetch the next chunk across an unfillable hole.
+                    break
+                if label == "Prefetch gap-fill":
+                    chunks.discard(chunk)
         except EmptyDataException as error:
             self._trace_stream(
                 f"{label} did not return data ({error}); keeping the stream "
@@ -777,8 +874,28 @@ class MediaStream:
         """Context manager to handle connection lifecycle."""
 
         try:
-            async with self.connect(position=position) as connection:
-                yield connection
+            try:
+                async with self.connect(position=position) as connection:
+                    yield connection
+            except BaseExceptionGroup as group:
+                # Trio's reconnect watcher wraps body failures. Unwrap only a
+                # single leaf; mixed failures/cancellation retain their semantics.
+                error: BaseException = group
+                while isinstance(error, BaseExceptionGroup):
+                    children = cast(tuple[BaseException, ...], error.exceptions)
+                    if len(children) != 1:
+                        break
+                    error = children[0]
+                if isinstance(
+                    error,
+                    (
+                        httpx.ReadError,
+                        httpx.TimeoutException,
+                        httpx.RemoteProtocolError,
+                    ),
+                ):
+                    raise error from group
+                raise
         except (
             EmptyDataException,
             DebridServiceRateLimitedException,
@@ -829,12 +946,30 @@ class MediaStream:
                 needs_url_refresh = False
 
                 seek_range: ChunkRange | None = None
+                run_generation = getattr(
+                    getattr(self, "adaptive_prefetch", None), "current_generation", 0
+                )
 
                 while True:
+                    if not self._transport_generation_live(run_generation):
+                        if self.is_killed.value:
+                            break
+                        latest_read = self.recent_reads.current_read.value
+                        if latest_read is not None:
+                            seek_range = latest_read.chunk_range
+                            position = seek_range.position
+                        attempt_count = 0
+                    failed_connection: StreamConnection | None = None
+                    run_generation = getattr(
+                        getattr(self, "adaptive_prefetch", None),
+                        "current_generation",
+                        0,
+                    )
                     try:
                         async with self.manage_connection(
                             position=position
                         ) as connection:
+                            failed_connection = connection
                             if not has_started:
                                 task_status.started()
                                 has_started = True
@@ -975,7 +1110,33 @@ class MediaStream:
                                                 )
                                             ):
                                                 fetch_started = monotonic()
+                                                ap_mgr = getattr(
+                                                    self, "adaptive_prefetch", None
+                                                )
+                                                fetch_generation = (
+                                                    ap_mgr.current_generation
+                                                    if ap_mgr is not None
+                                                    else 0
+                                                )
+                                                self._inflight_chunk = (
+                                                    fetch_generation,
+                                                    chunk.start,
+                                                )
                                                 chunk_buffer = bytearray()
+                                                wait_sec = float(
+                                                    self.config.chunk_wait_timeout_seconds
+                                                )
+                                                headroom = (
+                                                    3.0
+                                                    if wait_sec >= 4.0
+                                                    else (
+                                                        1.0 if wait_sec >= 2.0 else 0.5
+                                                    )
+                                                )
+                                                body_read_stall_timeout = min(
+                                                    7.0,
+                                                    max(0.5, wait_sec - headroom),
+                                                )
                                                 while len(chunk_buffer) < chunk.size:
                                                     if (
                                                         is_prefetch
@@ -1000,19 +1161,38 @@ class MediaStream:
                                                                 )
                                                             return
                                                     try:
-                                                        raw_part = await anext(
-                                                            connection.reader
-                                                        )
+                                                        with trio.fail_after(
+                                                            body_read_stall_timeout
+                                                        ):
+                                                            raw_part = await anext(
+                                                                connection.reader
+                                                            )
+                                                    except trio.TooSlowError as err:
+                                                        raise httpx.ReadTimeout(
+                                                            f"HTTP response-body read stalled for {body_read_stall_timeout:.1f}s"
+                                                        ) from err
                                                     except StopAsyncIteration:
                                                         break
                                                     if not raw_part:
                                                         break
                                                     chunk_buffer.extend(raw_part)
                                                 data = bytes(chunk_buffer)
-                                                if hasattr(self, "adaptive_prefetch"):
-                                                    self.adaptive_prefetch.record_provider_fetch(
-                                                        monotonic() - fetch_started
+                                                if (
+                                                    is_prefetch
+                                                    and hasattr(
+                                                        self, "adaptive_prefetch"
                                                     )
+                                                    and self.adaptive_prefetch.should_abort_prefetch(
+                                                        fetch_generation
+                                                    )
+                                                ):
+                                                    self._inflight_chunk = None
+                                                    connection.seek(
+                                                        chunk_range=self.chunker.get_chunk_range(
+                                                            position=chunk.start
+                                                        )
+                                                    )
+                                                    return
 
                                             if not data:
                                                 # Signal the outer loop to refresh the URL
@@ -1064,7 +1244,20 @@ class MediaStream:
                                                 await self._cache_chunk(
                                                     start=chunk.start,
                                                     data=data,
+                                                    admission=(
+                                                        "prefetch"
+                                                        if is_prefetch
+                                                        and not self._delivery_registry.has_pending(
+                                                            chunk.start
+                                                        )
+                                                        else "demand"
+                                                    ),
                                                 )
+                                                self._inflight_chunk = None
+                                                if hasattr(self, "adaptive_prefetch"):
+                                                    self.adaptive_prefetch.record_provider_fetch(
+                                                        monotonic() - fetch_started
+                                                    )
 
                                                 chunk.emit_cache_signal()
 
@@ -1075,9 +1268,10 @@ class MediaStream:
                                                 position = (
                                                     connection.current_read_position
                                                 )
-                                                self._update_runway_observation(
-                                                    position
-                                                )
+                                                if self._consumer_end is not None:
+                                                    self._update_runway_observation(
+                                                        self._consumer_end + 1
+                                                    )
 
                                                 self.session_statistics.bytes_transferred += len(
                                                     data
@@ -1229,9 +1423,27 @@ class MediaStream:
                                     # Sequential playhead prefetch: fill ahead without
                                     # blocking the current VFS read (already returned /
                                     # waiting independently via is_cached).
+                                    consumer_end = getattr(self, "_consumer_end", None)
+                                    if consumer_end is None and hasattr(
+                                        read, "chunk_range"
+                                    ):
+                                        consumer_end = getattr(
+                                            read.chunk_range,
+                                            "request_range",
+                                            (None, None),
+                                        )[1]
+                                    ap_manager = getattr(
+                                        self, "adaptive_prefetch", None
+                                    )
+                                    should_prefetch = (
+                                        ap_manager is None
+                                        or ap_manager.should_prefetch_now()
+                                        or ap_manager.get_effective_bitrate() <= 0
+                                    )
                                     if (
                                         self.config.prefetch_chunks > 0
-                                        and read.read_type in ("body_read", "cache_hit")
+                                        and consumer_end is not None
+                                        and should_prefetch
                                     ):
                                         active_leases = 0
                                         pool = getattr(self, "_http_pool", None)
@@ -1291,9 +1503,7 @@ class MediaStream:
                                         )
 
                                         if prefetch_window > 0:
-                                            _, playhead_end = (
-                                                read.chunk_range.request_range
-                                            )
+                                            playhead_end = consumer_end
                                             ahead = self.chunker.get_prefetch_uncached(
                                                 after_end=playhead_end,
                                                 count=prefetch_window,
@@ -1382,6 +1592,21 @@ class MediaStream:
                             )
                         )
 
+                        inflight = getattr(self, "_inflight_chunk", None)
+                        chunk_start = inflight[1] if inflight else position
+                        self._set_recovery_state(
+                            StreamRecoveryPhase.TRANSPORT_RETRY,
+                            generation=run_generation,
+                            chunk_start=chunk_start,
+                            failed_url=(
+                                str(failed_connection.response.request.url)
+                                if failed_connection
+                                else None
+                            ),
+                            attempt=attempt_count + 1,
+                            timeout_bound=10.0,
+                        )
+
                         # If the connection returned 0 bytes (URL expired/exhausted),
                         # refresh the download URL before the next retry so we don't
                         # loop forever on a dead debrid link.
@@ -1404,10 +1629,41 @@ class MediaStream:
 
                             continue
 
+                        # Body iterator failures must be retried here, never by
+                        # yielding a second response from establish_connection().
+                        if (
+                            failed_connection is not None
+                            and isinstance(
+                                e.original_exception,
+                                (
+                                    httpx.ReadError,
+                                    httpx.RemoteProtocolError,
+                                    httpx.TimeoutException,
+                                ),
+                            )
+                            and not isinstance(e.original_exception, httpx.PoolTimeout)
+                            and await self._recover_transport_url(
+                                str(failed_connection.response.request.url),
+                                run_generation,
+                            )
+                        ):
+                            attempt_count = 0
+                            continue
+
+                        self._set_recovery_state(
+                            StreamRecoveryPhase.IDLE, generation=run_generation
+                        )
+
+                        # A seek during refresh supersedes this connection's error.
+                        # The next turn selects the latest demand, not the failed tip.
+                        if not self._transport_generation_live(run_generation):
+                            continue
+
                         # All retries exhausted — reset attempt count so the next
                         # connection attempt (after break/restart) starts fresh.
                         attempt_count = 0
-                        self._stream_error.value = e.original_exception
+                        if hasattr(self, "_stream_error"):
+                            self._stream_error.value = e.original_exception
 
                         # FIX-03: Signal readiness before breaking so Trio's nursery.start()
                         # does not raise RuntimeError("task exited without calling task_status.started()").
@@ -1423,7 +1679,8 @@ class MediaStream:
                             )
                         )
 
-                        self._stream_error.value = e.original_exception
+                        if hasattr(self, "_stream_error"):
+                            self._stream_error.value = e.original_exception
 
                         # FIX-03: Signal readiness so the caller is not left hanging.
                         if not has_started:
@@ -1437,7 +1694,8 @@ class MediaStream:
                             self.build_log_message(f"Unexpected error from stream: {e}")
                         )
 
-                        self._stream_error.value = e
+                        if hasattr(self, "_stream_error"):
+                            self._stream_error.value = e
 
                         # FIX-03: Signal readiness so the caller is not left hanging.
                         if not has_started:
@@ -1478,14 +1736,20 @@ class MediaStream:
                 )
 
             try:
+                self._set_recovery_state(StreamRecoveryPhase.IDLE)
                 yield stream_connection
             finally:
+                self._inflight_chunk = None
                 if self._active_stream_connection is stream_connection:
                     self._active_stream_connection = None
 
     async def close(self) -> None:
         """Immediately terminate the active stream."""
 
+        # Fence even an idle/cache-only stream before any further refill.
+        self.is_killed.value = True
+        self._inflight_chunk = None
+        self._set_recovery_state(StreamRecoveryPhase.IDLE)
         # First wait for the stream to stop, then close the client
         if self.is_streaming.value:
             # FIX-04: Do NOT call clear_emitters() here.
@@ -1614,6 +1878,36 @@ class MediaStream:
                 chunk_range=chunk_range,
             )
 
+            start_byte, end_byte = chunk_range.request_range
+            foreground = (
+                start_byte >= self.config.header_size
+                and end_byte < self.chunker.footer_start
+                and (
+                    read_type == "body_read"
+                    or (
+                        read_type == "cache_hit"
+                        and (
+                            self._is_sequential_cache_playback(chunk_range)
+                            or chunk_range.size > self.config.block_size * 2
+                        )
+                    )
+                )
+            )
+            if foreground:
+                manager = getattr(self, "adaptive_prefetch", None)
+                if manager is not None:
+                    generation = manager.current_generation
+                    manager.record_read(start_byte, end_byte, monotonic())
+                    self._consumer_end = end_byte
+                    self._update_runway_observation(end_byte + 1)
+                    if manager.current_generation != generation:
+                        connection = self._active_stream_connection
+                        if connection is not None:
+                            connection.seek(chunk_range=chunk_range)
+                    self._protect_consumer(start_byte)
+                else:
+                    self._consumer_end = end_byte
+
             # Start the stream and wait for a connection before progressing with an uncached body read.
             # This MUST be done before assigning a value to current_read,
             # or else the stream will not receive the value.
@@ -1626,8 +1920,14 @@ class MediaStream:
                         await self._delivery_registry.register_pending(chunk.start)
                     )
                 start_pos = chunk_range.position
-            elif read_type == "cache_hit" and self._is_sequential_cache_playback(
-                chunk_range
+            elif (
+                read_type == "cache_hit"
+                and foreground
+                and (
+                    getattr(self, "adaptive_prefetch", None) is None
+                    or self.adaptive_prefetch.should_prefetch_now()
+                    or self.adaptive_prefetch.get_effective_bitrate() <= 0
+                )
             ):
                 _, playhead_end = chunk_range.request_range
                 cache_usage = 0.0
@@ -1674,14 +1974,6 @@ class MediaStream:
                 read_type=read_type,
             )
 
-            if hasattr(self, "adaptive_prefetch"):
-                start_byte, end_byte = chunk_range.request_range
-                self.adaptive_prefetch.record_read(
-                    start=start_byte,
-                    end=end_byte,
-                    current_time=monotonic(),
-                )
-
             yield read_type
         finally:
             with trio.CancelScope(shield=True):
@@ -1698,25 +1990,24 @@ class MediaStream:
         if start < self.config.header_size or start >= self.chunker.footer_start:
             return False
 
-        previous = self.recent_reads.previous_read.value
-        if previous is None or previous.read_type not in _HOT_STREAM_READ_TYPES:
-            return False
-
-        _, previous_end = previous.chunk_range.request_range
+        previous_end = getattr(self, "_consumer_end", None)
+        if previous_end is None:
+            previous = self.recent_reads.previous_read.value
+            if previous is None or previous.read_type not in _HOT_STREAM_READ_TYPES:
+                return False
+            previous_start, previous_end = previous.chunk_range.request_range
+            if (
+                previous_start < self.config.header_size
+                or previous_end >= self.chunker.footer_start
+            ):
+                return False
         return (
             previous_end < end
-            and start <= previous_end + 1 + self.config.sequential_read_tolerance
+            and abs(start - previous_end - 1) <= self.config.sequential_read_tolerance
         )
 
-    async def read(
-        self,
-        *,
-        request_start: int,
-        request_end: int,
-        request_size: int,
-    ) -> bytes:
-        """Handles incoming read requests from the VFS."""
-
+    def _protect_consumer(self, request_start: int) -> None:
+        """Metadata probes must not move the foreground lease window."""
         # Protect active playhead lookback and lookahead chunks in VFS cache
         try:
             from .cache import Cache
@@ -1741,6 +2032,14 @@ class MediaStream:
         except Exception:
             pass
 
+    async def read(
+        self,
+        *,
+        request_start: int,
+        request_end: int,
+        request_size: int,
+    ) -> bytes:
+        """Handles incoming read requests from the VFS."""
         read_range = self.chunker.get_chunk_range(
             position=request_start,
             size=request_size,
@@ -1955,6 +2254,9 @@ class MediaStream:
         transport_attempt = 0
         backoffs = [0.2, 0.5, 1.0]
         request_kind = "scan" if end is not None else "body"
+        generation = getattr(
+            getattr(self, "adaptive_prefetch", None), "current_generation", 0
+        )
 
         def _resolve_stream_workload() -> Workload:
             try:
@@ -1973,7 +2275,39 @@ class MediaStream:
         while transport_attempt < max_transport_attempts:
             lease: GenerationLease | None = None
             failed_generation: int | None = None
+            yielded = False
+            request_url = self.target_url.value
+            if request_kind == "body":
+                inflight = getattr(self, "_inflight_chunk", None)
+                chunk_start = inflight[1] if inflight else start
+                remaining_attempts = max_transport_attempts - transport_attempt
+                stream_cfg = getattr(self, "config", None)
+                connect_timeout = float(
+                    getattr(stream_cfg, "connect_timeout_seconds", 5.0)
+                )
+                remaining_backoffs = sum(
+                    backoffs[min(i, len(backoffs) - 1)]
+                    for i in range(transport_attempt, max_transport_attempts - 1)
+                )
+                url_refresh_budget = 10.0
+                estimated_bound = (
+                    remaining_attempts * connect_timeout
+                    + remaining_backoffs
+                    + url_refresh_budget
+                )
+                self._set_recovery_state(
+                    StreamRecoveryPhase.TRANSPORT_RETRY,
+                    generation=generation,
+                    chunk_start=chunk_start,
+                    failed_url=request_url,
+                    attempt=transport_attempt + 1,
+                    timeout_bound=estimated_bound,
+                )
             try:
+                if not self._transport_generation_live(generation):
+                    raise RecoverableMediaStreamException(
+                        DebridServiceClosedConnectionException(provider=self.provider)
+                    )
                 if self._http_pool is not None:
                     failed_generation = self._http_pool.generation
                     try:
@@ -1999,9 +2333,10 @@ class MediaStream:
                     else:
                         client = self._resolve_async_client()
 
+                    request_url = self.target_url.value
                     async with client.stream(
                         method="GET",
-                        url=self.target_url.value,
+                        url=request_url,
                         headers=headers,
                         extensions=extensions,
                     ) as stream:
@@ -2040,10 +2375,13 @@ class MediaStream:
 
                         self.session_statistics.total_session_connections += 1
 
+                        yielded = True
                         yield stream
 
                         return
             except httpx.HTTPStatusError as e:
+                if yielded:
+                    raise
                 status_code = e.response.status_code
 
                 logger.warning(self.build_log_message(f"HTTP error {status_code}: {e}"))
@@ -2140,24 +2478,25 @@ class MediaStream:
                 httpx.ConnectError,
                 httpx.InvalidURL,
             ) as e:
+                if yielded:
+                    raise
+                # Preserve the legacy initial-connect/scan ConnectError recovery,
+                # but never treat a malformed URL as a refreshable transport fault.
+                if (
+                    isinstance(e, httpx.ConnectError)
+                    and transport_attempt == 0
+                    and (
+                        end is not None
+                        or self.session_statistics.bytes_transferred == 0
+                    )
+                ):
+                    await self._refresh_download_url(failed_url=request_url)
                 logger.warning(
                     self.build_log_message(
                         f"Encountered {e.__class__.__name__}: {redact_text(str(e))} "
                         f"(attempt {transport_attempt + 1}/{max_transport_attempts})"
                     )
                 )
-
-                if transport_attempt == 0:
-                    # On first exception, try refreshing the URL in case it's a connectivity issue
-                    failed_url = self.target_url.value
-                    has_fresh_url = await self._refresh_download_url(
-                        failed_url=failed_url
-                    )
-
-                    if has_fresh_url:
-                        logger.warning(
-                            self.build_log_message("URL refresh after timeout")
-                        )
 
                 if await self._retry_with_backoff(
                     transport_attempt,
@@ -2167,10 +2506,20 @@ class MediaStream:
                     transport_attempt += 1
                     continue
 
+                if (
+                    end is None
+                    and isinstance(e, httpx.ConnectError)
+                    and await self._recover_transport_url(request_url, generation)
+                ):
+                    transport_attempt = 0
+                    continue
+
                 raise DebridServiceUnableToConnectException(
                     provider=self.provider
                 ) from e
             except httpx.PoolTimeout as e:
+                if yielded:
+                    raise
                 # Pool saturation: shed + recycle once, then fail-fast (no backoff storm).
                 pool_repr = ""
                 try:
@@ -2219,6 +2568,8 @@ class MediaStream:
                     provider=self.provider
                 ) from e
             except (httpx.RemoteProtocolError, httpx.TimeoutException) as e:
+                if yielded:
+                    raise
                 # This can happen if the server closes the connection prematurely
                 logger.warning(
                     self.build_log_message(
@@ -2234,6 +2585,12 @@ class MediaStream:
                     transport_attempt += 1
                     continue
 
+                if end is None and await self._recover_transport_url(
+                    request_url, generation
+                ):
+                    transport_attempt = 0
+                    continue
+
                 raise DebridServiceClosedConnectionException(
                     provider=self.provider
                 ) from e
@@ -2241,9 +2598,12 @@ class MediaStream:
                 DebridServiceLinkUnavailable,
                 DebridServiceFairUsageLimitException,
                 DebridServiceRefusedRangeRequestException,
+                RecoverableMediaStreamException,
             ):
                 raise
             except Exception as e:
+                if yielded:
+                    raise
                 logger.exception(
                     self.build_log_message("Unexpected error connecting to stream")
                 )
@@ -2253,6 +2613,12 @@ class MediaStream:
                     provider=self.provider,
                 ) from e
             finally:
+                if request_kind == "body":
+                    self._set_recovery_state(
+                        StreamRecoveryPhase.IDLE,
+                        generation=generation,
+                        chunk_start=start,
+                    )
                 if lease is not None and self._http_pool is not None:
                     await self._http_pool.release_lease(lease)
 
@@ -2272,11 +2638,9 @@ class MediaStream:
         # First, attempt to detect if the requested range is already cached.
         # This uses a lightweight check, that just checks for existence,
         # rather than reading the actual data.
-        is_request_fully_cached = await trio.to_thread.run_sync(
-            lambda: self._check_cache(
-                start=chunk_range.first_chunk.start,  # Align to start of chunk for cache check
-                end=end,
-            )
+        is_request_fully_cached = self._check_cache(
+            start=chunk_range.first_chunk.start,  # Align to start of chunk for cache check
+            end=end,
         )
 
         if is_request_fully_cached:
@@ -2402,42 +2766,102 @@ class MediaStream:
             "Failed to fetch discrete byte range after integrity retries"
         )
 
+    async def _wait_one_chunk(self, chunk: Chunk) -> None:
+        entry = self._delivery_registry.get_entry(chunk.start)
+        if entry is None:
+            await chunk.is_cached.wait_value(True)
+            return
+        await trio_util.wait_any(
+            lambda: chunk.is_cached.wait_value(True), entry.ready.wait
+        )
+
+    async def _wait_all_chunks(self, chunk_range: ChunkRange) -> None:
+        async with trio.open_nursery() as nursery:
+            for chunk in chunk_range.chunks:
+                nursery.start_soon(self._wait_one_chunk, chunk)
+
+    async def _wait_recovery_fence(self, generation: int) -> None:
+        # IDLE means the replacement connected, not that its bytes are ready.
+        # Keep the original bounded deadline through that handoff.
+        while self._transport_generation_live(generation):
+            await self._recovery_event.wait()
+
+    def _recovery_grace_budget(self, chunk_range: ChunkRange, generation: int) -> float:
+        state = self._recovery_state
+        if (
+            not self._transport_generation_live(generation)
+            or not self._is_foreground_eligible()
+            or state.phase == StreamRecoveryPhase.IDLE
+            or state.generation != generation
+        ):
+            return 0.0
+        if state.chunk_start is not None and not any(
+            chunk.start == state.chunk_start for chunk in chunk_range.uncached_chunks
+        ):
+            return 0.0
+
+        if state.recovery_deadline is not None:
+            try:
+                now = trio.current_time()
+            except RuntimeError:
+                now = monotonic()
+            remaining = state.recovery_deadline - now
+            return max(0.0, remaining)
+
+        return max(0.0, state.timeout_bound)
+
+    async def _wait_chunk_stage(
+        self, chunk_range: ChunkRange, deadline: float, generation: int
+    ) -> bool:
+        ready = False
+
+        async def wait_ready() -> None:
+            nonlocal ready
+            await self._wait_all_chunks(chunk_range)
+            ready = True
+
+        with trio.move_on_at(deadline):
+            await trio_util.wait_any(
+                wait_ready,
+                lambda: self._stream_error.wait_value(lambda value: value is not None),
+                lambda: self.is_killed.wait_value(True),
+                lambda: self._wait_recovery_fence(generation),
+            )
+        error = self._stream_error.value
+        if error is not None:
+            raise error from None
+        return ready
+
     async def _wait_until_chunks_ready(
         self,
         *,
         chunk_range: ChunkRange,
     ) -> None:
-        """Wait for persistent admission or a transient delivery notification."""
-
-        async def wait_one(chunk: Chunk) -> None:
-            entry = self._delivery_registry.get_entry(chunk.start)
-            if entry is None:
-                await chunk.is_cached.wait_value(True)
+        """Wait for delivery with one bounded, foreground-only recovery grace."""
+        started = monotonic()
+        generation = self.adaptive_prefetch.current_generation
+        nominal_timeout = self.config.chunk_wait_timeout_seconds
+        if await self._wait_chunk_stage(
+            chunk_range, trio.current_time() + nominal_timeout, generation
+        ):
+            return
+        if not chunk_range.uncached_chunks:
+            return
+        grace_budget = self._recovery_grace_budget(chunk_range, generation)
+        if grace_budget:
+            self._trace_stream(
+                f"Entering active recovery grace wait ({grace_budget:.1f}s) "
+                f"for phase={self._recovery_state.phase.value}"
+            )
+            if await self._wait_chunk_stage(
+                chunk_range, trio.current_time() + grace_budget, generation
+            ):
                 return
-            async with trio.open_nursery() as nursery:
-
-                async def wait_cache() -> None:
-                    await chunk.is_cached.wait_value(True)
-                    nursery.cancel_scope.cancel()
-
-                async def wait_delivery() -> None:
-                    await entry.ready.wait()
-                    nursery.cancel_scope.cancel()
-
-                nursery.start_soon(wait_cache)
-                nursery.start_soon(wait_delivery)
-
-        try:
-            with trio.fail_after(self.config.chunk_wait_timeout_seconds):
-                async with trio.open_nursery() as nursery:
-                    for chunk in chunk_range.chunks:
-                        nursery.start_soon(wait_one, chunk)
-        except trio.TooSlowError:
-            if len(chunk_range.uncached_chunks) > 0:
-                raise ChunksTooSlowException(
-                    threshold=self.config.chunk_wait_timeout_seconds,
-                    chunks=chunk_range.uncached_chunks,
-                ) from None
+        if chunk_range.uncached_chunks:
+            raise ChunksTooSlowException(
+                threshold=ceil(monotonic() - started),
+                chunks=chunk_range.uncached_chunks,
+            )
 
     def _check_cache(self, *, start: int, end: int) -> bool:
         """Check if the given byte range is fully cached."""
@@ -2486,6 +2910,14 @@ class MediaStream:
             admission=admission,
         )
 
+        if (
+            result == CachePutResult.SKIPPED_PREFETCH_PRESSURE
+            and self._delivery_registry.has_pending(start)
+        ):
+            # A foreground reader can arrive while speculative admission awaits
+            # the cache shard. Deliver the same bytes; never issue another fetch.
+            await self._delivery_registry.publish(start=start, payload=data)
+
         if result == CachePutResult.REFUSED_PHYSICAL_PRESSURE:
             # Persistent cache cannot admit this chunk. Publish bytes directly
             # into the delivery registry so waiting readers get the data without
@@ -2500,7 +2932,165 @@ class MediaStream:
 
         return result
 
-    async def _refresh_download_url(self, failed_url: str | None = None) -> bool:
+    def _transport_generation_live(self, generation: int) -> bool:
+        return not getattr(
+            getattr(self, "is_killed", None), "value", False
+        ) and generation == getattr(
+            getattr(self, "adaptive_prefetch", None), "current_generation", 0
+        )
+
+    def _set_recovery_state(
+        self,
+        phase: StreamRecoveryPhase,
+        *,
+        generation: int = 0,
+        chunk_start: int | None = None,
+        failed_url: str | None = None,
+        attempt: int = 0,
+        timeout_bound: float = 0.0,
+        recovery_deadline: float | None = None,
+    ) -> None:
+        """Update active recovery state and notify waiting readers."""
+        try:
+            now = trio.current_time()
+        except RuntimeError:
+            now = monotonic()
+
+        episode = getattr(self, "_recovery_episode", 0)
+        previous_state = getattr(self, "_recovery_state", None)
+        if phase != StreamRecoveryPhase.IDLE:
+            if (
+                previous_state is None
+                or previous_state.phase == StreamRecoveryPhase.IDLE
+            ):
+                episode += 1
+                self._recovery_episode = episode
+        else:
+            episode = 0
+            self._recovery_episode = 0
+
+        computed_deadline: float | None = None
+        if phase != StreamRecoveryPhase.IDLE:
+            if recovery_deadline is not None:
+                computed_deadline = recovery_deadline
+            elif timeout_bound > 0.0:
+                computed_deadline = now + timeout_bound
+
+        self._recovery_state = StreamRecoveryState(
+            phase=phase,
+            generation=generation,
+            chunk_start=chunk_start,
+            failed_url=failed_url,
+            attempt=attempt,
+            start_time=now,
+            timeout_bound=timeout_bound,
+            recovery_deadline=computed_deadline,
+            recovery_episode=episode,
+        )
+        old_event = getattr(self, "_recovery_event", None)
+        self._recovery_event = trio.Event()
+        if old_event is not None:
+            old_event.set()
+
+    def _is_foreground_eligible(self) -> bool:
+        """
+        Check if stream is eligible for durable transport recovery.
+        Qualifies if either Plex telemetry marks it foreground OR the stream
+        has established sequential body consumption (body reads occurred,
+        bytes transferred > 0, consumer runway active, not an unestablished probe).
+        """
+        try:
+            from program.services.streaming.telemetry import (
+                playback_telemetry_collector,
+            )
+
+            if playback_telemetry_collector.is_media_foreground(
+                self.file_metadata.path
+            ):
+                return True
+        except Exception:
+            pass
+
+        # FUSE-only / non-Plex sequential body playback fallback:
+        # Requires positive bytes transferred, active body reads or active consumer runway,
+        # distinguishing established media playback from discrete header/footer/metadata probes.
+        bytes_transferred = getattr(
+            getattr(self, "session_statistics", None), "bytes_transferred", 0
+        )
+        body_read_count = getattr(
+            getattr(self, "session_statistics", None), "body_read_count", 0
+        )
+        consumer_end = getattr(self, "_consumer_end", None)
+        return bytes_transferred > 0 and (
+            body_read_count > 0 or consumer_end is not None
+        )
+
+    async def _recover_transport_url(self, failed_url: str, generation: int) -> bool:
+        """
+        Durable transport recovery per established foreground handle.
+        Enforces a per-failed-URL budget: at most 1 recovery attempt for the same URL.
+        Re-arms if new URL successfully made media transfer progression (> 0 new bytes).
+        """
+        last_recovered = getattr(self, "_last_recovered_url", None)
+        bytes_at_recovery = getattr(self, "_bytes_transferred_at_last_recovery", 0)
+        current_bytes = getattr(
+            getattr(self, "session_statistics", None), "bytes_transferred", 0
+        )
+
+        # Disallow recovery if:
+        # 1. This exact failed_url was already attempted for recovery, OR
+        # 2. We already recovered once, and no new bytes were transferred since that recovery (prevent storming on dead replacement), OR
+        # 3. Generation is stale / stream killed, OR
+        # 4. Stream has transferred 0 bytes (initial connection failure), OR
+        # 5. Stream is not foreground eligible (neither Plex foreground nor established sequential body playback).
+        if (
+            last_recovered == failed_url
+            or (last_recovered is not None and current_bytes <= bytes_at_recovery)
+            or not self._transport_generation_live(generation)
+            or current_bytes <= 0
+            or not self._is_foreground_eligible()
+        ):
+            return False
+
+        # Set tracking before awaiting the per-file lock; outer run retries cannot reset it.
+        self._last_recovered_url = failed_url
+        self._bytes_transferred_at_last_recovery = current_bytes
+
+        inflight = getattr(self, "_inflight_chunk", None)
+        chunk_start = inflight[1] if inflight else None
+        safe_url = redact_text(failed_url)
+        logger.info("D83 transport recovery attempted for URL: {}", safe_url)
+        self._set_recovery_state(
+            StreamRecoveryPhase.URL_REFRESH,
+            generation=generation,
+            chunk_start=chunk_start,
+            failed_url=failed_url,
+            attempt=1,
+            timeout_bound=20.0,
+        )
+        try:
+            refreshed = await self._refresh_download_url(failed_url=failed_url)
+            recovered = (
+                self._transport_generation_live(generation)
+                and refreshed
+                and self.target_url.value != failed_url
+            )
+            logger.info(
+                "D83 transport recovery {}", "ready" if recovered else "unavailable"
+            )
+            return recovered
+        finally:
+            self._set_recovery_state(
+                StreamRecoveryPhase.IDLE,
+                generation=generation,
+                chunk_start=chunk_start,
+            )
+
+    async def _refresh_download_url(
+        self,
+        failed_url: str | None = None,
+        deadline: float | None = None,
+    ) -> bool:
         """
         Refresh download URL by unrestricting from provider.
 
@@ -2511,6 +3101,8 @@ class MediaStream:
         Args:
             failed_url: The exact URL that failed, used for race comparison.
                 If omitted, defaults to self.target_url.value.
+            deadline: Optional monotonic timestamp deadline. If omitted, derived
+                from self._recovery_state.recovery_deadline or default timeout bound.
 
         Returns:
             True if successfully refreshed with a distinct URL, False otherwise.
@@ -2519,20 +3111,70 @@ class MediaStream:
             failed_url if failed_url is not None else self.target_url.value
         )
         refresh_lock = _get_stream_refresh_lock(self.file_metadata.original_filename)
+        generation = getattr(
+            getattr(self, "adaptive_prefetch", None), "current_generation", 0
+        )
+
+        # Compute effective monotonic deadline
+        now_mono = monotonic()
+        if deadline is not None:
+            effective_deadline = deadline
+        else:
+            state = getattr(self, "_recovery_state", None)
+            if state is not None and state.recovery_deadline is not None:
+                effective_deadline = state.recovery_deadline
+            else:
+                effective_deadline = now_mono + 20.0
+
+        if now_mono >= effective_deadline:
+            return False
 
         async with refresh_lock:
+            if (
+                not self._transport_generation_live(generation)
+                or monotonic() >= effective_deadline
+            ):
+                return False
             from program.services.filesystem.vfs import VFSDatabase
 
             vfs_db = di[VFSDatabase]
 
+            def _get_entry_safe(force_resolve: bool) -> Any:
+                import inspect
+
+                fn = vfs_db.get_entry_by_original_filename
+                target = getattr(fn, "side_effect", None) or fn
+                supports_deadline = False
+                try:
+                    sig = inspect.signature(target)
+                    supports_deadline = "operation_deadline" in sig.parameters or any(
+                        p.kind == inspect.Parameter.VAR_KEYWORD
+                        for p in sig.parameters.values()
+                    )
+                except Exception:
+                    supports_deadline = False
+
+                if supports_deadline:
+                    return fn(
+                        original_filename=self.file_metadata.original_filename,
+                        force_resolve=force_resolve,
+                        operation_deadline=effective_deadline,
+                    )
+                return fn(
+                    original_filename=self.file_metadata.original_filename,
+                    force_resolve=force_resolve,
+                )
+
             # Step 1: Mandatory DB re-check before provider refresh (force_resolve=False)
             entry_info = await trio.to_thread.run_sync(
-                lambda: vfs_db.get_entry_by_original_filename(
-                    original_filename=self.file_metadata.original_filename,
-                    force_resolve=False,
-                )
+                lambda: _get_entry_safe(force_resolve=False)
             )
 
+            if (
+                not self._transport_generation_live(generation)
+                or monotonic() >= effective_deadline
+            ):
+                return False
             if entry_info:
                 persisted_url = entry_info.url
                 if persisted_url and persisted_url != target_failed_url:
@@ -2544,12 +3186,14 @@ class MediaStream:
 
             # Step 2: Persisted state still references failed URL or is missing -> canonical provider refresh
             entry_info_refreshed = await trio.to_thread.run_sync(
-                lambda: vfs_db.get_entry_by_original_filename(
-                    original_filename=self.file_metadata.original_filename,
-                    force_resolve=True,
-                )
+                lambda: _get_entry_safe(force_resolve=True)
             )
 
+            if (
+                not self._transport_generation_live(generation)
+                or monotonic() >= effective_deadline
+            ):
+                return False
             if entry_info_refreshed:
                 fresh_url = entry_info_refreshed.url
                 if fresh_url and fresh_url != target_failed_url:
@@ -2625,6 +3269,9 @@ class MediaStream:
         return data
 
     def build_log_message(self, message: str) -> str:
-        return (
-            f"{message} [fh: {self.fh} | file={self.file_metadata.path.split('/')[-1]}]"
+        fh_repr = getattr(self, "fh", "unknown")
+        meta_path = getattr(getattr(self, "file_metadata", None), "path", "unknown")
+        file_repr = (
+            meta_path.split("/")[-1] if isinstance(meta_path, str) else "unknown"
         )
+        return f"{message} [fh: {fh_repr} | file={file_repr}]"

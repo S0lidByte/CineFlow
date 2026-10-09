@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Literal, TypedDict
 
 from kink import di
@@ -150,13 +151,22 @@ class VFSDatabase:
         self,
         entry: MediaEntry,
         session: Session,
+        operation_deadline: float | None = None,
     ) -> str | None:
         """
         Refresh the unrestricted URL for a MediaEntry using the downloader services.
 
         Args:
             entry: MediaEntry to refresh
+            session: Active database session
+            operation_deadline: Optional monotonic timestamp deadline
         """
+
+        if operation_deadline is not None and time.monotonic() >= operation_deadline:
+            logger.debug(
+                f"Skipping unrestrict for {entry.original_filename}: operation deadline already expired"
+            )
+            return None
 
         if not self.downloader:
             logger.warning("No downloader available to refresh unrestricted URL")
@@ -175,9 +185,23 @@ class VFSDatabase:
 
         if service and entry.download_url:
             try:
-                new_unrestricted = service.unrestrict_link(entry.download_url)
+                new_unrestricted = service.unrestrict_link(
+                    entry.download_url,
+                    operation_deadline=operation_deadline,
+                )
 
                 if new_unrestricted:
+                    # Final check before database mutation: if deadline expired while unrestrict was running,
+                    # do NOT mutate database state.
+                    if (
+                        operation_deadline is not None
+                        and time.monotonic() >= operation_deadline
+                    ):
+                        logger.debug(
+                            f"Discarding unrestrict result for {entry.original_filename}: deadline expired during request"
+                        )
+                        return None
+
                     entry.unrestricted_url = new_unrestricted.download
 
                     # Always save the unrestricted URL so we don't spam the API on subsequent calls
@@ -214,6 +238,7 @@ class VFSDatabase:
         self,
         original_filename: str,
         force_resolve: bool = False,
+        operation_deadline: float | None = None,
     ) -> GetEntryByOriginalFilenameResult | None:
         """
         Get entry metadata and download URL by original filename.
@@ -223,10 +248,17 @@ class VFSDatabase:
         Args:
             original_filename: Original filename from debrid provider
             force_resolve: If True, force refresh of unrestricted URL from provider
+            operation_deadline: Optional monotonic timestamp deadline
 
         Returns:
             Dictionary with entry metadata and URLs, or None if not found
         """
+
+        if operation_deadline is not None and time.monotonic() >= operation_deadline:
+            logger.debug(
+                f"Skipping get_entry_by_original_filename for {original_filename}: deadline expired"
+            )
+            return None
 
         try:
             with db_session() as session:
@@ -250,6 +282,7 @@ class VFSDatabase:
                     unrestricted_url = self.refresh_unrestricted_url(
                         entry,
                         session=session,
+                        operation_deadline=operation_deadline,
                     )
 
                 bitrate: int | None = None

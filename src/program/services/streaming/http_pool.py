@@ -57,6 +57,7 @@ class TrioStreamingHttpPool:
         max_total_requests: int = MAX_TOTAL_STREAM_REQUESTS,
         max_body_streams: int = MAX_BODY_STREAMS,
         warn_interval: float = 5.0,
+        connect_timeout: float | None = None,
     ) -> None:
         if proxy_url is None:
             try:
@@ -69,6 +70,18 @@ class TrioStreamingHttpPool:
                 self._proxy_url = None
         else:
             self._proxy_url = proxy_url
+
+        if connect_timeout is None:
+            try:
+                from program.settings import settings_manager
+
+                self._connect_timeout: float | None = float(
+                    settings_manager.settings.stream.connect_timeout_seconds
+                )
+            except Exception:
+                self._connect_timeout = None
+        else:
+            self._connect_timeout = float(connect_timeout)
 
         self._max_total_requests = max_total_requests
         self._max_body_streams = max_body_streams
@@ -152,7 +165,7 @@ class TrioStreamingHttpPool:
             follow_redirects=True,
             proxy=proxy_url,
             limits=stream_http_limits(),
-            timeout=stream_http_timeout(),
+            timeout=stream_http_timeout(connect_timeout=self._connect_timeout),
         )
 
     def _create_generation_clients(self) -> dict[bool, httpx.AsyncClient]:
@@ -210,9 +223,8 @@ class TrioStreamingHttpPool:
             raise httpx.PoolTimeout("Streaming HTTP body admission saturated")
 
         if kind == "body":
-            async with total:
-                async with body:
-                    yield
+            async with total, body:
+                yield
         else:
             async with total:
                 yield
@@ -221,7 +233,7 @@ class TrioStreamingHttpPool:
         """Close retired clients for generations that no longer have active leases."""
         gens_to_close: list[int] = []
         async with self._lock:
-            for gen in list(self._retired_generations.keys()):
+            for gen in tuple(self._retired_generations.keys()):
                 if self._active_leases_by_gen.get(gen, 0) <= 0:
                     gens_to_close.append(gen)
 
@@ -412,9 +424,8 @@ async def admit_stream_request(kind: RequestKind) -> AsyncGenerator[None]:
         raise httpx.PoolTimeout("Streaming HTTP body admission saturated")
 
     if kind == "body":
-        async with total:
-            async with body:
-                yield
+        async with total, body:
+            yield
     else:
         async with total:
             yield

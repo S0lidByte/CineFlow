@@ -120,12 +120,17 @@ class DownloaderBase(ABC):
         """
 
     @abstractmethod
-    def unrestrict_link(self, link: str) -> UnrestrictedLink | None:
+    def unrestrict_link(
+        self,
+        link: str,
+        operation_deadline: float | None = None,
+    ) -> UnrestrictedLink | None:
         """
         Unrestrict a download link using the debrid service
 
         Args:
             link: The original download URL to unrestrict
+            operation_deadline: Optional monotonic timestamp deadline for the request
 
         Returns:
             UnrestrictedLink | None: The unrestricted download URL, or None if unrestricting failed

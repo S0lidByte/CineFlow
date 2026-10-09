@@ -30,11 +30,18 @@ class AsyncClient(httpx.AsyncClient):
     """
 
     def __init__(self) -> None:
+        try:
+            connect_timeout = float(
+                settings_manager.settings.stream.connect_timeout_seconds
+            )
+        except Exception:
+            connect_timeout = None
+
         super().__init__(
             http2=True,
             follow_redirects=True,
             limits=stream_http_limits(),
-            timeout=stream_http_timeout(),
+            timeout=stream_http_timeout(connect_timeout=connect_timeout),
             event_hooks={"response": [self.raise_on_4xx_5xx]},
         )
 
