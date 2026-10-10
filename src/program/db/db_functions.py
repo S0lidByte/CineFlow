@@ -326,10 +326,9 @@ def create_calendar(
             .where(MediaItem.aired_at.is_not(None))
             .where(MediaItem.aired_at >= start)
             .where(MediaItem.aired_at <= end)
-            .execution_options(stream_results=True)
         ).unique()
 
-        calendar_items = list(result.scalars().yield_per(500))
+        calendar_items = list(result.scalars().all())
 
         # Query 2: Shows with release_data that might have upcoming airings
         # NOTE: release_data is a custom SeriesReleaseDecorator (Pydantic model serialized
@@ -337,12 +336,10 @@ def create_calendar(
         # does not work with SQLAlchemy TypeDecorator columns. Date filtering is done
         # in Python below instead.
         shows_result = s.execute(
-            select(Show)
-            .where(Show.release_data.is_not(None))
-            .execution_options(stream_results=True)
+            select(Show).where(Show.release_data.is_not(None))
         ).unique()
 
-        potential_shows = list(shows_result.scalars().yield_per(500))
+        potential_shows = list(shows_result.scalars().all())
 
     calendar = dict[int, dict[str, Any]]()
 
@@ -645,12 +642,14 @@ def hard_reset_database() -> None:
             # Terminate existing connections for PostgreSQL
             if db.engine.name == "postgresql":
                 connection.execute(
-                    text("""
+                    text(
+                        """
                             SELECT pg_terminate_backend(pid)
                             FROM pg_stat_activity
                             WHERE datname = current_database()
                             AND pid <> pg_backend_pid()
-                        """)
+                        """
+                    )
                 )
 
                 # Drop and recreate schema

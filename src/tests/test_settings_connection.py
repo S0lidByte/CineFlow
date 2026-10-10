@@ -193,11 +193,70 @@ def test_real_debrid_unauthorized(mock_settings):
     assert result.message == "Unauthorized"
 
 
+def test_real_debrid_forbidden(mock_settings):
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.get.return_value = _FakeResponse(403)
+
+    with patch.object(ct.httpx, "Client", return_value=fake_client):
+        result = ct._probe_real_debrid()
+
+    assert result.ok is False
+    assert result.message == "Forbidden"
+
+
+def test_real_debrid_timeout(mock_settings):
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.get.side_effect = httpx.TimeoutException("Read timed out")
+
+    with patch.object(ct.httpx, "Client", return_value=fake_client):
+        result = ct._probe_real_debrid()
+
+    assert result.ok is False
+    assert result.message == "Timed out"
+
+
+def test_real_debrid_network_failure(mock_settings):
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.get.side_effect = httpx.ConnectError("Connection refused")
+
+    with patch.object(ct.httpx, "Client", return_value=fake_client):
+        result = ct._probe_real_debrid()
+
+    assert result.ok is False
+    assert result.message == "Connection failed"
+
+
+def test_probe_fails_on_unreachable_proxy(mock_settings):
+    mock_settings.downloaders.proxy_url = "http://127.0.0.1:9003"
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.get.side_effect = httpx.ProxyError("Cannot connect to proxy")
+
+    with patch.object(ct.httpx, "Client", return_value=fake_client):
+        result = ct._probe_real_debrid()
+
+    assert result.ok is False
+    assert result.message == "Connection failed"
+
+
 def test_all_debrid_ok(mock_settings):
     fake_client = MagicMock()
     fake_client.__enter__.return_value = fake_client
     fake_client.__exit__.return_value = False
-    fake_client.get.return_value = _FakeResponse(200, payload={"status": "success"})
+    fake_client.get.return_value = _FakeResponse(
+        200,
+        payload={
+            "status": "success",
+            "data": {"user": {"username": "testuser", "isPremium": True}},
+        },
+    )
 
     with patch.object(ct.httpx, "Client", return_value=fake_client):
         result = ct._probe_all_debrid()
@@ -209,6 +268,94 @@ def test_all_debrid_ok(mock_settings):
         "Bearer ad-secret-key"
         in fake_client.get.call_args.kwargs["headers"]["Authorization"]
     )
+
+
+def test_all_debrid_non_premium_fails(mock_settings):
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.get.return_value = _FakeResponse(
+        200,
+        payload={
+            "status": "success",
+            "data": {"user": {"username": "testuser", "isPremium": False}},
+        },
+    )
+
+    with patch.object(ct.httpx, "Client", return_value=fake_client):
+        result = ct._probe_all_debrid()
+
+    assert result.ok is False
+    assert "premium" in result.message.lower()
+    assert "ad-secret-key" not in result.message
+
+
+def test_all_debrid_error_envelope_fails(mock_settings):
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.get.return_value = _FakeResponse(
+        200,
+        payload={
+            "status": "error",
+            "error": {"code": "AUTH_BAD_APIKEY", "message": "Invalid API key"},
+        },
+    )
+
+    with patch.object(ct.httpx, "Client", return_value=fake_client):
+        result = ct._probe_all_debrid()
+
+    assert result.ok is False
+    assert result.message == "Invalid API key" or "error" in result.message.lower()
+    assert "ad-secret-key" not in result.message
+
+
+def test_all_debrid_missing_user_fails(mock_settings):
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.get.return_value = _FakeResponse(
+        200,
+        payload={"status": "success", "data": {}},
+    )
+
+    with patch.object(ct.httpx, "Client", return_value=fake_client):
+        result = ct._probe_all_debrid()
+
+    assert result.ok is False
+    assert "user" in result.message.lower() or "invalid" in result.message.lower()
+
+
+@pytest.mark.parametrize(
+    "status_code,expected", [(401, "Unauthorized"), (403, "Forbidden")]
+)
+def test_all_debrid_auth_failure(mock_settings, status_code, expected):
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.get.return_value = _FakeResponse(status_code)
+    with patch.object(ct.httpx, "Client", return_value=fake_client):
+        result = ct._probe_all_debrid()
+    assert result.ok is False
+    assert result.message == expected
+
+
+@pytest.mark.parametrize(
+    "failure,expected",
+    [
+        (httpx.ReadTimeout("fixture timeout"), "Timed out"),
+        (httpx.ConnectError("fixture disconnected"), "Connection failed"),
+    ],
+)
+def test_all_debrid_transport_failure(mock_settings, failure, expected):
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.get.side_effect = failure
+    with patch.object(ct.httpx, "Client", return_value=fake_client):
+        result = ct._probe_all_debrid()
+    assert result.ok is False
+    assert result.message == expected
 
 
 def test_debrid_link_ok(mock_settings):

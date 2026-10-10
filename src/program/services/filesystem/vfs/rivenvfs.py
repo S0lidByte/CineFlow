@@ -267,13 +267,13 @@ class RivenVFS(pyfuse3.Operations):
         self._tree_lock = threading.RLock()
 
         # Pending invalidations for batching (optimization: collect during sync, invalidate at end)
-        self._pending_invalidations = set[pyfuse3.InodeT]()
+        self._pending_invalidations: set[pyfuse3.InodeT] = set()
 
         # Profile hash for detecting changes (optimization: skip re-matching if unchanged)
         self._last_profile_hash: int | None = None
 
         # Set of paths currently being streamed
-        self._active_streams = dict[str, MediaStream]()
+        self._active_streams: dict[str, MediaStream] = {}
         # Sync-readable active count for Downloader backpressure (updated with dict).
         self._active_stream_count = 0
 
@@ -297,11 +297,11 @@ class RivenVFS(pyfuse3.Operations):
         self._active_streams_lock: trio.Lock
 
         # Open file handles: fh -> handle info
-        self._file_handles = dict[pyfuse3.FileHandleT, FileHandle]()
+        self._file_handles: dict[pyfuse3.FileHandleT, FileHandle] = {}
         self._next_fh = pyfuse3.FileHandleT(1)
 
         # Opener statistics
-        self.opener_stats = dict[str, dict[str, Any]]()
+        self.opener_stats: dict[str, dict[str, Any]] = {}
 
         # Mount and lifecycle management
         self.lifecycle_id = uuid.uuid4().hex[:8]
@@ -498,7 +498,7 @@ class RivenVFS(pyfuse3.Operations):
         candidates: dict[str, MediaStream] = {}
 
         async with self._active_streams_lock:
-            for stream_key, stream in list(self._active_streams.items()):
+            for stream_key, stream in self._active_streams.items():
                 fh = getattr(stream, "fh", None)
                 if fh is None:
                     try:
@@ -519,7 +519,7 @@ class RivenVFS(pyfuse3.Operations):
                 # worsens the pool pressure we're trying to relieve.
                 stream_age = (
                     trio.current_time() - stream.created_at
-                    if stream.created_at != 0.0
+                    if abs(stream.created_at) > 1e-6
                     else 0.0
                 )
                 zero_progress = (
@@ -800,7 +800,7 @@ class RivenVFS(pyfuse3.Operations):
 
     def _remove_node_recursive(self, node: VFSDirectory) -> None:
         """Recursively remove all children from inode map."""
-        for child in list(node.children.values()):
+        for child in tuple(node.children.values()):
             if child.inode:
                 self._inode_to_node.pop(child.inode, None)
 
@@ -2433,6 +2433,9 @@ class RivenVFS(pyfuse3.Operations):
             return pyfuse3.FileInfo(fh=pyfuse3.FileHandleT(fh))
         except pyfuse3.FUSEError:
             raise
+        except Exception:
+            logger.exception(f"open error: inode={inode}")
+            raise pyfuse3.FUSEError(errno.EIO)
 
     async def read(self, fh: pyfuse3.FileHandleT, off: int, size: int) -> bytes:
         """
@@ -2577,16 +2580,20 @@ class RivenVFS(pyfuse3.Operations):
                     )
 
                 raise pyfuse3.FUSEError(errno.ETIMEDOUT) from e
-            except* (
-                DebridServiceLinkUnavailable,
-                DebridServiceUnableToConnectException,
-            ) as e:
+            except* DebridServiceLinkUnavailable as e:
                 for exc in e.exceptions:
                     logger.error(
                         stream.build_log_message(f"{exc.__class__.__name__}: {exc}")
                     )
 
                 raise pyfuse3.FUSEError(errno.ENOENT) from e
+            except* DebridServiceUnableToConnectException as e:
+                for exc in e.exceptions:
+                    logger.error(
+                        stream.build_log_message(f"{exc.__class__.__name__}: {exc}")
+                    )
+
+                raise pyfuse3.FUSEError(errno.EIO) from e
             except* DebridServiceFairUsageLimitException as e:
                 for exc in e.exceptions:
                     logger.error(
@@ -2701,7 +2708,7 @@ class RivenVFS(pyfuse3.Operations):
             if not streams_to_close:
                 # Robust fallback: find any stream registered for this fh
                 async with self._active_streams_lock:
-                    for k, s in list(self._active_streams.items()):
+                    for k, s in tuple(self._active_streams.items()):
                         s_fh = getattr(s, "fh", None)
                         if s_fh == fh or (s_fh is None and k.endswith(f":{fh}")):
                             self._active_streams.pop(k, None)
@@ -2732,11 +2739,9 @@ class RivenVFS(pyfuse3.Operations):
 
     async def flush(self, fh: int) -> None:
         """Flush file data (no-op for read-only filesystem)."""
-        return
 
     async def fsync(self, fh: int, datasync: bool) -> None:
         """Sync file data (no-op for read-only filesystem)."""
-        return
 
     async def access(
         self, inode: pyfuse3.InodeT, mode: int, ctx: pyfuse3.RequestContext

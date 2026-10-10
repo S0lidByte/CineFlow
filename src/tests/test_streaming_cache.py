@@ -385,7 +385,7 @@ def test_cache_get_disk_io_off_trio_thread(
 
     trio.run(_run)
     assert "_write_file_bytes" in calls
-    assert "_read_file_slice" in calls
+    assert any(c in calls for c in ("_read_file_slice", "_read_file_slice_timed"))
 
 
 def test_cache_eviction_unlinks_without_holding_thread_lock(

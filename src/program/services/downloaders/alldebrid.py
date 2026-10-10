@@ -87,6 +87,9 @@ class AllDebridErrorCode(str, Enum):
     GENERIC_ERROR = "GENERIC_ERROR"
 
 
+ERR_CLIENT_NOT_INITIALIZED = "AllDebrid API client has not been initialized"
+
+
 class AllDebridMagnetStatusCode(IntEnum):
     """AllDebrid magnet numeric status codes."""
 
@@ -1231,12 +1234,17 @@ class AllDebridDownloader(DownloaderBase):
         if not response.ok:
             raise self._error_from_response(response)
 
-    def unrestrict_link(self, link: str) -> UnrestrictedLink | None:
+    def unrestrict_link(
+        self,
+        link: str,
+        operation_deadline: float | None = None,
+    ) -> UnrestrictedLink | None:
         """
         Unrestrict a link using AllDebrid.
 
         Args:
             link: The link to unrestrict.
+            operation_deadline: Optional monotonic timestamp deadline.
 
         Returns:
             UnrestrictedLink, or None on error.
@@ -1247,12 +1255,21 @@ class AllDebridDownloader(DownloaderBase):
             if api is None:
                 raise AllDebridError("AllDebrid API client has not been initialized")
 
-            response = api.session.get(
-                "v4/link/unlock",
-                params={
-                    "link": link,
-                },
-            )
+            if operation_deadline is not None:
+                response = api.session.get(
+                    "v4/link/unlock",
+                    params={
+                        "link": link,
+                    },
+                    operation_deadline=operation_deadline,
+                )
+            else:
+                response = api.session.get(
+                    "v4/link/unlock",
+                    params={
+                        "link": link,
+                    },
+                )
 
             self._maybe_backoff(response)
 
