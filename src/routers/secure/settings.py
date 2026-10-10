@@ -18,7 +18,6 @@ from program.settings.mutation import (
     apply_canonical_settings_mutation,
 )
 from program.settings.ranking_descriptions import enrich_ranking_schema
-from program.settings.ranking_patterns import validate_ranking_payload_patterns
 from program.utils.connection_tests import (
     SUPPORTED_SERVICES,
     ConnectionService,
@@ -27,16 +26,6 @@ from program.utils.connection_tests import (
 )
 
 from ..models.shared import MessageResponse
-
-
-def _validate_ranking_in_settings(settings_dict: dict[str, Any]) -> None:
-    ranking = settings_dict.get("ranking")
-    if isinstance(ranking, dict):
-        try:
-            validate_ranking_payload_patterns(cast(dict[str, Any], ranking))
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
 
 router = APIRouter(
     prefix="/settings",
@@ -262,11 +251,13 @@ async def set_settings(
             detail=f"Missing values for paths: {', '.join(missing_values)}",
         )
 
+    # Build mutation delta from requested paths while validating structure
+    mutation_delta: dict[str, Any] = {}
     for path in requested_paths:
         keys = path.split(".")
         current_obj: Any = current_settings
 
-        # Navigate to the parent object
+        # Navigate to the parent object to validate path existence
         for k in keys[:-1]:
             if not isinstance(current_obj, dict):
                 raise HTTPException(
@@ -290,13 +281,15 @@ async def set_settings(
                 status_code=400,
                 detail=f"Key '{keys[-1]}' does not exist in path '{'.'.join(keys[:-1]) or 'root'}'.",
             )
-        current_obj[keys[-1]] = values[path]
 
-    if any(p == "ranking" or p.startswith("ranking.") for p in requested_paths):
-        _validate_ranking_in_settings(current_settings)
+        # Place into mutation_delta
+        target_delta = mutation_delta
+        for k in keys[:-1]:
+            target_delta = target_delta.setdefault(k, {})
+        target_delta[keys[-1]] = values[path]
 
     # Preserve active Trakt OAuth tokens if client payload submitted empty strings or omitted them
-    trakt_oauth = current_settings.get("content", {}).get("trakt", {}).get("oauth")
+    trakt_oauth = mutation_delta.get("content", {}).get("trakt", {}).get("oauth")
     if isinstance(trakt_oauth, dict):
         existing_oauth = settings_manager.settings.content.trakt.oauth
         if not trakt_oauth.get("access_token") and existing_oauth.access_token:
@@ -305,10 +298,8 @@ async def set_settings(
             trakt_oauth["refresh_token"] = existing_oauth.refresh_token
 
     try:
-        updated_settings = settings_manager.settings.__class__(**current_settings)
-        settings_manager.load(settings_dict=updated_settings.model_dump())
-        settings_manager.save()
-    except ValidationError as e:
+        apply_canonical_settings_mutation(mutation_delta)
+    except (ValueError, ValidationError) as e:
         raise HTTPException(
             status_code=400,
             detail=f"Failed to update settings: {str(e)}",

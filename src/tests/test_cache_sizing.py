@@ -123,6 +123,56 @@ def test_tmpfs_custom_cap_still_half_free() -> None:
         tmpfs_hard_cap_bytes=custom_cap,
     )
     assert result.effective_max_bytes == int(free * 0.5)
+    assert result.reason is not None
+    assert "50% available tmpfs space" in result.reason
+    assert "free tmpfs space=4096 MB" in result.reason
+
+
+def test_tmpfs_warning_identifies_configured_ceiling_constraint() -> None:
+    """Warning identifies configured tmpfs ceiling when smaller than free space fraction and cgroup."""
+    free = 16 * 1024 * 1024 * 1024  # 16 GiB free
+    configured_mb = 10240  # 10 GiB configured
+    hard_cap = 2 * 1024 * 1024 * 1024  # 2 GiB hard cap
+    result = resolve_cache_max_bytes(
+        Path("/dev/shm/riven-cache"),
+        configured_mb,
+        free_bytes=free,
+        tmpfs=True,
+        tmpfs_hard_cap_bytes=hard_cap,
+    )
+    assert result.clamped is True
+    assert result.effective_max_bytes == hard_cap
+    assert result.reason is not None
+    assert "configured tmpfs ceiling" in result.reason
+    assert "filesystem.tmpfs_cache_max_mb ceiling=2048 MB" in result.reason
+
+
+def test_tmpfs_warning_identifies_cgroup_headroom_constraint() -> None:
+    """Warning identifies cgroup headroom when container memory limit is tightest constraint."""
+    from unittest.mock import patch
+
+    free = 16 * 1024 * 1024 * 1024  # 16 GiB free
+    configured_mb = 10240
+    hard_cap = 8 * 1024 * 1024 * 1024  # 8 GiB hard cap
+
+    with patch(
+        "program.services.streaming.cache_sizing.get_cgroup_memory_limit"
+    ) as mock_cgroup:
+        # 3072 MB cgroup limit - 1536 MB headroom = 1536 MB safe tmpfs cap
+        mock_cgroup.return_value = 3072 * 1024 * 1024
+
+        result = resolve_cache_max_bytes(
+            Path("/dev/shm/riven-cache"),
+            configured_mb,
+            free_bytes=free,
+            tmpfs=True,
+            tmpfs_hard_cap_bytes=hard_cap,
+        )
+        assert result.clamped is True
+        assert result.effective_max_bytes == 1536 * 1024 * 1024
+        assert result.reason is not None
+        assert "cgroup memory headroom" in result.reason
+        assert "cgroup limit=3072 MB - 1536 MB headroom = 1536 MB" in result.reason
 
 
 def test_is_tmpfs_path_detects_dev_shm_prefix() -> None:

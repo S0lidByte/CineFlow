@@ -134,25 +134,53 @@ def resolve_cache_max_bytes(
     reason: str | None = None
 
     if on_tmpfs:
-        # Prefer the hard cap so a huge /dev/shm (or host shm) cannot authorize
-        # multi-GiB RAM cache that OOMs the container.
+        # Evaluate candidate caps across:
+        # 1. Configured tmpfs hard cap (filesystem.tmpfs_cache_max_mb)
+        # 2. Cgroup memory limit minus reserved application headroom (1536 MiB)
+        # 3. Available tmpfs space safety fraction (TMPFS_FREE_FRACTION = 0.5)
+        limiting_factor = "configured tmpfs ceiling"
         tmpfs_cap = tmpfs_hard_cap_bytes
+
         cgroup_limit = get_cgroup_memory_limit()
+        cgroup_cap: int | None = None
         if cgroup_limit is not None:
             # Leave at least 1.5 GiB for Python application working set, pyfuse3, PostgreSQL, network buffers
             reserved_app_headroom = 1536 * 1024 * 1024
-            safe_cgroup_tmpfs = max(0, cgroup_limit - reserved_app_headroom)
-            tmpfs_cap = min(tmpfs_cap, safe_cgroup_tmpfs)
+            cgroup_cap = max(0, cgroup_limit - reserved_app_headroom)
+            if cgroup_cap < tmpfs_cap:
+                tmpfs_cap = cgroup_cap
+                limiting_factor = "cgroup memory headroom"
 
+        free_fraction_cap: int | None = None
         if has_free_space_measurement:
-            tmpfs_cap = min(tmpfs_cap, int(free * TMPFS_FREE_FRACTION))
+            free_fraction_cap = int(free * TMPFS_FREE_FRACTION)
+            if free_fraction_cap < tmpfs_cap:
+                tmpfs_cap = free_fraction_cap
+                limiting_factor = "50% available tmpfs space"
 
         if effective > tmpfs_cap:
             effective = tmpfs_cap
+            details: list[str] = []
+            if limiting_factor == "configured tmpfs ceiling":
+                details.append(
+                    f"filesystem.tmpfs_cache_max_mb ceiling={tmpfs_hard_cap_bytes // (1024 * 1024)} MB"
+                )
+            elif (
+                limiting_factor == "cgroup memory headroom" and cgroup_limit is not None
+            ):
+                details.append(
+                    f"cgroup limit={cgroup_limit // (1024 * 1024)} MB - 1536 MB headroom = {cgroup_cap // (1024 * 1024) if cgroup_cap is not None else 0} MB"
+                )
+            elif limiting_factor == "50% available tmpfs space":
+                details.append(
+                    f"free tmpfs space={free // (1024 * 1024)} MB (50% safety fraction = {free_fraction_cap // (1024 * 1024) if free_fraction_cap is not None else 0} MB)"
+                )
+
+            detail_str = f" ({details[0]})" if details else ""
             reason = (
                 f"tmpfs/ramfs cache_dir hard-capped to "
                 f"{effective // (1024 * 1024)} MB "
-                f"(configured {configured_mb} MB). "
+                f"(configured {configured_mb} MB) due to {limiting_factor}{detail_str}. "
                 "Raise filesystem.tmpfs_cache_max_mb (and container shm/mem limits) "
                 "for a larger RAM cache, or move cache_dir off tmpfs onto disk."
             )

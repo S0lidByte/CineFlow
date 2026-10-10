@@ -555,10 +555,14 @@ class MediaStream:
 
         from .adaptive_prefetch import AdaptivePrefetchConfig, AdaptivePrefetchManager
 
+        configured_prefetch = self.config.prefetch_chunks
+        max_chunks = max(48, configured_prefetch) if configured_prefetch > 0 else 48
+
         self.adaptive_prefetch = AdaptivePrefetchManager(
             config=AdaptivePrefetchConfig(
                 chunk_size_bytes=self.config.chunk_size,
-                default_fallback_chunks=self.config.prefetch_chunks,
+                default_fallback_chunks=configured_prefetch,
+                max_window_chunks=max_chunks,
                 sequential_tolerance_bytes=self.config.sequential_read_tolerance,
             ),
             initial_bitrate=bitrate,
