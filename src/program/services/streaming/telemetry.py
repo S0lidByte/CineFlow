@@ -323,8 +323,29 @@ class PlaybackTelemetryCollector:
     def _normalize_media_path(path: str | None) -> str | None:
         if not path:
             return None
-        normalized = path.replace("\\", "/")
-        return posixpath.normpath(normalized).casefold()
+        normalized = posixpath.normpath(path.replace("\\", "/"))
+        if not normalized or normalized == ".":
+            return None
+
+        # Check configured mount_path and strip prefix in a path-aware manner
+        try:
+            from program.settings import settings_manager
+
+            mount_cfg = str(settings_manager.settings.filesystem.mount_path or "")
+            if mount_cfg:
+                norm_mount = posixpath.normpath(mount_cfg.replace("\\", "/"))
+                if norm_mount and norm_mount != "/":
+                    if normalized == norm_mount:
+                        return "/"
+                    if normalized.startswith(norm_mount + "/"):
+                        normalized = normalized[len(norm_mount) :]
+                        normalized = posixpath.normpath(normalized)
+        except Exception:
+            pass
+
+        if not normalized.startswith("/"):
+            normalized = "/" + normalized
+        return normalized
 
     def update_plex_playback(
         self,

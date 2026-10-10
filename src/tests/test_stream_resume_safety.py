@@ -216,6 +216,7 @@ def test_empty_prefetch_closes_exhausted_connection_before_reconnect() -> None:
         prefetch_chunks=1,
         chunk_size=10,
         header_size=0,
+        chunk_wait_timeout_seconds=10,
     )
     stream.file_metadata = SimpleNamespace(path="movie.mkv", file_size=100)
     stream.session_statistics = SimpleNamespace(bytes_transferred=0)

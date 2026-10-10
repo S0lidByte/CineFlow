@@ -31,6 +31,7 @@ from program.utils.stream_http import (
 
 RequestKind = Literal["body", "scan"]
 Workload = Literal["foreground", "background", "neutral"]
+WorkloadResolver = Workload | Callable[[], Workload]
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +57,7 @@ class TrioStreamingHttpPool:
         max_total_requests: int = MAX_TOTAL_STREAM_REQUESTS,
         max_body_streams: int = MAX_BODY_STREAMS,
         warn_interval: float = 5.0,
+        connect_timeout: float | None = None,
     ) -> None:
         if proxy_url is None:
             try:
@@ -68,6 +70,18 @@ class TrioStreamingHttpPool:
                 self._proxy_url = None
         else:
             self._proxy_url = proxy_url
+
+        if connect_timeout is None:
+            try:
+                from program.settings import settings_manager
+
+                self._connect_timeout: float | None = float(
+                    settings_manager.settings.stream.connect_timeout_seconds
+                )
+            except Exception:
+                self._connect_timeout = None
+        else:
+            self._connect_timeout = float(connect_timeout)
 
         self._max_total_requests = max_total_requests
         self._max_body_streams = max_body_streams
@@ -108,9 +122,30 @@ class TrioStreamingHttpPool:
     ) -> None:
         self._foreground_pressure = callback
 
-    async def _wait_for_background_pressure(self) -> None:
-        """Wait cooperatively with cancellation and a bounded pressure poll interval."""
+    @staticmethod
+    def _resolve_workload(workload: WorkloadResolver) -> Workload:
+        if callable(workload):
+            try:
+                return workload()
+            except Exception:
+                return "neutral"
+        return workload
+
+    async def _wait_for_background_pressure(
+        self, kind: RequestKind, workload: WorkloadResolver
+    ) -> None:
+        """Wait cooperatively with cancellation and a bounded pressure poll interval.
+
+        If a waiting neutral request promotes to foreground while waiting, break the wait
+        immediately so legitimate new playbacks are never serialized behind older runway pressure.
+        """
         while self._foreground_pressure is not None and self._foreground_pressure():
+            current_workload = self._resolve_workload(workload)
+            if not (
+                current_workload == "background"
+                or (kind == "body" and current_workload != "foreground")
+            ):
+                break
             # Polling avoids a shared event reset race between multiple waiters. The
             # short interval bounds recovery latency while Trio cancellation remains
             # effective at the sleep checkpoint.
@@ -130,7 +165,7 @@ class TrioStreamingHttpPool:
             follow_redirects=True,
             proxy=proxy_url,
             limits=stream_http_limits(),
-            timeout=stream_http_timeout(),
+            timeout=stream_http_timeout(connect_timeout=self._connect_timeout),
         )
 
     def _create_generation_clients(self) -> dict[bool, httpx.AsyncClient]:
@@ -170,11 +205,14 @@ class TrioStreamingHttpPool:
 
     @asynccontextmanager
     async def admit(
-        self, kind: RequestKind, *, workload: Workload = "neutral"
+        self, kind: RequestKind, *, workload: WorkloadResolver = "neutral"
     ) -> AsyncGenerator[None]:
         """Bound remote acquisition and cooperatively yield background requests."""
-        if workload == "background":
-            await self._wait_for_background_pressure()
+        current_workload = self._resolve_workload(workload)
+        if current_workload == "background" or (
+            kind == "body" and current_workload != "foreground"
+        ):
+            await self._wait_for_background_pressure(kind, workload)
         total = self._total_limiter
         body = self._body_limiter
 
@@ -185,9 +223,8 @@ class TrioStreamingHttpPool:
             raise httpx.PoolTimeout("Streaming HTTP body admission saturated")
 
         if kind == "body":
-            async with total:
-                async with body:
-                    yield
+            async with total, body:
+                yield
         else:
             async with total:
                 yield
@@ -196,7 +233,7 @@ class TrioStreamingHttpPool:
         """Close retired clients for generations that no longer have active leases."""
         gens_to_close: list[int] = []
         async with self._lock:
-            for gen in list(self._retired_generations.keys()):
+            for gen in tuple(self._retired_generations.keys()):
                 if self._active_leases_by_gen.get(gen, 0) <= 0:
                     gens_to_close.append(gen)
 
@@ -387,9 +424,8 @@ async def admit_stream_request(kind: RequestKind) -> AsyncGenerator[None]:
         raise httpx.PoolTimeout("Streaming HTTP body admission saturated")
 
     if kind == "body":
-        async with total:
-            async with body:
-                yield
+        async with total, body:
+            yield
     else:
         async with total:
             yield

@@ -10,12 +10,13 @@ import time
 import uuid
 from bisect import bisect_right, insort
 from collections import OrderedDict
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager, contextmanager
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Literal, NotRequired, Required, TypedDict
+from typing import Any, Literal, NamedTuple, NotRequired, Required, TypedDict
 
 import trio
 from kink import di
@@ -58,6 +59,9 @@ class CacheConfig:
     @property
     def two_tier(self) -> bool:
         return self.hot_dir is not None and self.hot_max_size_bytes > 0
+
+
+CACHE_META_SUFFIX = ".meta"
 
 
 @dataclass(frozen=True)
@@ -112,6 +116,146 @@ class ChunkInfo:
     copy_start: int
     bytes_to_read: int
     chunk_end: int
+
+
+class TimedSliceResult(NamedTuple):
+    data: bytes
+    sched_delay_s: float
+    exec_s: float
+
+
+@dataclass
+class TierProbeTiming:
+    tier: Literal["hot", "warm"]
+    success: bool
+    limiter_wait_s: float = 0.0
+    sched_delay_s: float = 0.0
+    exec_s: float = 0.0
+    elapsed_s: float = 0.0
+
+
+@dataclass
+class CacheReadSliceBreakdown:
+    key_prefix: str = ""
+    preferred_tier: Literal["hot", "warm"] = "warm"
+    probes: list[TierProbeTiming] = field(
+        default_factory=lambda: list[TierProbeTiming]()
+    )
+    limiter_wait_s: float = 0.0
+    sched_delay_s: float = 0.0
+    exec_s: float = 0.0
+    total_slice_s: float = 0.0
+
+
+@dataclass
+class CacheReadLatencyBreakdown:
+    key_prefix: str = ""
+    range_bytes: int = 0
+    stream_id_set: bool = False
+    path: Literal["fast_single", "slow_stitched", "fallback_probe", "miss"] = "miss"
+    hit: bool = False
+    index_lock_wait_s: float = 0.0
+    limiter_wait_s: float = 0.0
+    worker_sched_delay_s: float = 0.0
+    slice_exec_s: float = 0.0
+    fallback_probe_s: float = 0.0
+    lru_update_s: float = 0.0
+    slices: list[CacheReadSliceBreakdown] = field(
+        default_factory=lambda: list[CacheReadSliceBreakdown]()
+    )
+    total_get_s: float = 0.0
+
+
+@dataclass
+class CachePutLatencyBreakdown:
+    key_prefix: str = ""
+    need_bytes: int = 0
+    target_tier: Literal["hot", "warm"] = "warm"
+    result: CachePutResult = CachePutResult.REFUSED_PHYSICAL_PRESSURE
+    stream_id_set: bool = False
+    shard_lock_wait_s: float = 0.0
+    existing_check_s: float = 0.0
+    hot_reservation_s: float = 0.0
+    hot_demotion_s: float = 0.0
+    eviction_s: float = 0.0
+    payload_write_s: float = 0.0
+    meta_write_s: float = 0.0
+    index_lock_wait_s: float = 0.0
+    index_publish_s: float = 0.0
+    lease_publish_s: float = 0.0
+    total_put_s: float = 0.0
+
+
+_read_timing: ContextVar[CacheReadLatencyBreakdown | None] = ContextVar(
+    "cache_read_timing", default=None
+)
+_put_timing: ContextVar[CachePutLatencyBreakdown | None] = ContextVar(
+    "cache_put_timing", default=None
+)
+
+
+class InstrumentedReadLimiter:
+    """Wrapper around trio.CapacityLimiter preserving all limiter methods and tracking acquisition wait."""
+
+    def __init__(self, capacity: int = 40) -> None:
+        self._limiter = trio.CapacityLimiter(capacity)
+        self._task_wait_times: dict[int, float] = {}
+        self._lock = threading.Lock()
+
+    @property
+    def underlying_limiter(self) -> trio.CapacityLimiter:
+        return self._limiter
+
+    @property
+    def total_tokens(self) -> int:
+        return int(self._limiter.total_tokens)
+
+    @total_tokens.setter
+    def total_tokens(self, val: int) -> None:
+        self._limiter.total_tokens = val
+
+    @property
+    def available_tokens(self) -> int:
+        return int(self._limiter.available_tokens)
+
+    @property
+    def borrowed_tokens(self) -> int:
+        return int(self._limiter.borrowed_tokens)
+
+    def statistics(self) -> Any:
+        return self._limiter.statistics()
+
+    async def acquire_on_behalf_of(self, borrower: Any) -> None:
+        t0 = time.perf_counter()
+        await self._limiter.acquire_on_behalf_of(borrower)
+        t_wait = max(0.0, time.perf_counter() - t0)
+        with self._lock:
+            self._task_wait_times[id(trio.lowlevel.current_task())] = t_wait
+
+    def release_on_behalf_of(self, borrower: Any) -> None:
+        self._limiter.release_on_behalf_of(borrower)
+
+    def acquire_on_behalf_of_nowait(self, borrower: Any) -> None:
+        self._limiter.acquire_on_behalf_of_nowait(borrower)
+
+    async def acquire(self) -> None:
+        await self._limiter.acquire()
+
+    def release(self) -> None:
+        self._limiter.release()
+
+    def acquire_nowait(self) -> None:
+        self._limiter.acquire_nowait()
+
+    async def __aenter__(self) -> None:
+        await self._limiter.__aenter__()
+
+    async def __aexit__(self, *args: Any) -> None:
+        await self._limiter.__aexit__(*args)
+
+    def pop_borrower_wait(self, borrower_id: int) -> float:
+        with self._lock:
+            return self._task_wait_times.pop(borrower_id, 0.0)
 
 
 class Metrics:
@@ -207,7 +351,7 @@ class Cache:
     def __init__(self, cfg: CacheConfig) -> None:
         self.cfg = cfg
         self._index = OrderedDict[str, CacheEntry]()
-        self._by_path = dict[str, list[int]]()
+        self._by_path: dict[str, list[int]] = {}
         self._total_bytes = 0
         self._hot_bytes = 0
         # Brief global lock for index / eviction accounting only — never across I/O.
@@ -230,7 +374,15 @@ class Cache:
 
         # Dedicated read thread limiter so FUSE cache hits never queue behind
         # background chunk writes, demotions, or maintenance disk operations.
-        self._read_limiter = trio.CapacityLimiter(40)
+        self._read_limiter = InstrumentedReadLimiter(40)
+
+        # Telemetry & slow-path hooks
+        self._on_read_latency: Callable[[CacheReadLatencyBreakdown], None] | None = None
+        self._on_put_latency: Callable[[CachePutLatencyBreakdown], None] | None = None
+        self._slow_read_threshold_s: float = 0.05  # 50ms
+        self._slow_get_threshold_s: float = 0.10  # 100ms
+        self._slow_put_threshold_s: float = 0.10  # 100ms
+        self._latency_sample_rate: float = 0.05  # 5% sample rate
 
         # Active Playback Protection:
         # key (composite chunk_key e.g. "hash_start") -> dict[stream_id, StreamLease]
@@ -294,6 +446,20 @@ class Cache:
             f.seek(offset)
             return f.read(size)
 
+    def _read_file_slice_timed(
+        self, path: Path, offset: int, size: int, sched_time: float
+    ) -> TimedSliceResult:
+        t_enter = time.perf_counter()
+        sched_delay = max(0.0, t_enter - sched_time)
+        try:
+            data = self._read_file_slice(path, offset, size)
+        except FileNotFoundError:
+            data = b""
+        t_exit = time.perf_counter()
+        return TimedSliceResult(
+            data=data, sched_delay_s=sched_delay, exec_s=max(0.0, t_exit - t_enter)
+        )
+
     @staticmethod
     def _read_file_all(path: Path) -> bytes | None:
         try:
@@ -350,7 +516,10 @@ class Cache:
                             if sub.is_dir():
                                 for fp in sub.iterdir():
                                     try:
-                                        if not fp.is_file() or fp.suffix == ".meta":
+                                        if (
+                                            not fp.is_file()
+                                            or fp.suffix == CACHE_META_SUFFIX
+                                        ):
                                             continue
 
                                         if not self._is_cache_payload_file(root, fp):
@@ -387,7 +556,7 @@ class Cache:
                                         continue
                             elif (
                                 sub.is_file()
-                                and sub.suffix != ".meta"
+                                and sub.suffix != CACHE_META_SUFFIX
                                 and self._is_cache_payload_file(root, sub)
                             ):
                                 key = sub.name
@@ -497,21 +666,84 @@ class Cache:
         preferred: Literal["hot", "warm"],
         offset: int,
         size: int,
+        slice_breakdown: CacheReadSliceBreakdown | None = None,
     ) -> bytes:
         """Read a complete slice while an entry may be moving between tiers."""
+        t_slice_start = time.perf_counter()
+        read_breakdown = _read_timing.get()
+        if slice_breakdown is None and read_breakdown is not None:
+            slice_breakdown = CacheReadSliceBreakdown()
+            read_breakdown.slices.append(slice_breakdown)
+        if slice_breakdown is not None:
+            slice_breakdown.key_prefix = key[:8]
+            slice_breakdown.preferred_tier = preferred
+
         for tier in self._tier_probe_order(preferred):
+            t_probe_start = time.perf_counter()
+            probe_timing = TierProbeTiming(tier=tier, success=False)
+            t_sched = time.perf_counter()
+            limiter_wait = 0.0
+            borrower_obj = trio.lowlevel.current_task()
+            borrower_id = id(borrower_obj)
             try:
-                data = await trio.to_thread.run_sync(
-                    self._read_file_slice,
+                timed_res: TimedSliceResult = await trio.to_thread.run_sync(
+                    self._read_file_slice_timed,
                     self._file_for(key, tier=tier),
                     offset,
                     size,
-                    limiter=self._read_limiter,
+                    t_sched,
+                    limiter=self._read_limiter,  # type: ignore[arg-type]
                 )
+                limiter_wait = self._read_limiter.pop_borrower_wait(borrower_id)
+                data = timed_res.data
+                probe_timing.limiter_wait_s = limiter_wait
+                probe_timing.sched_delay_s = max(
+                    0.0, timed_res.sched_delay_s - limiter_wait
+                )
+                probe_timing.exec_s = timed_res.exec_s
             except FileNotFoundError:
+                limiter_wait = self._read_limiter.pop_borrower_wait(borrower_id)
+                probe_timing.limiter_wait_s = limiter_wait
+                probe_timing.elapsed_s = max(0.0, time.perf_counter() - t_probe_start)
+                if slice_breakdown is not None:
+                    slice_breakdown.probes.append(probe_timing)
                 continue
+            except BaseException:
+                self._read_limiter.pop_borrower_wait(borrower_id)
+                raise
+
+            probe_timing.elapsed_s = max(0.0, time.perf_counter() - t_probe_start)
             if len(data) == size:
+                probe_timing.success = True
+                if slice_breakdown is not None:
+                    slice_breakdown.probes.append(probe_timing)
+                    slice_breakdown.limiter_wait_s = sum(
+                        p.limiter_wait_s for p in slice_breakdown.probes
+                    )
+                    slice_breakdown.sched_delay_s = sum(
+                        p.sched_delay_s for p in slice_breakdown.probes
+                    )
+                    slice_breakdown.exec_s = sum(
+                        p.exec_s for p in slice_breakdown.probes
+                    )
+                    slice_breakdown.total_slice_s = max(
+                        0.0, time.perf_counter() - t_slice_start
+                    )
                 return data
+            elif slice_breakdown is not None:
+                slice_breakdown.probes.append(probe_timing)
+
+        if slice_breakdown is not None:
+            slice_breakdown.limiter_wait_s = sum(
+                p.limiter_wait_s for p in slice_breakdown.probes
+            )
+            slice_breakdown.sched_delay_s = sum(
+                p.sched_delay_s for p in slice_breakdown.probes
+            )
+            slice_breakdown.exec_s = sum(p.exec_s for p in slice_breakdown.probes)
+            slice_breakdown.total_slice_s = max(
+                0.0, time.perf_counter() - t_slice_start
+            )
         return b""
 
     def _ensure_parent(self, path: Path) -> None:
@@ -523,7 +755,7 @@ class Cache:
     ) -> Path:
         """Get the metadata sidecar file path for a cache entry."""
 
-        return self._file_for(key, tier=tier).with_suffix(".meta")
+        return self._file_for(key, tier=tier).with_suffix(CACHE_META_SUFFIX)
 
     def _write_metadata(
         self,
@@ -980,12 +1212,17 @@ class Cache:
         )
         return high, low
 
-    async def _ensure_hot_capacity(self, need_bytes: int) -> None:
+    async def _ensure_hot_capacity(
+        self,
+        need_bytes: int,
+        put_breakdown: CachePutLatencyBreakdown | None = None,
+    ) -> None:
         """Demote LRU hot entries to warm until hot tier can accept need_bytes and respects watermarks."""
         if not self.cfg.two_tier:
             return
 
         to_demote: list[CacheEntry] = []
+        t_demote_start = time.perf_counter()
 
         async with self.locks():
             projected = self._hot_bytes + self._hot_reserved_bytes + need_bytes
@@ -1154,10 +1391,10 @@ class Cache:
                 warm_meta_fp = self._metadata_file_for(entry.key, tier="warm")
                 try:
                     await trio.to_thread.run_sync(
-                        lambda: warm_fp.unlink(missing_ok=True)
+                        lambda p=warm_fp: p.unlink(missing_ok=True)
                     )
                     await trio.to_thread.run_sync(
-                        lambda: warm_meta_fp.unlink(missing_ok=True)
+                        lambda p=warm_meta_fp: p.unlink(missing_ok=True)
                     )
                 except Exception as e:
                     logger.warning(
@@ -1168,12 +1405,23 @@ class Cache:
         if to_demote:
             await self._evict_lru(0)
 
-    async def _reserve_hot_capacity(self, need_bytes: int) -> bool:
+        if put_breakdown is not None and to_demote:
+            put_breakdown.hot_demotion_s += max(
+                0.0, time.perf_counter() - t_demote_start
+            )
+
+    async def _reserve_hot_capacity(
+        self,
+        need_bytes: int,
+        put_breakdown: CachePutLatencyBreakdown | None = None,
+    ) -> bool:
         """Reserve hot-tier bytes, returning false when disk fallback is safer."""
         with trio.move_on_after(self._HOT_RESERVATION_TIMEOUT_SECONDS):
             while True:
                 async with self._hot_write_lock:
-                    await self._ensure_hot_capacity(need_bytes)
+                    await self._ensure_hot_capacity(
+                        need_bytes, put_breakdown=put_breakdown
+                    )
                     available = (
                         self.cfg.hot_max_size_bytes
                         - self._hot_bytes
@@ -1200,7 +1448,11 @@ class Cache:
             self._hot_capacity_changed.set()
             self._hot_capacity_changed = trio.Event()
 
-    async def _evict_lru(self, need_bytes: int = 0) -> bool:
+    async def _evict_lru(
+        self,
+        need_bytes: int = 0,
+        put_breakdown: CachePutLatencyBreakdown | None = None,
+    ) -> bool:
         # Index updates under both _index_lock (via locks()) AND _thread_lock
         # so that sync callers (has(), sync_size_snapshot()) never observe an
         # entry that is mid-eviction.  _thread_lock is held only around the
@@ -1208,6 +1460,7 @@ class Cache:
         # happens after both locks are released).
         # This mirrors the pattern used by put() which also takes _thread_lock
         # around _index writes to coordinate with has().
+        t_evict_start = time.perf_counter()
         to_unlink: list[str] = []
         tiers: dict[str, Literal["hot", "warm"]] = {}
         evicted = 0
@@ -1326,9 +1579,16 @@ class Cache:
                         di[ChunkCacheNotifier].on_chunk_evicted(cache_key=ck, start=st)
                 except Exception:
                     pass
+            if put_breakdown is not None:
+                put_breakdown.eviction_s += max(
+                    0.0, time.perf_counter() - t_evict_start
+                )
         return eviction_succeeded
 
-    async def _evict_ttl(self) -> None:
+    async def _evict_ttl(
+        self, put_breakdown: CachePutLatencyBreakdown | None = None
+    ) -> None:
+        t_evict_start = time.perf_counter()
         ttl = self.cfg.ttl_seconds
         now = time.time()
         to_unlink: list[str] = []
@@ -1381,8 +1641,43 @@ class Cache:
                         di[ChunkCacheNotifier].on_chunk_evicted(cache_key=ck, start=st)
                 except Exception:
                     pass
+        if put_breakdown is not None:
+            put_breakdown.eviction_s += max(0.0, time.perf_counter() - t_evict_start)
 
     async def get(
+        self,
+        cache_key: str,
+        start: int,
+        end: int,
+        *,
+        stream_id: str | None = None,
+    ) -> bytes:
+        timing = CacheReadLatencyBreakdown(
+            key_prefix=self._key(cache_key, start)[:8],
+            range_bytes=max(0, end - start + 1),
+            stream_id_set=stream_id is not None,
+        )
+        token = _read_timing.set(timing)
+        began = time.perf_counter()
+        try:
+            result = await self._get(cache_key, start, end, stream_id=stream_id)
+            timing.hit = bool(result)
+            return result
+        finally:
+            timing.total_get_s = time.perf_counter() - began
+            timing.limiter_wait_s = sum(s.limiter_wait_s for s in timing.slices)
+            timing.worker_sched_delay_s = sum(s.sched_delay_s for s in timing.slices)
+            timing.slice_exec_s = sum(s.exec_s for s in timing.slices)
+            _read_timing.reset(token)
+            if timing.total_get_s >= self._slow_get_threshold_s:
+                logger.warning(f"Cache read timing: {timing}")
+            if self._on_read_latency is not None:
+                try:
+                    self._on_read_latency(timing)
+                except Exception:
+                    logger.debug("Cache read telemetry callback failed")
+
+    async def _get(
         self,
         cache_key: str,
         start: int,
@@ -1397,6 +1692,7 @@ class Cache:
 
         get_start_time = time.time()
         lock_wait_s = 0.0
+        timing = _read_timing.get()
 
         # Do not hold the per-key shard across disk I/O — same title may be
         # opened via multiple VFS paths (library profiles); readers must overlap.
@@ -1439,8 +1735,12 @@ class Cache:
                             # Don't update timestamps yet - do it after successful read
                             break
 
+        if timing is not None:
+            timing.index_lock_wait_s = lock_wait_s
         # Fast path: read single chunk outside the index lock (off trio thread)
         if chunk_key:
+            if timing is not None:
+                timing.path = "fast_single"
             try:
                 read_start = time.time()
 
@@ -1581,7 +1881,11 @@ class Cache:
                     current_pos = chunk_end + 1
 
         # Execute reads outside the index lock (off trio thread)
+        if timing is not None:
+            timing.index_lock_wait_s = lock_wait_s
         if chunks_to_read:
+            if timing is not None:
+                timing.path = "slow_stitched"
             result_data = bytearray()
             chunks_used = list[tuple[str, float]]()
 
@@ -1637,6 +1941,10 @@ class Cache:
 
                     return bytes(result_data)
 
+        # Fallback timing is aggregate (worker queue + full-file I/O), not physical I/O.
+        fallback_started = time.perf_counter()
+        if timing is not None:
+            timing.path = "fallback_probe"
         # Fallback: Direct probe for chunk files on filesystem and rebuild index
         found_data: bytes | None = None
         found_tier: Literal["hot", "warm"] = "warm"
@@ -1683,7 +1991,11 @@ class Cache:
             if found_data is not None:
                 break
 
+        if timing is not None:
+            timing.fallback_probe_s = time.perf_counter() - fallback_started
         if found_data is None:
+            if timing is not None:
+                timing.path = "miss"
             async with self.locks():
                 prev = self._index.pop(self._key(cache_key, start), None)
                 if prev and prev.tier == "hot":
@@ -1747,6 +2059,44 @@ class Cache:
         lease_seconds: float = 60.0,
         admission: Literal["demand", "prefetch"] = "demand",
     ) -> CachePutResult:
+        timing = CachePutLatencyBreakdown(
+            key_prefix=self._key(cache_key, start)[:8],
+            need_bytes=len(data),
+            stream_id_set=stream_id is not None,
+        )
+        token = _put_timing.set(timing)
+        began = time.perf_counter()
+        try:
+            timing.result = await self._put(
+                cache_key,
+                start,
+                data,
+                stream_id=stream_id,
+                lease_seconds=lease_seconds,
+                admission=admission,
+            )
+            return timing.result
+        finally:
+            timing.total_put_s = time.perf_counter() - began
+            _put_timing.reset(token)
+            if timing.total_put_s >= self._slow_put_threshold_s:
+                logger.warning(f"Cache write timing: {timing}")
+            if self._on_put_latency is not None:
+                try:
+                    self._on_put_latency(timing)
+                except Exception:
+                    logger.debug("Cache write telemetry callback failed")
+
+    async def _put(
+        self,
+        cache_key: str,
+        start: int,
+        data: bytes,
+        *,
+        stream_id: str | None = None,
+        lease_seconds: float = 60.0,
+        admission: Literal["demand", "prefetch"] = "demand",
+    ) -> CachePutResult:
         if not data:
             return CachePutResult.REFUSED_PHYSICAL_PRESSURE
 
@@ -1758,8 +2108,12 @@ class Cache:
             else "warm"
         )
 
+        timing = _put_timing.get()
+        shard_started = time.perf_counter()
         # Shard serializes writers for the same title; index lock stays brief.
         async with self._shard(cache_key):
+            if timing is not None:
+                timing.shard_lock_wait_s = time.perf_counter() - shard_started
             # A discrete scan/fallback can begin at the same offset as a full
             # media chunk. Never replace a complete payload with a shorter
             # overlapping payload: that would turn a ready chunk into a miss.
@@ -1768,6 +2122,7 @@ class Cache:
                 existing_size = existing.size if existing else 0
                 existing_tier = existing.tier if existing else write_tier
 
+            existing_started = time.perf_counter()
             existing_is_complete = False
             if existing_size >= need:
                 for probe_tier in self._tier_probe_order(existing_tier):
@@ -1779,7 +2134,11 @@ class Cache:
                         existing_is_complete = True
                         break
 
+            if timing is not None:
+                timing.existing_check_s = time.perf_counter() - existing_started
             if existing_is_complete:
+                if timing is not None:
+                    timing.target_tier = existing_tier
                 if stream_id is not None:
                     self.acquire_lease(
                         stream_id=stream_id,
@@ -1817,21 +2176,25 @@ class Cache:
                         return CachePutResult.SKIPPED_PREFETCH_PRESSURE
 
             hot_reservation = 0
+            reservation_started = time.perf_counter()
             if write_tier == "hot":
-                if await self._reserve_hot_capacity(need):
+                if await self._reserve_hot_capacity(need, put_breakdown=timing):
                     hot_reservation = need
                 else:
                     write_tier = "warm"
 
+            if timing is not None:
+                timing.hot_reservation_s = time.perf_counter() - reservation_started
+                timing.target_tier = write_tier
             try:
                 if self.cfg.eviction == "TTL":
-                    await self._evict_ttl()
+                    await self._evict_ttl(put_breakdown=timing)
                 else:
                     # The warm budget describes persistent-tier retention. A hot
                     # write must not evict warm history merely because the total
                     # two-tier footprint temporarily grows.
                     eviction_ok = await self._evict_lru(
-                        need if write_tier == "warm" else 0
+                        need if write_tier == "warm" else 0, put_breakdown=timing
                     )
                     if not eviction_ok and write_tier == "warm":
                         # Eviction could not reach the low-watermark target because all
@@ -1842,7 +2205,7 @@ class Cache:
                         #   playback data causes buffer stalls; cap overflow is preferable.
                         # - If this is an unprotected/demand chunk, only refuse when the
                         #   hard cap itself would be exceeded (not just the watermark).
-                        if stream_id is None:
+                        if stream_id is None or admission == "prefetch":
                             with self._thread_lock:
                                 warm_after = max(0, self._total_bytes - self._hot_bytes)
                             if warm_after + need > self.cfg.max_size_bytes:
@@ -1852,13 +2215,19 @@ class Cache:
                 fp = self._file_for(k, tier=write_tier)
 
                 try:
+                    write_started = time.perf_counter()
                     await trio.to_thread.run_sync(self._write_file_bytes, fp, data)
+                    if timing is not None:
+                        timing.payload_write_s = time.perf_counter() - write_started
                     # Write metadata after successful data write (also disk I/O)
+                    meta_started = time.perf_counter()
                     await trio.to_thread.run_sync(
                         lambda: self._write_metadata(
                             k, cache_key, start, tier=write_tier
                         )
                     )
+                    if timing is not None:
+                        timing.meta_write_s = time.perf_counter() - meta_started
                 except Exception as e:
                     logger.warning(f"Disk cache write failed: {e}")
                     return CachePutResult.REFUSED_PHYSICAL_PRESSURE
@@ -1866,7 +2235,11 @@ class Cache:
                 # Priority 3: _thread_lock guards _index writes so sync readers
                 # (has(), sync_size_snapshot()) see a consistent snapshot without
                 # having to wait on the async _index_lock.
+                index_started = time.perf_counter()
                 async with self.locks():
+                    if timing is not None:
+                        timing.index_lock_wait_s = time.perf_counter() - index_started
+                    publish_started = time.perf_counter()
                     with self._thread_lock:
                         prev = self._index.pop(k, None)
 
@@ -1899,7 +2272,10 @@ class Cache:
                         if write_tier == "hot":
                             self._hot_bytes += need
                         self._metrics.record_bytes_written(need)
+                    if timing is not None:
+                        timing.index_publish_s = time.perf_counter() - publish_started
 
+                lease_started = time.perf_counter()
                 if stream_id is not None:
                     self.acquire_lease(
                         stream_id=stream_id,
@@ -1908,6 +2284,8 @@ class Cache:
                         size=need,
                         lease_seconds=lease_seconds,
                     )
+                if timing is not None:
+                    timing.lease_publish_s = time.perf_counter() - lease_started
                 return (
                     CachePutResult.STORED_HOT
                     if write_tier == "hot"

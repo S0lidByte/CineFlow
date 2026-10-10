@@ -202,6 +202,253 @@ def test_trio_streaming_http_pool_foreground_bypasses_pressure_and_background_wa
     trio.run(_run)
 
 
+def test_trio_streaming_http_pool_foreground_pressure_gates_neutral_body_admission():
+    """Confirmed foreground runway pressure gates non-foreground neutral body acquisition."""
+
+    async def _run() -> None:
+        pool = http_pool.TrioStreamingHttpPool()
+        pressure = {"active": True}
+        pool.register_foreground_pressure_callback(lambda: pressure["active"])
+        try:
+            # 1. Foreground body request proceeds immediately despite pressure
+            fg_done = False
+            async with pool.admit("body", workload="foreground"):
+                fg_done = True
+            assert fg_done
+
+            # 2. Non-foreground/neutral body acquisition must wait while pressure is active
+            neutral_done = {"value": False}
+
+            async def _neutral_body() -> None:
+                async with pool.admit("body", workload="neutral"):
+                    neutral_done["value"] = True
+
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(_neutral_body)
+                await trio.sleep(0.3)
+                # MUST be false while pressure is active!
+                assert not neutral_done["value"]
+
+                # Clearing pressure allows neutral body acquisition to proceed
+                pressure["active"] = False
+
+            assert neutral_done["value"]
+        finally:
+            await pool.teardown()
+
+    trio.run(_run)
+
+
+def test_trio_streaming_http_pool_multiple_neutral_waiters_and_cancellation():
+    """Multiple neutral requests queue during foreground pressure and clear without lost wakeup or token leak."""
+
+    async def _run() -> None:
+        pool = http_pool.TrioStreamingHttpPool()
+        pressure = {"active": True}
+        pool.register_foreground_pressure_callback(lambda: pressure["active"])
+        try:
+            waiter_a = {"done": False}
+            waiter_b = {"done": False}
+
+            async def _task_a():
+                async with pool.admit("body", workload="neutral"):
+                    waiter_a["done"] = True
+
+            async def _task_b():
+                async with pool.admit("body", workload="neutral"):
+                    waiter_b["done"] = True
+
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(_task_a)
+                nursery.start_soon(_task_b)
+                await trio.sleep(0.3)
+                assert not waiter_a["done"]
+                assert not waiter_b["done"]
+
+                # Release pressure
+                pressure["active"] = False
+
+            assert waiter_a["done"]
+            assert waiter_b["done"]
+
+            # Test cancellation during pressure wait: tokens must not leak
+            pressure["active"] = True
+
+            async def _cancelled_task():
+                async with pool.admit("body", workload="neutral"):
+                    pass
+
+            with trio.move_on_after(0.1):
+                async with trio.open_nursery() as nursery:
+                    nursery.start_soon(_cancelled_task)
+
+            # Pool limiters must be clean and unborrowed
+            assert pool._total_limiter.borrowed_tokens == 0
+            assert pool._body_limiter.borrowed_tokens == 0
+        finally:
+            await pool.teardown()
+
+    trio.run(_run)
+
+
+def test_trio_streaming_http_pool_late_foreground_promotion_breaks_wait():
+    """A neutral waiter whose workload promotes to foreground proceeds immediately without waiting for pressure clear."""
+
+    async def _run() -> None:
+        pool = http_pool.TrioStreamingHttpPool()
+        pressure = {"active": True}
+        pool.register_foreground_pressure_callback(lambda: pressure["active"])
+        try:
+            current_workload = {"val": "neutral"}
+            b_done = {"val": False}
+
+            async def _task_b():
+                async with pool.admit("body", workload=lambda: current_workload["val"]):
+                    b_done["val"] = True
+
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(_task_b)
+                await trio.sleep(0.3)
+                # B must be waiting because it is currently neutral and pressure is active
+                assert not b_done["val"]
+
+                # Promote B to foreground while pressure remains active!
+                current_workload["val"] = "foreground"
+                # Wait for poll interval (0.25s) to detect promotion
+                await trio.sleep(0.35)
+                # Pressure is STILL active, but B became foreground so it MUST have proceeded
+                assert b_done["val"]
+                assert pressure["active"] is True
+        finally:
+            await pool.teardown()
+
+    trio.run(_run)
+
+
+def test_trio_streaming_http_pool_two_simultaneous_playback_promotions():
+    """Two concurrent playback startups that promote to foreground both proceed under pressure."""
+
+    async def _run() -> None:
+        pool = http_pool.TrioStreamingHttpPool()
+        pressure = {"active": True}
+        pool.register_foreground_pressure_callback(lambda: pressure["active"])
+        try:
+            wl_1 = {"val": "neutral"}
+            wl_2 = {"val": "neutral"}
+            done_1 = {"val": False}
+            done_2 = {"val": False}
+
+            async def _stream_1():
+                async with pool.admit("body", workload=lambda: wl_1["val"]):
+                    done_1["val"] = True
+
+            async def _stream_2():
+                async with pool.admit("body", workload=lambda: wl_2["val"]):
+                    done_2["val"] = True
+
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(_stream_1)
+                nursery.start_soon(_stream_2)
+                await trio.sleep(0.3)
+                assert not done_1["val"]
+                assert not done_2["val"]
+
+                # Webhooks arrive for both playbacks
+                wl_1["val"] = "foreground"
+                wl_2["val"] = "foreground"
+                await trio.sleep(0.35)
+                assert done_1["val"]
+                assert done_2["val"]
+                assert pressure["active"] is True
+        finally:
+            await pool.teardown()
+
+    trio.run(_run)
+
+
+def test_trio_streaming_http_pool_two_foreground_and_one_unconfirmed_neutral():
+    """Two foreground streams proceed while an unconfirmed neutral stream remains yielding under pressure."""
+
+    async def _run() -> None:
+        pool = http_pool.TrioStreamingHttpPool()
+        pressure = {"active": True}
+        pool.register_foreground_pressure_callback(lambda: pressure["active"])
+        try:
+            wl_fg1 = {"val": "neutral"}
+            wl_fg2 = {"val": "neutral"}
+            wl_neutral = {"val": "neutral"}
+            done_fg1 = {"val": False}
+            done_fg2 = {"val": False}
+            done_neutral = {"val": False}
+
+            async def _fg1():
+                async with pool.admit("body", workload=lambda: wl_fg1["val"]):
+                    done_fg1["val"] = True
+
+            async def _fg2():
+                async with pool.admit("body", workload=lambda: wl_fg2["val"]):
+                    done_fg2["val"] = True
+
+            async def _neutral():
+                async with pool.admit("body", workload=lambda: wl_neutral["val"]):
+                    done_neutral["val"] = True
+
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(_fg1)
+                nursery.start_soon(_fg2)
+                nursery.start_soon(_neutral)
+                await trio.sleep(0.3)
+                assert not done_fg1["val"]
+                assert not done_fg2["val"]
+                assert not done_neutral["val"]
+
+                # Only two streams receive foreground confirmation
+                wl_fg1["val"] = "foreground"
+                wl_fg2["val"] = "foreground"
+                await trio.sleep(0.35)
+                assert done_fg1["val"]
+                assert done_fg2["val"]
+                # Neutral stream remains yielding because pressure is still active!
+                assert not done_neutral["val"]
+
+                # Clear pressure: neutral stream now completes
+                pressure["active"] = False
+                await trio.sleep(0.35)
+                assert done_neutral["val"]
+        finally:
+            await pool.teardown()
+
+    trio.run(_run)
+
+
+def test_trio_streaming_http_pool_no_confirmed_foreground_stays_waiting():
+    """Streams without foreground confirmation continue waiting as long as pressure is active."""
+
+    async def _run() -> None:
+        pool = http_pool.TrioStreamingHttpPool()
+        pressure = {"active": True}
+        pool.register_foreground_pressure_callback(lambda: pressure["active"])
+        try:
+            done = {"val": False}
+
+            async def _neutral():
+                async with pool.admit("body", workload="neutral"):
+                    done["val"] = True
+
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(_neutral)
+                await trio.sleep(0.6)
+                assert not done["val"]
+
+                pressure["active"] = False
+                await trio.sleep(0.35)
+                assert done["val"]
+        finally:
+            await pool.teardown()
+
+    trio.run(_run)
+
+
 def test_trio_streaming_http_pool_admission_limits():
     """TrioStreamingHttpPool enforces total and body capacity limiters."""
 

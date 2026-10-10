@@ -33,6 +33,9 @@ MIB = 1024 * 1024
 DECIMAL_MBPS = 1_000_000
 BYTES_PER_MEGABIT = 125_000
 ROOT = Path(__file__).resolve().parents[1]
+_src_path = str(ROOT / "src")
+if _src_path not in sys.path:
+    sys.path.insert(0, _src_path)
 
 GEOMETRIES: dict[str, dict[str, Any]] = {
     "stress": {
@@ -1375,6 +1378,18 @@ def main() -> None:
     if not 1 <= args.seconds <= 900:
         parser.error("--seconds must be between 1 and 900")
     output = args.output.resolve()
+    # Path traversal validation
+    try:
+        output.relative_to(ROOT)
+    except ValueError:
+        # If output is not within ROOT, ensure it is within user's home or current working directory
+        cwd = Path.cwd().resolve()
+        if not (
+            output.is_relative_to(cwd) or output.is_relative_to(Path.home().resolve())
+        ):
+            parser.error(
+                "Output path must be within the project root, current directory, or home directory."
+            )
     output.parent.mkdir(parents=True, exist_ok=True)
     sys.path.insert(0, str(ROOT / "src"))
     logger.remove()

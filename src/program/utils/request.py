@@ -5,6 +5,7 @@ import threading
 import time
 from collections.abc import Generator, Mapping
 from contextlib import closing
+from datetime import datetime
 from email.utils import parsedate_to_datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -67,10 +68,17 @@ class TokenBucket:
 
             return False
 
-    def wait(self, tokens: int = 1) -> None:
+    def wait(
+        self,
+        tokens: int = 1,
+        deadline: float | None = None,
+    ) -> bool:
         """
-        Block until enough tokens are available. Uses precise sleep based on
+        Block until enough tokens are available, or until deadline expires. Uses precise sleep based on
         deficit/rate, releasing the lock during sleep so other threads can progress.
+
+        Returns:
+            True if tokens were acquired, False if deadline expired.
         """
 
         need = float(tokens)
@@ -78,15 +86,27 @@ class TokenBucket:
         while True:
             with self._lock:
                 now = time.monotonic()
+                if deadline is not None and now >= deadline:
+                    return False
+
                 self._refill(now)
 
-                if self.tokens >= need:
-                    self.tokens -= need
-                    return
+                # Tolerance of 1e-9 absorbs float rounding noise (e.g. 0.9999999999999432 vs 1.0)
+                if self.tokens >= need - 1e-9:
+                    self.tokens = max(0.0, self.tokens - need)
+                    return True
 
                 # Compute exact time to wait for next available tokens
                 deficit = max(0.0, need - self.tokens)
                 sleep_for = deficit / self.rate if self.rate > 0 else 0.05
+                # Ensure minimum sleep duration to prevent sub-microsecond busy-wait loops from float rounding
+                sleep_for = max(sleep_for, 0.001)
+
+                if deadline is not None:
+                    remaining = deadline - now
+                    if remaining <= 0:
+                        return False
+                    sleep_for = min(sleep_for, remaining)
 
                 if self.name:
                     logger.trace(
@@ -101,6 +121,21 @@ class TokenBucket:
 
             # Release lock while sleeping to allow other threads to make progress
             time.sleep(sleep_for)
+            if deadline is not None and time.monotonic() >= deadline:
+                with self._lock:
+                    now = time.monotonic()
+                    self._refill(now)
+                    if self.tokens >= need:
+                        self.tokens -= need
+                        return True
+                    return False
+
+
+class OperationDeadlineExceeded(requests.exceptions.Timeout):
+    """Raised when an operation exceeds its configured end-to-end deadline."""
+
+    def __init__(self, message: str = "Operation deadline exceeded"):
+        super().__init__(message)
 
 
 class CircuitBreakerOpen(RuntimeError):
@@ -415,18 +450,31 @@ class SmartSession:
                 self.breakers[domain] = CircuitBreaker(name=domain)
 
     # --- public API ---
-    def request(self, method: str, url: str, **kwargs: Any) -> SmartResponse:
+    def request(
+        self,
+        method: str,
+        url: str,
+        operation_deadline: float | None = None,
+        **kwargs: Any,
+    ) -> SmartResponse:
         """
         Make a request with automatic SmartResponse, rate limiting, and circuit breaker.
 
         Args:
             method (str): HTTP method.
             url (str): Request URL (relative or absolute).
+            operation_deadline (float | None): Optional monotonic timestamp representing
+                the outer end-to-end deadline. If expired, raises OperationDeadlineExceeded.
             **kwargs: Additional requests-compatible parameters.
 
         Returns:
             SmartResponse: Parsed response object.
         """
+
+        if operation_deadline is not None and time.monotonic() >= operation_deadline:
+            raise OperationDeadlineExceeded(
+                "Operation deadline exceeded prior to request dispatch"
+            )
 
         if self.base_url and not url.lower().startswith(("http://", "https://")):
             url = f"{self.base_url}/{url.lstrip('/')}"
@@ -442,7 +490,14 @@ class SmartSession:
         limiter = self.limiters.get(domain)
 
         if limiter:
-            limiter.wait()
+            if operation_deadline is not None:
+                acquired = limiter.wait(deadline=operation_deadline)
+                if not acquired:
+                    raise OperationDeadlineExceeded(
+                        f"Operation deadline exceeded waiting for rate limiter token for {domain}"
+                    )
+            else:
+                limiter.wait()
 
         base_headers = dict(self.headers)
         req_headers = kwargs.pop("headers", {})
@@ -540,6 +595,32 @@ class SmartSession:
             while True:
                 attempt += 1
 
+                if operation_deadline is not None:
+                    remaining_time = operation_deadline - time.monotonic()
+                    if remaining_time <= 0:
+                        if breaker:
+                            breaker.after_request(False)
+                        raise OperationDeadlineExceeded(
+                            "Operation deadline exceeded during retry loop"
+                        )
+                else:
+                    remaining_time = None
+
+                # Clamp request timeout so this attempt cannot block past the parent budget
+                if remaining_time is not None:
+                    effective_timeout = httpx.Timeout(
+                        connect=min(
+                            req_timeout.connect or 5.0, max(0.001, remaining_time)
+                        ),
+                        read=min(req_timeout.read or 30.0, max(0.001, remaining_time)),
+                        write=min(
+                            req_timeout.write or 10.0, max(0.001, remaining_time)
+                        ),
+                        pool=min(req_timeout.pool or 5.0, max(0.001, remaining_time)),
+                    )
+                else:
+                    effective_timeout = req_timeout
+
                 try:
                     if stream:
                         # For streaming, build request and send with stream=True to avoid pre-reading body
@@ -559,6 +640,7 @@ class SmartSession:
                             json=kwargs.get("json"),
                             files=kwargs.get("files"),
                             content=kwargs.get("content"),
+                            timeout=effective_timeout,
                         )
 
                         hx_resp = active_client.send(
@@ -572,7 +654,7 @@ class SmartSession:
                             method.upper(),
                             url,
                             follow_redirects=follow_redirects,
-                            timeout=req_timeout,
+                            timeout=effective_timeout,
                             auth=auth,
                             cookies=cookies,
                             **{k: v for k, v in kwargs.items()},
@@ -583,6 +665,21 @@ class SmartSession:
                         delay = self._compute_retry_delay(hx_resp, attempt)
 
                         if attempt <= self.retries:
+                            if operation_deadline is not None:
+                                remaining_sleep = operation_deadline - time.monotonic()
+                                if remaining_sleep <= 0:
+                                    if breaker:
+                                        breaker.after_request(False)
+                                    raise OperationDeadlineExceeded(
+                                        f"Operation deadline exceeded before status retry sleep (delay={delay:.2f}s)"
+                                    )
+                                if delay > remaining_sleep:
+                                    time.sleep(remaining_sleep)
+                                    if breaker:
+                                        breaker.after_request(False)
+                                    raise OperationDeadlineExceeded(
+                                        f"Operation deadline exceeded during status retry sleep (needed={delay:.2f}s, remaining={remaining_sleep:.2f}s)"
+                                    )
                             time.sleep(delay)
                             continue
 
@@ -621,8 +718,34 @@ class SmartSession:
                     return response
 
                 except httpx.TimeoutException as e:
+                    if (
+                        operation_deadline is not None
+                        and time.monotonic() >= operation_deadline
+                    ):
+                        if breaker:
+                            breaker.after_request(False)
+                        raise OperationDeadlineExceeded(
+                            "Operation deadline exceeded on timeout"
+                        ) from e
+
                     if attempt <= self.retries:
-                        time.sleep(self._backoff(attempt))
+                        backoff = self._backoff(attempt)
+                        if operation_deadline is not None:
+                            rem = operation_deadline - time.monotonic()
+                            if rem <= 0:
+                                if breaker:
+                                    breaker.after_request(False)
+                                raise OperationDeadlineExceeded(
+                                    "Operation deadline exceeded before backoff sleep"
+                                ) from e
+                            if backoff > rem:
+                                time.sleep(rem)
+                                if breaker:
+                                    breaker.after_request(False)
+                                raise OperationDeadlineExceeded(
+                                    "Operation deadline exceeded during backoff sleep"
+                                ) from e
+                        time.sleep(backoff)
                         continue
 
                     if breaker:
@@ -630,8 +753,34 @@ class SmartSession:
 
                     self._raise_requests_timeout(e)
                 except httpx.RequestError as e:
+                    if (
+                        operation_deadline is not None
+                        and time.monotonic() >= operation_deadline
+                    ):
+                        if breaker:
+                            breaker.after_request(False)
+                        raise OperationDeadlineExceeded(
+                            "Operation deadline exceeded on request error"
+                        ) from e
+
                     if attempt <= self.retries:
-                        time.sleep(self._backoff(attempt))
+                        backoff = self._backoff(attempt)
+                        if operation_deadline is not None:
+                            rem = operation_deadline - time.monotonic()
+                            if rem <= 0:
+                                if breaker:
+                                    breaker.after_request(False)
+                                raise OperationDeadlineExceeded(
+                                    "Operation deadline exceeded before backoff sleep"
+                                ) from e
+                            if backoff > rem:
+                                time.sleep(rem)
+                                if breaker:
+                                    breaker.after_request(False)
+                                raise OperationDeadlineExceeded(
+                                    "Operation deadline exceeded during backoff sleep"
+                                ) from e
+                        time.sleep(backoff)
                         continue
 
                     if breaker:
@@ -660,26 +809,50 @@ class SmartSession:
         else:
             return _run_with_client(client)
 
-    def get(self, url: str, **kwargs: Any) -> SmartResponse:
-        return self.request("GET", url, **kwargs)
+    def get(
+        self, url: str, operation_deadline: float | None = None, **kwargs: Any
+    ) -> SmartResponse:
+        return self.request("GET", url, operation_deadline=operation_deadline, **kwargs)
 
-    def post(self, url: str, **kwargs: Any) -> SmartResponse:
-        return self.request("POST", url, **kwargs)
+    def post(
+        self, url: str, operation_deadline: float | None = None, **kwargs: Any
+    ) -> SmartResponse:
+        return self.request(
+            "POST", url, operation_deadline=operation_deadline, **kwargs
+        )
 
-    def put(self, url: str, **kwargs: Any) -> SmartResponse:
-        return self.request("PUT", url, **kwargs)
+    def put(
+        self, url: str, operation_deadline: float | None = None, **kwargs: Any
+    ) -> SmartResponse:
+        return self.request("PUT", url, operation_deadline=operation_deadline, **kwargs)
 
-    def delete(self, url: str, **kwargs: Any) -> SmartResponse:
-        return self.request("DELETE", url, **kwargs)
+    def delete(
+        self, url: str, operation_deadline: float | None = None, **kwargs: Any
+    ) -> SmartResponse:
+        return self.request(
+            "DELETE", url, operation_deadline=operation_deadline, **kwargs
+        )
 
-    def patch(self, url: str, **kwargs: Any) -> SmartResponse:
-        return self.request("PATCH", url, **kwargs)
+    def patch(
+        self, url: str, operation_deadline: float | None = None, **kwargs: Any
+    ) -> SmartResponse:
+        return self.request(
+            "PATCH", url, operation_deadline=operation_deadline, **kwargs
+        )
 
-    def head(self, url: str, **kwargs: Any) -> SmartResponse:
-        return self.request("HEAD", url, **kwargs)
+    def head(
+        self, url: str, operation_deadline: float | None = None, **kwargs: Any
+    ) -> SmartResponse:
+        return self.request(
+            "HEAD", url, operation_deadline=operation_deadline, **kwargs
+        )
 
-    def options(self, url: str, **kwargs: Any) -> SmartResponse:
-        return self.request("OPTIONS", url, **kwargs)
+    def options(
+        self, url: str, operation_deadline: float | None = None, **kwargs: Any
+    ) -> SmartResponse:
+        return self.request(
+            "OPTIONS", url, operation_deadline=operation_deadline, **kwargs
+        )
 
     def close(self):
         try:
@@ -808,11 +981,9 @@ class SmartSession:
                 delay = max(0.0, float(int(ra)))
             except Exception:
                 try:
-                    parsed_retry_at = parsedate_to_datetime(ra)  # pyright: ignore[reportUnknownVariableType]
-                    delay = max(
-                        0.0,
-                        float(int(round(parsed_retry_at.timestamp() - time.time()))),  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
-                    )
+                    parsed_retry_at = cast(datetime, parsedate_to_datetime(ra))
+                    retry_ts = parsed_retry_at.timestamp()
+                    delay = max(0.0, float(int(round(retry_ts - time.time()))))
                 except Exception:
                     delay = None
 
