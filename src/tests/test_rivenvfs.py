@@ -607,3 +607,217 @@ def test_vfs_get_stream_rejects_missing_mount_http_pool(mock_vfs):
             nursery.cancel_scope.cancel()
 
     trio.run(_run)
+
+
+@pytest.mark.parametrize(
+    "created,expected", [(0.0, False), (1e-7, False), (10.0, True)]
+)
+def test_shed_iteration_holds_lock_and_preserves_timestamp_guard(
+    mock_vfs, created, expected
+):
+    from types import SimpleNamespace
+
+    async def exercise():
+        stream = SimpleNamespace(
+            fh=77,
+            created_at=created,
+            is_streaming=SimpleNamespace(value=True),
+            session_statistics=SimpleNamespace(bytes_transferred=0),
+            is_timed_out=False,
+            close=AsyncMock(),
+        )
+
+        class LockedItems(dict):
+            def items(self):
+                assert mock_vfs._active_streams_lock.locked()
+                for item in super().items():
+                    assert mock_vfs._active_streams_lock.locked()
+                    yield item
+                assert mock_vfs._active_streams_lock.locked()
+
+        mock_vfs._active_streams = LockedItems({"movie:77": stream})
+        with patch("trio.current_time", return_value=100.0):
+            await mock_vfs._shed_stalled_streams()
+        assert stream.close.await_count == int(expected)
+        assert bool(mock_vfs._active_streams) is (not expected)
+
+    trio.run(exercise)
+
+
+def test_open_unexpected_error_logs_inode_and_returns_eio(mock_vfs):
+    async def exercise():
+        nodes = MagicMock()
+        nodes.get.side_effect = RuntimeError("injected")
+        with (
+            patch.object(mock_vfs, "_inode_to_node", nodes),
+            patch("program.services.filesystem.vfs.rivenvfs.logger") as log,
+        ):
+            with pytest.raises(pyfuse3.FUSEError) as caught:
+                await mock_vfs.open(pyfuse3.InodeT(123), 0, MagicMock())
+            assert caught.value.errno == errno.EIO
+            log.exception.assert_called_once_with("open error: inode=123")
+
+    trio.run(exercise)
+
+
+def test_read_transient_transport_failure_maps_to_eio(mock_vfs):
+    """Case A: Transient transport failure (UnableToConnect) must map to EIO, not ENOENT.
+
+    Protects against misleading FileNotFoundError when remote network/DNS drops out.
+    The file and inode remain addressable.
+    """
+    from program.services.streaming.exceptions import (
+        DebridServiceUnableToConnectException,
+    )
+
+    fh = 1001
+    inode = pyfuse3.InodeT(777)
+    node = VFSFile(
+        name="movie.mkv",
+        inode=inode,
+        parent=mock_vfs._root,
+        original_filename="movie.mkv",
+        file_size=10_000_000,
+        created_at="2026-01-01T00:00:00",
+        updated_at="2026-01-01T00:00:00",
+        entry_type="media",
+    )
+    mock_vfs._file_handles[fh] = {"inode": inode, "stream": None}
+    mock_vfs._inode_to_node[inode] = node
+
+    mock_stream = MagicMock()
+    mock_stream.read = AsyncMock(
+        side_effect=ExceptionGroup(
+            "stream read failure",
+            [DebridServiceUnableToConnectException("rd")],
+        )
+    )
+    mock_stream.build_log_message = MagicMock(return_value="mock log msg")
+
+    async def exercise():
+        with patch.object(mock_vfs, "_get_stream", AsyncMock(return_value=mock_stream)):
+            with pytest.raises(pyfuse3.FUSEError) as exc_info:
+                await mock_vfs.read(fh, 0, 131072)
+            assert exc_info.value.errno == errno.EIO
+            assert exc_info.value.errno != errno.ENOENT
+
+    trio.run(exercise)
+    # Verify inode and handle mapping remain intact and valid
+    assert inode in mock_vfs._inode_to_node
+    assert mock_vfs._inode_to_node[inode].name == "movie.mkv"
+
+
+def test_read_link_unavailable_maps_to_enoent(mock_vfs):
+    """Case B: Genuine missing backing link must map to ENOENT."""
+    from program.services.streaming.exceptions import (
+        DebridServiceLinkUnavailable,
+    )
+
+    fh = 1002
+    inode = pyfuse3.InodeT(778)
+    node = VFSFile(
+        name="deleted.mkv",
+        inode=inode,
+        parent=mock_vfs._root,
+        original_filename="deleted.mkv",
+        file_size=10_000_000,
+        created_at="2026-01-01T00:00:00",
+        updated_at="2026-01-01T00:00:00",
+        entry_type="media",
+    )
+    mock_vfs._file_handles[fh] = {"inode": inode, "stream": None}
+    mock_vfs._inode_to_node[inode] = node
+
+    mock_stream = MagicMock()
+    mock_stream.read = AsyncMock(
+        side_effect=ExceptionGroup(
+            "stream read failure",
+            [DebridServiceLinkUnavailable("rd", "https://cdn.example/dead")],
+        )
+    )
+    mock_stream.build_log_message = MagicMock(return_value="mock log msg")
+
+    async def exercise():
+        with patch.object(mock_vfs, "_get_stream", AsyncMock(return_value=mock_stream)):
+            with pytest.raises(pyfuse3.FUSEError) as exc_info:
+                await mock_vfs.read(fh, 0, 131072)
+            assert exc_info.value.errno == errno.ENOENT
+
+    trio.run(exercise)
+
+
+def test_read_missing_inode_or_handle_maps_to_enoent_or_ebadf(mock_vfs):
+    """Case C: Genuine missing handle returns EBADF, missing node returns ENOENT."""
+
+    # Unknown handle
+    async def test_bad_fh():
+        with pytest.raises(pyfuse3.FUSEError) as exc_info:
+            await mock_vfs.read(9999, 0, 131072)
+        assert exc_info.value.errno == errno.EBADF
+
+    trio.run(test_bad_fh)
+
+    # Handle with missing node
+    fh = 1003
+    mock_vfs._file_handles[fh] = {"inode": pyfuse3.InodeT(9999), "stream": None}
+
+    async def test_missing_node():
+        with pytest.raises(pyfuse3.FUSEError) as exc_info:
+            await mock_vfs.read(fh, 0, 131072)
+        assert exc_info.value.errno == errno.ENOENT
+
+    trio.run(test_missing_node)
+
+
+def test_read_successful_after_transient_failure_on_new_handle(mock_vfs):
+    """Case D: Namespace remains usable and reads succeed once transport recovers."""
+    from program.services.streaming.exceptions import (
+        DebridServiceUnableToConnectException,
+    )
+
+    fh1 = 1004
+    fh2 = 1005
+    inode = pyfuse3.InodeT(779)
+    node = VFSFile(
+        name="recovering.mkv",
+        inode=inode,
+        parent=mock_vfs._root,
+        original_filename="recovering.mkv",
+        file_size=10_000_000,
+        created_at="2026-01-01T00:00:00",
+        updated_at="2026-01-01T00:00:00",
+        entry_type="media",
+    )
+    mock_vfs._file_handles[fh1] = {"inode": inode, "stream": None}
+    mock_vfs._file_handles[fh2] = {"inode": inode, "stream": None}
+    mock_vfs._inode_to_node[inode] = node
+
+    failing_stream = MagicMock()
+    failing_stream.read = AsyncMock(
+        side_effect=ExceptionGroup(
+            "stream read failure",
+            [DebridServiceUnableToConnectException("rd")],
+        )
+    )
+    failing_stream.build_log_message = MagicMock(return_value="mock log msg")
+
+    recovered_stream = MagicMock()
+    recovered_stream.read = AsyncMock(return_value=b"RECOVERED_MEDIA_DATA")
+
+    async def exercise():
+        # First handle fails with transport error -> EIO
+        with patch.object(
+            mock_vfs, "_get_stream", AsyncMock(return_value=failing_stream)
+        ):
+            with pytest.raises(pyfuse3.FUSEError) as exc_info:
+                await mock_vfs.read(fh1, 0, 131072)
+            assert exc_info.value.errno == errno.EIO
+
+        # Second handle succeeds on same inode/path
+        with patch.object(
+            mock_vfs, "_get_stream", AsyncMock(return_value=recovered_stream)
+        ):
+            data = await mock_vfs.read(fh2, 0, 131072)
+            assert data == b"RECOVERED_MEDIA_DATA"
+
+    trio.run(exercise)

@@ -56,6 +56,10 @@ services:
       - SYS_ADMIN
     security_opt:
       - apparmor:unconfined
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    shm_size: 3221225472
     devices:
       - /dev/fuse:/dev/fuse
     volumes:

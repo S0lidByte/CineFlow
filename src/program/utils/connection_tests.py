@@ -7,11 +7,13 @@ that response. Messages never include API keys, tokens, or passwords.
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Literal, cast
+from urllib.parse import urlsplit
 from xmlrpc.client import ServerProxy
 
 import httpx
@@ -189,11 +191,34 @@ def _probe_all_debrid() -> ConnectionTestResponse:
         return _fail(started, "API key not configured")
 
     proxy_url = (settings_manager.settings.downloaders.proxy_url or "").strip() or None
+    # Only the dedicated E2E container may redirect this probe to the local fixture.
+    fixture_origin = (
+        os.environ.get("CINEFLOW_E2E_ALLDEBRID_ORIGIN", "").strip()
+        if os.environ.get("CINEFLOW_E2E_FIXTURES") == "true"
+        else ""
+    )
+    if fixture_origin:
+        try:
+            origin = urlsplit(fixture_origin)
+            valid_origin = (
+                origin.scheme == "http"
+                and origin.hostname == "fixture"
+                and origin.port is not None
+                and origin.username is None
+                and origin.password is None
+                and origin.path in ("", "/")
+                and not origin.query
+                and not origin.fragment
+            )
+        except ValueError:
+            valid_origin = False
+        if not valid_origin:
+            return _fail(started, "Invalid test fixture origin")
     try:
         with httpx.Client(
-            base_url="https://api.alldebrid.com",
+            base_url=fixture_origin or "https://api.alldebrid.com",
             timeout=_httpx_timeout(),
-            proxy=proxy_url,
+            proxy=None if fixture_origin else proxy_url,
             follow_redirects=True,
         ) as client:
             response = client.get(
@@ -211,6 +236,34 @@ def _probe_all_debrid() -> ConnectionTestResponse:
         )
     if response.status_code >= 400:
         return _fail(started, f"HTTP {response.status_code}")
+
+    try:
+        payload_obj = response.json()
+    except ValueError:
+        return _fail(started, "Invalid response")
+
+    if not isinstance(payload_obj, dict):
+        return _fail(started, "Invalid response format")
+
+    payload = cast(dict[str, object], payload_obj)
+    status_field = payload.get("status")
+    if status_field != "success":
+        # Provider-controlled text can echo credentials without recognizable markers.
+        return _fail(started, "AllDebrid error")
+
+    data_obj = payload.get("data")
+    if not isinstance(data_obj, dict):
+        return _fail(started, "Missing data in response")
+
+    typed_data = cast(dict[str, object], data_obj)
+    user_obj = typed_data.get("user")
+    if not isinstance(user_obj, dict):
+        return _fail(started, "Missing user details in response")
+
+    typed_user = cast(dict[str, object], user_obj)
+    if typed_user.get("isPremium") is not True:
+        return _fail(started, "Account is not premium")
+
     return _ok(started, "Connected to AllDebrid")
 
 

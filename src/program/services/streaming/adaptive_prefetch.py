@@ -123,7 +123,10 @@ class AdaptivePrefetchManager:
         return is_sequential
 
     def record_provider_fetch(self, duration_seconds: float) -> None:
-        """Record upstream fetch duration to observe provider latency tail."""
+        """Record fetch-through-publication latency (network plus cache admission).
+
+        The legacy method name is retained for callers; this is not network-only p95.
+        """
         if duration_seconds > 0:
             self._recent_fetch_durations.append(duration_seconds)
             if len(self._recent_fetch_durations) > 20:
@@ -211,7 +214,10 @@ class AdaptivePrefetchManager:
         if bitrate <= 0:
             window = self.config.default_fallback_chunks
         else:
-            buffer_bytes = (bitrate * self.config.target_buffer_seconds) / 8.0
+            target_seconds = max(
+                self.config.target_buffer_seconds, self.get_fetch_p95() * 1.5
+            )
+            buffer_bytes = (bitrate * target_seconds) / 8.0
             raw_chunks = math.ceil(buffer_bytes / self.config.chunk_size_bytes)
             window = max(
                 self.config.min_window_chunks,
@@ -233,10 +239,7 @@ class AdaptivePrefetchManager:
         raw_pressure = (
             cache_protected_pct if cache_protected_pct is not None else cache_usage_pct
         )
-        if callable(raw_pressure):
-            effective_cache_pressure = float(raw_pressure())  # type: ignore[reportUnknownArgumentType]
-        else:
-            effective_cache_pressure = float(raw_pressure)
+        effective_cache_pressure = float(raw_pressure)
         if effective_cache_pressure >= 95.0:
             window = self.config.min_window_chunks
         elif effective_cache_pressure >= self.config.cache_pressure_threshold_pct:
@@ -250,6 +253,11 @@ class AdaptivePrefetchManager:
             )
             window = min(window, ramp_cap)
 
+        # Unknown-bitrate fallback must obey the same hard resource bounds.
+        window = max(
+            self.config.min_window_chunks,
+            min(self.config.max_window_chunks, window),
+        )
         self.last_calculated_window = window
         return window
 

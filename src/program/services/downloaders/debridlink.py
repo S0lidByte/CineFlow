@@ -523,14 +523,19 @@ class DebridLinkDownloader(DownloaderBase):
         if not response.ok:
             raise DebridLinkError(self._handle_error(response))
 
-    def unrestrict_link(self, link: str) -> UnrestrictedLink:
+    def unrestrict_link(
+        self,
+        link: str,
+        operation_deadline: float | None = None,
+    ) -> UnrestrictedLink:
         """
         Unrestrict a link using Debrid-Link.
 
         For Debrid-Link, links are already direct download URLs, so we just return them.
 
         Args:
-            url: The link to unrestrict.
+            link: The link to unrestrict.
+            operation_deadline: Optional monotonic timestamp deadline.
 
         Returns:
             UnrestrictedLink with download URL.
