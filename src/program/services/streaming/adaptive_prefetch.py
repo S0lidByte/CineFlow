@@ -57,6 +57,8 @@ class AdaptivePrefetchManager:
         self._last_consumption_bps: float = 0.0
         self._cached_runway_bytes: int = 0
         self._inflight_runway_bytes: int = 0
+        self._accumulated_read_bytes: int = 0
+        self._accumulated_read_start_time: float | None = None
 
     def set_metadata_bitrate(self, bitrate: int | None) -> None:
         """Set known bitrate from media metadata or prober (in bits per second)."""
@@ -91,9 +93,17 @@ class AdaptivePrefetchManager:
             expected_next = self.last_read_end + 1
             if abs(start - expected_next) <= self.config.sequential_tolerance_bytes:
                 is_sequential = True
-                delta_t = current_time - self.last_read_time
-                if 0.02 <= delta_t <= 10.0:
-                    instant_bitrate = (size * 8.0) / delta_t
+                if self._accumulated_read_start_time is None:
+                    self._accumulated_read_start_time = self.last_read_time
+                self._accumulated_read_bytes += size
+
+                delta_t = current_time - self._accumulated_read_start_time
+                if 0.05 <= delta_t <= 10.0:
+                    instant_bitrate = (self._accumulated_read_bytes * 8.0) / delta_t
+                    # Reset accumulator window after taking a valid sample
+                    self._accumulated_read_bytes = 0
+                    self._accumulated_read_start_time = current_time
+
                     # Reasonable range: 200 Kbps to 500 Mbps
                     if 200_000 <= instant_bitrate <= 500_000_000:
                         if self.estimated_bitrate <= 0:
@@ -105,12 +115,25 @@ class AdaptivePrefetchManager:
                                 + (1.0 - alpha) * self.estimated_bitrate
                             )
                         self._last_consumption_bps = instant_bitrate
+                elif delta_t > 10.0:
+                    # Stale accumulator window (e.g. pause/idle); reset
+                    self._accumulated_read_bytes = size
+                    self._accumulated_read_start_time = self.last_read_time
+            else:
+                # Discontiguous sequential jump: reset accumulator
+                self._accumulated_read_bytes = 0
+                self._accumulated_read_start_time = None
+        else:
+            self._accumulated_read_bytes = 0
+            self._accumulated_read_start_time = None
 
         if not is_sequential and self.last_read_end is not None:
             # Non-sequential jump detected: Player sought
             self.current_generation += 1
             self.seek_count += 1
             self.consecutive_sequential_reads = 0
+            self._accumulated_read_bytes = 0
+            self._accumulated_read_start_time = None
             logger.debug(
                 f"Seek detected: jumped from {self.last_read_end} to {start}. "
                 f"Advanced generation to {self.current_generation}"

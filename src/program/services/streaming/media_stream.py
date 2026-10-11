@@ -51,7 +51,7 @@ from .http_pool import (
     heal_on_pool_timeout,
 )
 from .recent_reads import Read, RecentReads
-from .session_statistics import SessionStatistics
+from .session_statistics import SessionStatistics, observe_response
 from .stream_connection import StreamConnection
 from .streaming_constants import PROXY_REQUIRED_PROVIDERS
 
@@ -245,6 +245,32 @@ class _DeliveryRegistry:
             for start, entry in self._entries.items()
             if entry.state == _DeliveryState.PENDING and entry.waiter_count > 0
         )
+
+
+class _ProducerClaims:
+    """Atomic producer ownership; never owns or changes reader reservations."""
+
+    def __init__(self) -> None:
+        self._owners: dict[int, trio.Event] = {}
+
+    def acquire(self, start: int) -> tuple[bool, trio.Event]:
+        # No checkpoint between lookup and insertion in the owning Trio loop.
+        existing = self._owners.get(start)
+        if existing is not None:
+            return False, existing
+        event = trio.Event()
+        self._owners[start] = event
+        return True, event
+
+    def release(self, start: int, event: trio.Event) -> None:
+        if self._owners.get(start) is event:
+            self._owners.pop(start)
+            event.set()
+
+    def wake_all(self) -> None:
+        for event in self._owners.values():
+            event.set()
+        self._owners.clear()
 
 
 _CONTENT_RANGE_PATTERN = re.compile(
@@ -521,6 +547,14 @@ class MediaStream:
         self._delivery_registry = _DeliveryRegistry()
         self._consumer_end: int | None = None
         self._inflight_chunk: tuple[int, int] | None = None
+        self.parallel_prefetch_workers = stream_settings.parallel_prefetch_workers
+        self._producer_claims = _ProducerClaims()
+        self._speculative_active = 0
+        self._speculative_peak = 0
+        self._speculative_bytes = 0
+        self._speculative_failures = 0
+        self._speculative_scope: trio.CancelScope | None = None
+        self._speculative_done: trio.Event | None = None
         # Per-failed-URL transport recovery budget: allows re-arming after progression on new URL
         self._last_recovered_url: str | None = None
         self._bytes_transferred_at_last_recovery: int = 0
@@ -543,6 +577,10 @@ class MediaStream:
         )
 
         self.session_statistics = SessionStatistics()
+        self.session_statistics.parallel_prefetch_workers = (
+            self.parallel_prefetch_workers
+        )
+        self.session_statistics.on_update = self._publish_telemetry_snapshot
         # Monotonic creation time used by is_timed_out to expire scan-only
         # streams (no HTTP transfer) without waiting activity_timeout_seconds.
         # Set inside trio context so trio.current_time() is valid.
@@ -555,10 +593,16 @@ class MediaStream:
 
         from .adaptive_prefetch import AdaptivePrefetchConfig, AdaptivePrefetchManager
 
+        configured_prefetch = self.config.prefetch_chunks
+        max_chunks = max(48, configured_prefetch) if configured_prefetch > 0 else 48
+
+        self._publish_telemetry_snapshot(self.session_statistics)
+
         self.adaptive_prefetch = AdaptivePrefetchManager(
             config=AdaptivePrefetchConfig(
                 chunk_size_bytes=self.config.chunk_size,
-                default_fallback_chunks=self.config.prefetch_chunks,
+                default_fallback_chunks=configured_prefetch,
+                max_window_chunks=max_chunks,
                 sequential_tolerance_bytes=self.config.sequential_read_tolerance,
             ),
             initial_bitrate=bitrate,
@@ -571,7 +615,7 @@ class MediaStream:
             bitrate=bitrate,
         )
 
-        self.stream_id = f"{self.file_metadata.original_filename}:{self.fh}"
+        self.stream_id = f"{self.file_metadata.path}:{self.fh}"
 
         self.chunker = Chunker(
             cache_key=self.file_metadata.original_filename,
@@ -660,6 +704,19 @@ class MediaStream:
         except Exception:
             # Runway telemetry must never affect delivery correctness.
             return
+
+    def _publish_telemetry_snapshot(self, stats: SessionStatistics) -> None:
+        try:
+            if hasattr(self, "stream_id"):
+                from program.services.streaming.telemetry import (
+                    playback_telemetry_collector,
+                )
+
+                playback_telemetry_collector.record_upstream_statistics(
+                    self.stream_id, stats.upstream_snapshot()
+                )
+        except Exception:
+            pass
 
     def _prefetch_window(self) -> int:
         """Keep the existing adaptive resource bounds on every refill turn."""
@@ -865,6 +922,221 @@ class MediaStream:
 
         return True
 
+    async def _stop_speculative_workers(self) -> None:
+        scope = self._speculative_scope
+        done = self._speculative_done
+        if scope is not None:
+            scope.cancel()
+        if done is not None:
+            await done.wait()
+
+    async def _fetch_speculative_chunk(self, chunk: Chunk, generation: int) -> None:
+        """Fetch one exact bounded range, with independent response and cache-first handoff."""
+        from .cache import CachePutResult
+
+        if not self._transport_generation_live(generation) or chunk.is_cached.value:
+            return
+        acquired, claim = self._producer_claims.acquire(chunk.start)
+        if not acquired:
+            return
+        try:
+            if chunk.is_cached.value or self._delivery_registry.get_pending_starts():
+                return
+            # Reserve a body token before opening the independent HTTP response.
+            # Speculative saturation is a soft yield, never a pool heal.
+            pool = self._http_pool
+            if pool is None:
+                return
+            try:
+                async with pool.admit("body", workload="background"):
+                    if (
+                        not self._transport_generation_live(generation)
+                        or chunk.is_cached.value
+                        or self._delivery_registry.get_pending_starts()
+                    ):
+                        return
+                    lease = pool.acquire_lease(use_proxy=self._use_proxy_client)
+                    try:
+                        self._speculative_active += 1
+                        self._speculative_peak = max(
+                            self._speculative_peak, self._speculative_active
+                        )
+                        url = self.target_url.value
+                        req_context = lease.client.stream(
+                            "GET",
+                            url,
+                            headers={
+                                "Accept-Encoding": "identity",
+                                "Range": format_range_header(chunk.start, chunk.end),
+                            },
+                        )
+                        async with observe_response(
+                            req_context, self.session_statistics, speculative=True
+                        ) as response:
+                            response.raise_for_status()
+                            parsed = validate_range_response(
+                                response,
+                                chunk.start,
+                                chunk.end,
+                                self.provider,
+                                self.file_metadata.file_size,
+                            )
+                            if (
+                                parsed is None
+                                or parsed.last_byte != chunk.end
+                                or parsed.complete_length
+                                != self.file_metadata.file_size
+                            ):
+                                raise ValueError(
+                                    "Speculative Content-Range does not match exact chunk/file size"
+                                )
+                            length = response.headers.get("Content-Length")
+                            if length is not None and int(length) != chunk.size:
+                                raise ValueError("Speculative Content-Length mismatch")
+                            data = bytearray()
+                            async for part in response.aiter_raw():
+                                data.extend(part)
+                                if len(data) > chunk.size:
+                                    raise ValueError(
+                                        "Speculative response exceeds requested chunk"
+                                    )
+                            if len(data) != chunk.size:
+                                raise ValueError("Truncated speculative response")
+                        if not self._transport_generation_live(generation):
+                            return
+                        result = await self._cache_chunk(
+                            start=chunk.start,
+                            data=bytes(data),
+                            admission=(
+                                "demand"
+                                if self._delivery_registry.has_pending(chunk.start)
+                                else "prefetch"
+                            ),
+                        )
+                        if not self._transport_generation_live(generation):
+                            return
+                        if result in (
+                            CachePutResult.STORED_HOT,
+                            CachePutResult.STORED_WARM,
+                        ):
+                            chunk.emit_cache_signal()
+                        self._speculative_bytes += len(data)
+                    finally:
+                        self._speculative_active -= 1
+                        with trio.CancelScope(shield=True):
+                            await pool.release_lease(lease)
+            except httpx.PoolTimeout:
+                return
+        except trio.Cancelled:
+            raise
+        except Exception as exc:
+            self._speculative_failures += 1
+            self.session_statistics.speculative_failures += 1
+            self.session_statistics.publish()
+            logger.debug(
+                self.build_log_message(
+                    f"Speculative fetch skipped: {type(exc).__name__}"
+                )
+            )
+        finally:
+            self._producer_claims.release(chunk.start, claim)
+
+    async def _fetch_speculative_span(self, span: list[Chunk], generation: int) -> None:
+        """Fetch a contiguous span of speculative chunks sequentially on a background worker."""
+        for chunk in span:
+            if not self._transport_generation_live(generation):
+                break
+            if (
+                hasattr(self, "_delivery_registry")
+                and self._delivery_registry.get_pending_starts()
+            ):
+                break
+            await self._fetch_speculative_chunk(chunk, generation)
+
+    def _partition_prefetch_spans(
+        self, chunks: OrderedSet[Chunk] | list[Chunk], parallel_workers: int
+    ) -> tuple[list[Chunk], list[list[Chunk]]]:
+        """Partition prefetch chunks into non-overlapping contiguous transfer spans.
+
+        The primary socket is assigned the first contiguous transfer span so that
+        the active HTTP response can stream sequentially without encountering
+        isolated cached holes. Speculative workers are assigned disjoint contiguous spans
+        beyond the primary span.
+        """
+        chunks_list = list(chunks)
+        if not chunks_list or parallel_workers <= 1:
+            return chunks_list, []
+
+        if not hasattr(chunks_list[0], "start") or not hasattr(chunks_list[0], "size"):
+            primary_len = 1
+            primary_span = chunks_list[:primary_len]
+            remaining = chunks_list[primary_len:]
+            num_spec = parallel_workers - 1
+            spec_spans: list[list[Chunk]] = []
+            if remaining and num_spec > 0:
+                for item in remaining[:num_spec]:
+                    spec_spans.append([item])
+            return primary_span, spec_spans
+
+        contiguous_run = [chunks_list[0]]
+        expected_start = chunks_list[0].start + chunks_list[0].size
+        idx = 1
+        while idx < len(chunks_list) and chunks_list[idx].start == expected_start:
+            contiguous_run.append(chunks_list[idx])
+            expected_start = chunks_list[idx].start + chunks_list[idx].size
+            idx += 1
+
+        total_len = len(chunks_list)
+        k = parallel_workers
+        primary_len = min(len(contiguous_run), max(1, (total_len + k - 1) // k))
+        primary_span = chunks_list[:primary_len]
+        remaining = chunks_list[primary_len:]
+
+        num_spec = k - 1
+        speculative_spans: list[list[Chunk]] = []
+        if remaining and num_spec > 0:
+            spec_len = max(1, (len(remaining) + num_spec - 1) // num_spec)
+            for i in range(num_spec):
+                span = remaining[i * spec_len : (i + 1) * spec_len]
+                if span:
+                    speculative_spans.append(span)
+
+        return primary_span, speculative_spans
+
+    async def _parallel_prefetch(
+        self,
+        chunks: OrderedSet[Chunk],
+        generation: int,
+        process_chunks: Callable[..., Awaitable[None]],
+    ) -> None:
+        """Bounded generation-owned batch with coordinated non-overlapping transfer spans."""
+        if self._speculative_done is not None:
+            await self._speculative_done.wait()
+        done = trio.Event()
+        self._speculative_done = done
+        try:
+            primary_span, spec_spans = self._partition_prefetch_spans(
+                chunks, self.parallel_prefetch_workers
+            )
+            with trio.CancelScope() as scope:
+                self._speculative_scope = scope
+                async with trio.open_nursery() as nursery:
+                    for span in spec_spans:
+                        nursery.start_soon(
+                            self._fetch_speculative_span, span, generation
+                        )
+                    await process_chunks(
+                        OrderedSet(primary_span),
+                        is_prefetch=True,
+                        prefetch_gen=generation,
+                    )
+                    if not self._transport_generation_live(generation):
+                        nursery.cancel_scope.cancel()
+        finally:
+            self._speculative_scope = None
+            self._speculative_done = None
+            done.set()
+
     @asynccontextmanager
     async def manage_connection(
         self,
@@ -993,8 +1265,52 @@ class MediaStream:
                                     *,
                                     is_prefetch: bool = False,
                                     prefetch_gen: int | None = None,
+                                    owned: bool = False,
                                 ) -> None:
                                     nonlocal needs_url_refresh, position
+                                    if (
+                                        not owned
+                                        and getattr(
+                                            self, "parallel_prefetch_workers", 1
+                                        )
+                                        > 1
+                                    ):
+                                        for claimed_chunk in chunks:
+                                            while not claimed_chunk.is_cached.value:
+                                                delivery = (
+                                                    self._delivery_registry.get_entry(
+                                                        claimed_chunk.start
+                                                    )
+                                                )
+                                                if (
+                                                    delivery is not None
+                                                    and delivery.state
+                                                    == _DeliveryState.READY_TRANSIENT
+                                                ):
+                                                    break
+                                                acquired, claim = (
+                                                    self._producer_claims.acquire(
+                                                        claimed_chunk.start
+                                                    )
+                                                )
+                                                if not acquired:
+                                                    if is_prefetch:
+                                                        break
+                                                    await claim.wait()
+                                                    continue
+                                                try:
+                                                    await _process_chunks(
+                                                        OrderedSet([claimed_chunk]),
+                                                        is_prefetch=is_prefetch,
+                                                        prefetch_gen=prefetch_gen,
+                                                        owned=True,
+                                                    )
+                                                finally:
+                                                    self._producer_claims.release(
+                                                        claimed_chunk.start, claim
+                                                    )
+                                                break
+                                        return
                                     if len(chunks) == 0:
                                         if self.enable_tracing:
                                             logger.log(
@@ -1241,7 +1557,7 @@ class MediaStream:
                                             ):
                                                 connection.increment_sequential_chunks()
 
-                                                await self._cache_chunk(
+                                                cache_result = await self._cache_chunk(
                                                     start=chunk.start,
                                                     data=data,
                                                     admission=(
@@ -1259,7 +1575,13 @@ class MediaStream:
                                                         monotonic() - fetch_started
                                                     )
 
-                                                chunk.emit_cache_signal()
+                                                from .cache import CachePutResult
+
+                                                if cache_result in (
+                                                    CachePutResult.STORED_HOT,
+                                                    CachePutResult.STORED_WARM,
+                                                ):
+                                                    chunk.emit_cache_signal()
 
                                                 connection.current_read_position += len(
                                                     data
@@ -1276,6 +1598,7 @@ class MediaStream:
                                                 self.session_statistics.bytes_transferred += len(
                                                     data
                                                 )
+                                                self.session_statistics.publish()
 
                                 if seek_range:
                                     await _process_chunks(seek_range.uncached_chunks)
@@ -1561,15 +1884,28 @@ class MediaStream:
                                                             )
                                                         )
                                                         break
-                                                prefetched = await self._run_opportunistic_prefetch(
-                                                    ahead,
-                                                    _process_chunks,
-                                                    label="Prefetch",
-                                                    prefetch_gen=prefetch_gen,
+                                                parallel_workers = getattr(
+                                                    self, "parallel_prefetch_workers", 1
                                                 )
-                                                if not prefetched:
-                                                    needs_url_refresh = False
-                                                    break
+                                                if (
+                                                    parallel_workers > 1
+                                                    and prefetch_gen is not None
+                                                ):
+                                                    await self._parallel_prefetch(
+                                                        ahead,
+                                                        prefetch_gen,
+                                                        _process_chunks,
+                                                    )
+                                                else:
+                                                    prefetched = await self._run_opportunistic_prefetch(
+                                                        ahead,
+                                                        _process_chunks,
+                                                        label="Prefetch",
+                                                        prefetch_gen=prefetch_gen,
+                                                    )
+                                                    if not prefetched:
+                                                        needs_url_refresh = False
+                                                        break
 
                             position = connection.current_read_position
                             seek_range = connection.seek_range
@@ -1716,7 +2052,8 @@ class MediaStream:
             else max(self.config.header_size, chunk_range.first_chunk.start)
         )
 
-        async with self.establish_connection(start=chunk_aligned_start) as response:
+        conn_ctx = self.establish_connection(start=chunk_aligned_start)
+        async with observe_response(conn_ctx, self.session_statistics) as response:
             stream_connection = StreamConnection(
                 response=response,
                 start_position=chunk_aligned_start,
@@ -1749,6 +2086,8 @@ class MediaStream:
         # Fence even an idle/cache-only stream before any further refill.
         self.is_killed.value = True
         self._inflight_chunk = None
+        self._producer_claims.wake_all()
+        await self._stop_speculative_workers()
         self._set_recovery_state(StreamRecoveryPhase.IDLE)
         # First wait for the stream to stop, then close the client
         if self.is_streaming.value:
@@ -1901,6 +2240,7 @@ class MediaStream:
                     self._consumer_end = end_byte
                     self._update_runway_observation(end_byte + 1)
                     if manager.current_generation != generation:
+                        await self._stop_speculative_workers()
                         connection = self._active_stream_connection
                         if connection is not None:
                             connection.seek(chunk_range=chunk_range)
@@ -2373,8 +2713,6 @@ class MediaStream:
 
                             raise
 
-                        self.session_statistics.total_session_connections += 1
-
                         yielded = True
                         yield stream
 
@@ -2711,13 +3049,17 @@ class MediaStream:
             raise ValueError("Size must be positive")
 
         for integrity_attempt in range(1, DISCRETE_SCAN_MAX_INTEGRITY_ATTEMPTS + 1):
-            async with self.establish_connection(
+            conn_ctx = self.establish_connection(
                 start=start,
                 end=start + size - 1,
-            ) as response:
+            )
+            async with observe_response(conn_ctx, self.session_statistics) as response:
                 data = await response.aread()
 
                 self.session_statistics.bytes_transferred += len(data)
+                publish_fn = getattr(self.session_statistics, "publish", None)
+                if callable(publish_fn):
+                    publish_fn()
 
                 if len(data) < size:
                     logger.warning(
@@ -2767,13 +3109,47 @@ class MediaStream:
         )
 
     async def _wait_one_chunk(self, chunk: Chunk) -> None:
-        entry = self._delivery_registry.get_entry(chunk.start)
-        if entry is None:
-            await chunk.is_cached.wait_value(True)
-            return
-        await trio_util.wait_any(
-            lambda: chunk.is_cached.wait_value(True), entry.ready.wait
-        )
+        while not chunk.is_cached.value:
+            entry = self._delivery_registry.get_entry(chunk.start)
+            if entry is not None and entry.state == _DeliveryState.READY_TRANSIENT:
+                return
+            if entry is not None and entry.state == _DeliveryState.RETIRED:
+                return
+            producer_claims = getattr(self, "_producer_claims", None)
+            claim = (
+                producer_claims._owners.get(chunk.start)
+                if producer_claims is not None
+                else None
+            )
+            if claim is not None:
+                await trio_util.wait_any(
+                    lambda: chunk.is_cached.wait_value(True),
+                    claim.wait,
+                    *([entry.ready.wait] if entry is not None else []),
+                )
+                if not chunk.is_cached.value and (
+                    entry is None or entry.state == _DeliveryState.PENDING
+                ):
+                    # Ownership was abandoned; retain reader reservation and let
+                    # foreground claim the chunk rather than treating it as delivered.
+                    if (
+                        producer_claims is not None
+                        and producer_claims._owners.get(chunk.start) is None
+                    ):
+                        self.recent_reads.current_read.value = Read(
+                            chunk_range=self.chunker.get_chunk_range(
+                                position=chunk.start, size=1
+                            ),
+                            read_type="body_read",
+                        )
+                    await trio.lowlevel.checkpoint()
+                continue
+            if entry is None:
+                await chunk.is_cached.wait_value(True)
+            else:
+                await trio_util.wait_any(
+                    lambda: chunk.is_cached.wait_value(True), entry.ready.wait
+                )
 
     async def _wait_all_chunks(self, chunk_range: ChunkRange) -> None:
         async with trio.open_nursery() as nursery:

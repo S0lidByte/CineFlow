@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from RTN import RTN, DefaultRanking, parse
 from RTN.exceptions import GarbageTorrent
+from RTN.fetch import check_fetch  # type: ignore[reportUnknownVariableType]
 
 from program.services.scrapers.funnel import get_remembered_funnel_summary
 from program.services.scrapers.shared import (
@@ -597,15 +598,28 @@ async def test_ranking(body: RankingTestRequest) -> RankingTestResponse:
             if trash_summary and trash_summary.total_score:
                 effective_rank += trash_summary.total_score
 
+            accepted = bool(torrent.fetch)
+            deny_key: str | None = None
+            if not accepted and parsed:
+                try:
+                    _, failed_keys = cast(
+                        tuple[bool, list[Any]],
+                        check_fetch(torrent.data, settings_model, speed_mode=False),
+                    )
+                    if failed_keys:
+                        deny_key = str(failed_keys[0]).lower()
+                except Exception:
+                    deny_key = None
+
             return RankingTestResponse(
-                message="Accepted by RTN",
-                accepted=True,
-                rank=effective_rank,
+                message="Accepted by RTN" if accepted else "Rejected by RTN",
+                accepted=accepted,
+                rank=effective_rank if accepted else 0,
                 lev_ratio=float(torrent.lev_ratio),
-                fetch=bool(torrent.fetch),
-                deny_reason=None,
-                deny_help=None,
-                scraping_hint=None,
+                fetch=accepted,
+                deny_reason=deny_key,
+                deny_help=DENY_KEY_HELP.get(deny_key) if deny_key else None,
+                scraping_hint=_scraping_hint_for_deny(deny_key),
                 title_similarity_threshold=threshold,
                 aliases_used=bool(aliases),
                 parsed=parsed,

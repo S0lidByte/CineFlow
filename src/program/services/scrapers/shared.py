@@ -735,6 +735,13 @@ def _accumulate_ranked_torrents(
             )
             if ranking_title != raw_title:
                 torrent = torrent.model_copy(update={"raw_title": raw_title})
+
+            if not manual and not torrent.fetch:
+                logger.debug(f"RTN rejected '{raw_title[:60]}' with fetch=False")
+                if funnel is not None:
+                    funnel.record_rtn_reject(Exception(f"'{raw_title}' fetch=false"))
+                processed_infohashes.add(infohash)
+                continue
         except Exception as e:
             logger.debug(f"RTN rejected '{raw_title[:60]}': {type(e).__name__}: {e}")
             if funnel is not None:

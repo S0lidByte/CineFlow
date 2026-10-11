@@ -1385,6 +1385,10 @@ class StreamModel(Observable):
             "Values above 256 MB are aggressive during resume/seek."
         ),
     )
+    parallel_prefetch_workers: Literal[1, 2, 4] = Field(
+        default=1,
+        description="Maximum simultaneous per-stream body transfers including the foreground connection (1, 2, or 4).",
+    )
     connect_timeout_seconds: int = Field(
         default=10,
         ge=1,

@@ -79,6 +79,90 @@ def test_read_tracking_and_bitrate_estimation():
     assert mgr.get_effective_bitrate() > 0
 
 
+def test_sub_interval_fuse_read_accumulation():
+    """Verify that small 128 KiB FUSE reads arriving faster than 0.05s are accumulated
+    rather than dropped or under-sampling throughput.
+    """
+    mgr = AdaptivePrefetchManager()
+    t = 100.0
+    pos = 0
+    read_size = 131072  # 128 KiB FUSE block
+
+    # First read (seed)
+    mgr.record_read(pos, pos + read_size - 1, current_time=t)
+    pos += read_size
+
+    # Simulate 50 x 128 KiB reads at 64 Mbps = 8 MB/s.
+    # 128 KiB takes 0.125 MB / 8 MB/s = 0.015625s (15.6 ms, which is < 0.05s interval).
+    dt = 0.015625
+    for _ in range(50):
+        t += dt
+        mgr.record_read(pos, pos + read_size - 1, current_time=t)
+        pos += read_size
+
+    # The estimated bitrate should track ~64 Mbps (60 to 70 Mbps range)
+    eff_bitrate = mgr.get_effective_bitrate()
+    assert (
+        60_000_000 <= eff_bitrate <= 68_000_000
+    ), f"Expected ~64 Mbps, got {eff_bitrate / 1e6:.2f} Mbps"
+
+
+def test_read_accumulator_edge_cases():
+    """Verify accumulator behaviors under pauses, seeks, non-sequential reads, and delayed reads."""
+    mgr = AdaptivePrefetchManager()
+    t = 100.0
+    pos = 0
+    read_size = 131072  # 128 KiB block
+
+    # 1. Establish baseline steady state at 64 Mbps (dt = 0.015625s per 128 KiB)
+    mgr.record_read(pos, pos + read_size - 1, current_time=t)
+    pos += read_size
+    dt = 0.015625
+    for _ in range(40):
+        t += dt
+        mgr.record_read(pos, pos + read_size - 1, current_time=t)
+        pos += read_size
+    assert 60_000_000 <= mgr.get_effective_bitrate() <= 68_000_000
+
+    # 2. Pause / Idle event (dt > 10.0s, e.g. 15s pause)
+    t += 15.0  # 15s pause during playback
+    # Playback resumes with contiguous read
+    is_seq = mgr.record_read(pos, pos + read_size - 1, current_time=t)
+    pos += read_size
+    assert is_seq is True
+    # The pause should NOT produce an erroneously low instant bitrate (e.g. 128 KiB / 15s = 68 Kbps)
+    # The stale accumulator must reset, keeping estimated bitrate preserved via EMA
+    assert 60_000_000 <= mgr.get_effective_bitrate() <= 68_000_000
+    assert mgr._accumulated_read_bytes == read_size
+
+    # Continue normal reads after pause to verify clean re-sampling
+    for _ in range(20):
+        t += dt
+        mgr.record_read(pos, pos + read_size - 1, current_time=t)
+        pos += read_size
+    assert 60_000_000 <= mgr.get_effective_bitrate() <= 68_000_000
+
+    # 3. Discontiguous forward read within sequential tolerance vs outside tolerance (Seek)
+    seek_target = pos + 50_000_000
+    is_seq_seek = mgr.record_read(
+        seek_target, seek_target + read_size - 1, current_time=t + 0.1
+    )
+    assert is_seq_seek is False
+    assert mgr.seek_count == 1
+    assert mgr.current_generation == 1
+    assert mgr._accumulated_read_bytes == 0
+    assert mgr._accumulated_read_start_time is None
+
+    # 4. Rapid contiguous reads right after seek
+    pos = seek_target + read_size
+    t = t + 0.1
+    for _ in range(40):
+        t += dt
+        mgr.record_read(pos, pos + read_size - 1, current_time=t)
+        pos += read_size
+    assert 60_000_000 <= mgr.get_effective_bitrate() <= 68_000_000
+
+
 def test_seek_detection_and_generation_advancement():
     mgr = AdaptivePrefetchManager()
 

@@ -70,6 +70,14 @@ class StreamSessionTracker:
         self.last_read_at = self.started_at
         self.bytes_transferred = 0
         self.bytes_from_cache = 0
+        self.upstream_bytes = 0
+        self.upstream_transfer_seconds = 0.0
+        self.total_session_connections = 0
+        self.active_body_responses = 0
+        self.peak_body_responses = 0
+        self.speculative_bytes = 0
+        self.speculative_failures = 0
+        self.parallel_prefetch_workers = 1
         self.is_active = True
         self.cdn_url_refreshed = False
         self._lock = threading.Lock()
@@ -215,6 +223,39 @@ class StreamSessionTracker:
             self._window.append((now_mono, nbytes))
             self._prune_window(now_mono)
 
+    def update_upstream_metrics(
+        self,
+        *,
+        upstream_bytes: int | None = None,
+        upstream_transfer_seconds: float | None = None,
+        total_session_connections: int | None = None,
+        active_body_responses: int | None = None,
+        peak_body_responses: int | None = None,
+        speculative_bytes: int | None = None,
+        speculative_failures: int | None = None,
+        parallel_prefetch_workers: int | None = None,
+    ) -> None:
+        """Update upstream transport accounting counters."""
+        with self._lock:
+            if upstream_bytes is not None:
+                self.upstream_bytes = upstream_bytes
+            if upstream_transfer_seconds is not None:
+                self.upstream_transfer_seconds = upstream_transfer_seconds
+            if total_session_connections is not None:
+                self.total_session_connections = total_session_connections
+            if active_body_responses is not None:
+                self.active_body_responses = active_body_responses
+            if peak_body_responses is not None:
+                self.peak_body_responses = max(
+                    self.peak_body_responses, peak_body_responses
+                )
+            if speculative_bytes is not None:
+                self.speculative_bytes = speculative_bytes
+            if speculative_failures is not None:
+                self.speculative_failures = speculative_failures
+            if parallel_prefetch_workers is not None:
+                self.parallel_prefetch_workers = parallel_prefetch_workers
+
     def mark_cdn_refreshed(self) -> None:
         with self._lock:
             self.cdn_url_refreshed = True
@@ -263,6 +304,14 @@ class StreamSessionTracker:
                 bytes_transferred=self.bytes_transferred,
                 bytes_from_cache=self.bytes_from_cache,
                 cache_hit_rate_pct=cache_rate,
+                upstream_bytes=self.upstream_bytes,
+                upstream_transfer_seconds=round(self.upstream_transfer_seconds, 3),
+                total_session_connections=self.total_session_connections,
+                active_body_responses=self.active_body_responses,
+                peak_body_responses=self.peak_body_responses,
+                speculative_bytes=self.speculative_bytes,
+                speculative_failures=self.speculative_failures,
+                parallel_prefetch_workers=self.parallel_prefetch_workers,
                 current_throughput_mbps=throughput,
                 started_at=self.started_at,
                 last_read_at=self.last_read_at,
@@ -438,6 +487,30 @@ class PlaybackTelemetryCollector:
             tracker = self._sessions.get(stream_id)
             if tracker:
                 tracker.record_read(nbytes, from_cache=from_cache)
+
+    def record_upstream_statistics(
+        self, stream_id: str, snapshot: dict[str, int | float]
+    ) -> None:
+        """Publish updated upstream metrics from a stream session."""
+        with self._lock:
+            tracker = self._sessions.get(stream_id)
+            if tracker:
+                tracker.update_upstream_metrics(
+                    upstream_bytes=int(snapshot.get("upstream_bytes", 0)),
+                    upstream_transfer_seconds=float(
+                        snapshot.get("upstream_transfer_seconds", 0.0)
+                    ),
+                    total_session_connections=int(
+                        snapshot.get("total_session_connections", 0)
+                    ),
+                    active_body_responses=int(snapshot.get("active_body_responses", 0)),
+                    peak_body_responses=int(snapshot.get("peak_body_responses", 0)),
+                    speculative_bytes=int(snapshot.get("speculative_bytes", 0)),
+                    speculative_failures=int(snapshot.get("speculative_failures", 0)),
+                    parallel_prefetch_workers=int(
+                        snapshot.get("parallel_prefetch_workers", 1)
+                    ),
+                )
 
     def correlate_plex_session(
         self,
