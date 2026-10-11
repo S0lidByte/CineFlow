@@ -534,6 +534,11 @@ class Downloader(Runner[None, DownloaderBase]):
 
                     continue
 
+                # Episode work must never accept a sibling, including the
+                # already-linked no-op path below, or mutate sibling metadata.
+                if isinstance(item, Episode) and episode.id != item.id:
+                    continue
+
                 if episode.filesystem_entry:
                     # Already linked — treat as matched (noop). Returning False
                     # here used to raise NoMatchingFilesException and blacklist

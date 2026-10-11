@@ -1049,7 +1049,8 @@ async def reset_items(
                             s (Session): Database session (provided for caller context; not used directly here).
                         """
 
-                        i.blacklist_active_stream()
+                        # Reset clears local blacklists; blacklisting first would
+                        # needlessly mutate an ancestor-owned active stream.
                         i.reset()
 
                     apply_item_mutation(
@@ -1057,10 +1058,11 @@ async def reset_items(
                         session,
                         media_item,
                         mutation,
-                        bubble_parents=True,
+                        bubble_parents=False,
                     )
 
                     session.commit()
+                    di[Program].em.add_event(Event("RetryItem", media_item.id))
 
                     # Trigger media server refresh for all paths where this item appeared
                     if updater and updater.initialized:
@@ -1678,15 +1680,32 @@ async def reset_item_streams(
             parent = getattr(parent, "parent", None)
 
         unblacklisted_count = 0
-        for stream in blacklisted_candidates:
-            owner = MediaItem.get_stream_owner(
-                item,
-                stream_id=getattr(stream, "id", None),
-                infohash=getattr(stream, "infohash", None),
-            )
-            target = owner or item
-            if stream in target.blacklisted_streams:
-                MediaItem.unblacklist_stream(target, stream)
+        if isinstance(item, Episode):
+            from program.services.scrapers.shared import parse_results
+
+            # Run ordinary episode identity/content filters and ranking without
+            # the blacklist being restored suppressing its own candidates.
+            local_blacklist = list(item.blacklisted_streams)
+            item.blacklisted_streams.clear()
+            try:
+                restored = parse_results(
+                    item,
+                    {s.infohash: s.raw_title for s in blacklisted_candidates},
+                )
+            finally:
+                item.blacklisted_streams.extend(local_blacklist)
+
+            for candidate in restored.values():
+                for stream in list(item.blacklisted_streams):
+                    if stream.infohash == candidate.infohash:
+                        item.blacklisted_streams.remove(stream)
+                # Fresh episode-local rows preserve shared ranking and ownership.
+                if candidate not in item.streams:
+                    item.streams.append(candidate)
+                unblacklisted_count += 1
+        else:
+            for stream in list(item.blacklisted_streams):
+                MediaItem.unblacklist_stream(item, stream)
                 unblacklisted_count += 1
 
         # Automatically re-evaluate restored candidate streams if there is no active playback,
