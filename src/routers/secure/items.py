@@ -1395,6 +1395,27 @@ def _is_active_stream(item: MediaItem, stream: Stream) -> bool:
     return bool(active.infohash) and active.infohash == stream.infohash
 
 
+def _item_has_available_candidates(item: MediaItem) -> bool:
+    """Check if an item has candidate streams available for download/evaluation,
+    including parent season packs for episodes without copying streams to episode.
+    """
+    item_streams: list[Stream] = getattr(item, "streams", None) or []
+    item_blacklisted: list[Stream] = getattr(item, "blacklisted_streams", None) or []
+    if any(s not in item_blacklisted for s in item_streams):
+        return True
+
+    parent = getattr(item, "parent", None)
+    if isinstance(item, Episode) and parent is not None:
+        parent_streams: list[Stream] = getattr(parent, "streams", None) or []
+        parent_blacklisted: list[Stream] = (
+            getattr(parent, "blacklisted_streams", None) or []
+        )
+        if any(s not in parent_blacklisted for s in parent_streams):
+            return True
+
+    return False
+
+
 @router.post(
     "/{item_id}/streams/{stream_id}/blacklist",
     summary="Blacklist Media Item Stream",
@@ -1618,7 +1639,7 @@ async def unblacklist_stream(
 @router.post(
     path="/{item_id}/streams/reset",
     summary="Reset Media Item Streams",
-    description="Reset all streams for a media item",
+    description="Reset blacklisted streams for a media item",
     operation_id="reset_item_streams",
     response_model=MessageResponse,
     dependencies=[Depends(require_role("playback:operator"))],
@@ -1644,20 +1665,57 @@ async def reset_item_streams(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Item not found"
             )
 
-        def mutation(i: MediaItem, _: Session):
-            i.streams.clear()
-            i.blacklisted_streams.clear()
-            i.active_stream = None
+        # Collect candidate streams to unblacklist across item's visible blacklists.
+        # Preserve active playback and existing candidate streams without destructive clearing.
+        blacklisted_candidates = list(item.blacklisted_streams)
 
-        apply_item_mutation(
-            di[Program],
-            session,
-            item,
-            mutation,
-            bubble_parents=True,
-        )
+        # Also check parent-owned blacklisted streams that belong to this item's stream hierarchy
+        parent = getattr(item, "parent", None)
+        while parent is not None:
+            for p_stream in getattr(parent, "blacklisted_streams", []):
+                if p_stream not in blacklisted_candidates:
+                    blacklisted_candidates.append(p_stream)
+            parent = getattr(parent, "parent", None)
+
+        unblacklisted_count = 0
+        for stream in blacklisted_candidates:
+            owner = MediaItem.get_stream_owner(
+                item,
+                stream_id=getattr(stream, "id", None),
+                infohash=getattr(stream, "infohash", None),
+            )
+            target = owner or item
+            if stream in target.blacklisted_streams:
+                MediaItem.unblacklist_stream(target, stream)
+                unblacklisted_count += 1
+
+        # Automatically re-evaluate restored candidate streams if there is no active playback,
+        # without enqueuing parent items or triggering new scrapers.
+        should_re_evaluate = False
+        if (
+            unblacklisted_count > 0
+            and getattr(item, "active_stream", None) is None
+            and getattr(item, "last_state", None) not in (States.Paused, States.Failed)
+            and _item_has_available_candidates(item)
+        ):
+            # Transition item to Scraped so process_event routes directly to services.downloader
+            item.store_state(States.Scraped)
+            should_re_evaluate = True
 
         session.commit()
+
+        # Dispatch RetryItem only after successful commit to guarantee durability
+        if should_re_evaluate and getattr(item, "id", None):
+            try:
+                enqueued = di[Program].em.add_event(Event("RetryItem", item.id))
+                if not enqueued:
+                    logger.warning(
+                        f"Failed to enqueue RetryItem event for re-evaluated item {item.id}"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Exception emitting RetryItem event for re-evaluated item {item.id}: {e}"
+                )
 
         return MessageResponse(
             message=f"Successfully reset streams for item {item_id}",
