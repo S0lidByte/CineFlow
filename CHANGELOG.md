@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.44.1](https://github.com/S0lidByte/CineFlow/compare/v1.44.0...v1.44.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* preserve streaming bitrate estimates and enforce RTN fetch restrictions ([#317](https://github.com/S0lidByte/CineFlow/issues/317)) ([151dc24](https://github.com/S0lidByte/CineFlow/commit/151dc24a918f73ecc77776fd7c48ea88e9e35447))
+
 ## [1.44.0](https://github.com/S0lidByte/CineFlow/compare/v1.43.2...v1.44.0) (2026-10-09)
 
 
