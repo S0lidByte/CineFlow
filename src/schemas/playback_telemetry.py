@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -31,6 +32,38 @@ class StreamSessionMetric(BaseModel):
     )
     cache_hit_rate_pct: float = Field(
         0.0, ge=0.0, le=100.0, description="Percentage of bytes served from cache"
+    )
+    upstream_bytes: int = Field(
+        0,
+        ge=0,
+        description="Total raw payload bytes fetched from the upstream provider",
+    )
+    upstream_transfer_seconds: float = Field(
+        0.0,
+        ge=0.0,
+        description="Summed transport service seconds across body responses",
+    )
+    total_session_connections: int = Field(
+        0,
+        ge=0,
+        description="Total HTTP response connections established in this session",
+    )
+    active_body_responses: int = Field(
+        0, ge=0, description="Currently open upstream HTTP body responses"
+    )
+    peak_body_responses: int = Field(
+        0, ge=0, description="Peak concurrent upstream HTTP body responses observed"
+    )
+    speculative_bytes: int = Field(
+        0, ge=0, description="Raw payload bytes fetched by parallel prefetch workers"
+    )
+    speculative_failures: int = Field(
+        0,
+        ge=0,
+        description="Count of failed or abandoned speculative prefetch attempts",
+    )
+    parallel_prefetch_workers: int = Field(
+        1, ge=1, description="Configured parallel prefetch worker count for this stream"
     )
     current_throughput_mbps: float = Field(
         0.0,
