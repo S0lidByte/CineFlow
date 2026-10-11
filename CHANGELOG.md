@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.44.2](https://github.com/S0lidByte/CineFlow/compare/v1.44.1...v1.44.2) (2026-10-11)
+
+
+### Bug Fixes
+
+* **items:** non-destructive stream unblacklist and candidate re-evaluation on reset ([#319](https://github.com/S0lidByte/CineFlow/issues/319)) ([007ddda](https://github.com/S0lidByte/CineFlow/commit/007dddab4045fd65620f8618af5488116b5e8e19))
+
 ## [1.44.1](https://github.com/S0lidByte/CineFlow/compare/v1.44.0...v1.44.1) (2026-10-11)
 
 
