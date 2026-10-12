@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.44.4](https://github.com/S0lidByte/CineFlow/compare/v1.44.3...v1.44.4) (2026-10-12)
+
+
+### Bug Fixes
+
+* **streaming:** prevent false response-body stalls ([#323](https://github.com/S0lidByte/CineFlow/issues/323)) ([3cdbc18](https://github.com/S0lidByte/CineFlow/commit/3cdbc181c6027ba5a97081e7a3141b30a6843cb8))
+
 ## [1.44.3](https://github.com/S0lidByte/CineFlow/compare/v1.44.2...v1.44.3) (2026-10-12)
 
 
