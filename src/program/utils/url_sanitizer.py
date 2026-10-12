@@ -13,6 +13,7 @@ SENSITIVE_URL_QUERY_PARAMS: frozenset[str] = frozenset(
         "refresh_token",
         "client_secret",
         "password",
+        "x-plex-token",
     }
 )
 
@@ -43,9 +44,11 @@ def sanitize_url_for_logs(url: str) -> str:
 
         query = parse_qsl(parsed.query, keep_blank_values=True)
         sanitized = [
-            (key, "[redacted]")
-            if key.lower() in SENSITIVE_URL_QUERY_PARAMS
-            else (key, value)
+            (
+                (key, "[redacted]")
+                if key.lower() in SENSITIVE_URL_QUERY_PARAMS
+                else (key, value)
+            )
             for key, value in query
         ]
 
