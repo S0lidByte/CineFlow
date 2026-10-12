@@ -26,6 +26,7 @@ class StreamConnection:
         self.start_position = start_position
         self.current_read_position = current_read_position
         self.reader = reader
+        self.pending_body = b""
         self.seek_required = trio_util.AsyncBool(False)
         self.seek_range: ChunkRange | None = None
 
