@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.45.0](https://github.com/S0lidByte/CineFlow/compare/v1.44.4...v1.45.0) (2026-10-12)
+
+
+### Features
+
+* **settings,plex:** global blacklist clear maintenance action & plex token hardening ([#325](https://github.com/S0lidByte/CineFlow/issues/325)) ([a493945](https://github.com/S0lidByte/CineFlow/commit/a49394550e83b26884c95f6069135069b5437fcc))
+
 ## [1.44.4](https://github.com/S0lidByte/CineFlow/compare/v1.44.3...v1.44.4) (2026-10-12)
 
 
