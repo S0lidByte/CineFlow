@@ -27,6 +27,27 @@ from program.utils.connection_tests import (
 
 from ..models.shared import MessageResponse
 
+
+class BlacklistedStreamsCountResponse(MessageResponse):
+    count: Annotated[
+        int,
+        Field(
+            description="Total number of currently blacklisted stream candidate relations",
+            ge=0,
+        ),
+    ]
+
+
+class ClearBlacklistedStreamsResponse(MessageResponse):
+    cleared_count: Annotated[
+        int,
+        Field(
+            description="Number of blacklisted stream candidate relations cleared and restored",
+            ge=0,
+        ),
+    ]
+
+
 router = APIRouter(
     prefix="/settings",
     tags=["settings"],
@@ -479,4 +500,77 @@ async def apply_cache_autotune(
 
     return MessageResponse(
         message=f"Auto-tune '{rec.profile}' settings applied successfully!"
+    )
+
+
+@router.get(
+    "/maintenance/blacklisted-streams/count",
+    operation_id="get_blacklisted_streams_count",
+    response_model=BlacklistedStreamsCountResponse,
+    summary="Count Blacklisted Stream Candidates",
+    description="Get the total count of blacklisted stream candidates across all media items.",
+)
+async def get_blacklisted_streams_count() -> BlacklistedStreamsCountResponse:
+    from sqlalchemy import func, select
+
+    from program.db.db import db_session
+    from program.media.stream import StreamBlacklistRelation
+
+    with db_session() as session:
+        stmt = select(func.count(StreamBlacklistRelation.id))
+        total_count = session.execute(stmt).scalar() or 0
+
+    return BlacklistedStreamsCountResponse(
+        message=f"Found {total_count} blacklisted stream candidates",
+        count=total_count,
+    )
+
+
+@router.post(
+    "/maintenance/blacklisted-streams/clear",
+    operation_id="clear_all_blacklisted_streams",
+    response_model=ClearBlacklistedStreamsResponse,
+    summary="Clear All Blacklisted Stream Candidates",
+    description=(
+        "Globally clear all blacklisted stream candidate relations across all media items, "
+        "restoring their candidate availability for future evaluation without triggering downloads or rescraping."
+    ),
+)
+async def clear_all_blacklisted_streams() -> ClearBlacklistedStreamsResponse:
+    from sqlalchemy import select
+
+    from program.db.db import db_session
+    from program.media.stream import StreamBlacklistRelation, StreamRelation
+
+    with db_session() as session:
+        # Restore and delete the same locked snapshot, leaving later blacklist decisions intact.
+        blacklist_rows = session.scalars(
+            select(StreamBlacklistRelation).with_for_update()
+        ).all()
+
+        cleared_count = len(blacklist_rows)
+        if cleared_count > 0:
+            # Check existing candidate relationships to avoid duplicate violations
+            existing_relations_stmt = select(
+                StreamRelation.parent_id, StreamRelation.child_id
+            )
+            existing_relations = set(session.execute(existing_relations_stmt).all())
+
+            # Restore candidates that are not currently in StreamRelation
+            new_relations = [
+                StreamRelation(parent_id=item.media_item_id, child_id=item.stream_id)
+                for item in blacklist_rows
+                if (item.media_item_id, item.stream_id) not in existing_relations
+            ]
+            if new_relations:
+                session.add_all(new_relations)
+
+            for item in blacklist_rows:
+                session.delete(item)
+
+            session.commit()
+
+    return ClearBlacklistedStreamsResponse(
+        message=f"Successfully cleared and restored {cleared_count} blacklisted stream candidates",
+        cleared_count=cleared_count,
     )
