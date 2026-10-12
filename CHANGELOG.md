@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.44.3](https://github.com/S0lidByte/CineFlow/compare/v1.44.2...v1.44.3) (2026-10-12)
+
+
+### Bug Fixes
+
+* **streams:** isolate episode stream blacklist reset with candidate re-evaluation and parent protection ([#321](https://github.com/S0lidByte/CineFlow/issues/321)) ([f86024d](https://github.com/S0lidByte/CineFlow/commit/f86024d417ad262634e833f826fcc4b732a3cfe0))
+
 ## [1.44.2](https://github.com/S0lidByte/CineFlow/compare/v1.44.1...v1.44.2) (2026-10-11)
 
 
