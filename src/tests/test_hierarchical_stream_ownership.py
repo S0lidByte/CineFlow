@@ -186,8 +186,8 @@ async def test_reset_item_streams_preserves_active_stream_and_unblacklists(monke
 
 
 @pytest.mark.asyncio
-async def test_reset_item_streams_unblacklists_parent_owned_streams(monkeypatch):
-    """reset_item_streams resolves parent-owned blacklisted streams and unblacklists them on owner."""
+async def test_non_episode_reset_preserves_parent_owned_streams(monkeypatch):
+    """A reset must not unblacklist an ancestor's shared relationship."""
     from contextlib import contextmanager
 
     from routers.secure.items import reset_item_streams
@@ -232,9 +232,9 @@ async def test_reset_item_streams_unblacklists_parent_owned_streams(monkeypatch)
     response = await reset_item_streams(item_id=42)
 
     assert "Successfully reset streams for item 42" in response.message
-    # Stream should be moved back to season.streams
-    assert season.blacklisted_streams == []
-    assert parent_blacklisted in season.streams
+    # Non-episode reset must not change ancestor relationships either.
+    assert season.blacklisted_streams == [parent_blacklisted]
+    assert season.streams == []
 
 
 @pytest.mark.asyncio
@@ -487,13 +487,19 @@ async def test_reset_item_streams_season_pack_isolation(monkeypatch):
     program = MagicMock()
     program.em = mock_em
 
-    with patch("routers.secure.items.di", {Program: program}):
+    with (
+        patch("routers.secure.items.di", {Program: program}),
+        patch(
+            "program.services.scrapers.shared.parse_results",
+            return_value={parent_stream.infohash: parent_stream},
+        ),
+    ):
         response = await reset_item_streams(item_id=101)
 
     assert "Successfully reset streams for item 101" in response.message
-    # Parent stream was restored to season.streams
-    assert parent_stream in season.streams
-    assert season.blacklisted_streams == []
+    assert parent_stream in target_episode.streams
+    assert season.streams == []
+    assert season.blacklisted_streams == [parent_stream]
     # Target episode was transitioned to Scraped and enqueued
     target_episode.store_state.assert_called_once_with(States.Scraped)
     mock_em.add_event.assert_called_once()

@@ -861,7 +861,9 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
         self.blacklisted_streams.clear()
         self.active_stream = None
 
-        # Reset scraping metadata
+        # Reset scraping metadata and release sticky paused/failed states,
+        # including descendants of an explicitly reset show or season.
+        self.last_state = States.Unknown
         self.updated = False
         self.scraped_at = None
         self.scraped_times = 0
