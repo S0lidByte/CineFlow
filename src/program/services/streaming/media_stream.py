@@ -1477,21 +1477,35 @@ class MediaStream:
                                                                 )
                                                             return
                                                     try:
-                                                        with trio.fail_after(
-                                                            body_read_stall_timeout
-                                                        ):
-                                                            raw_part = await anext(
-                                                                connection.reader
-                                                            )
+                                                        raw_part = getattr(
+                                                            connection,
+                                                            "pending_body",
+                                                            b"",
+                                                        )
+                                                        if not raw_part:
+                                                            # Empty fragments are not byte progress.
+                                                            with trio.fail_after(
+                                                                body_read_stall_timeout
+                                                            ):
+                                                                while not raw_part:
+                                                                    raw_part = await anext(
+                                                                        connection.reader
+                                                                    )
                                                     except trio.TooSlowError as err:
                                                         raise httpx.ReadTimeout(
                                                             f"HTTP response-body read stalled for {body_read_stall_timeout:.1f}s"
                                                         ) from err
                                                     except StopAsyncIteration:
                                                         break
-                                                    if not raw_part:
-                                                        break
-                                                    chunk_buffer.extend(raw_part)
+                                                    remaining = chunk.size - len(
+                                                        chunk_buffer
+                                                    )
+                                                    chunk_buffer.extend(
+                                                        raw_part[:remaining]
+                                                    )
+                                                    connection.pending_body = raw_part[
+                                                        remaining:
+                                                    ]
                                                 data = bytes(chunk_buffer)
                                                 if (
                                                     is_prefetch
@@ -2058,7 +2072,7 @@ class MediaStream:
                 response=response,
                 start_position=chunk_aligned_start,
                 current_read_position=chunk_aligned_start,
-                reader=response.aiter_raw(chunk_size=self.config.chunk_size),
+                reader=response.aiter_raw(),
             )
             self._active_stream_connection = stream_connection
 
