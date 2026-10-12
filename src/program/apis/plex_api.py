@@ -78,9 +78,13 @@ class PlexAPI:
         filter_params = (
             "includeGuids=1&includeFields=guid,title,year&includeElements=Guid"
         )
-        url = f"{self.BASE_URL}/library/metadata/{ratingKey}?X-Plex-Token={self.token}&{filter_params}"
+        url = f"{self.BASE_URL}/library/metadata/{ratingKey}?{filter_params}"
 
-        response = self.session.get(url, headers={"Accept": "application/json"})
+        headers = {
+            "Accept": "application/json",
+            "X-Plex-Token": self.token,
+        }
+        response = self.session.get(url, headers=headers)
 
         class ResponseData(BaseModel):
             class MediaContainerModel(BaseModel):
