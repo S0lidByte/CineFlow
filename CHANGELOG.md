@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.45.1](https://github.com/S0lidByte/CineFlow/compare/v1.45.0...v1.45.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **vfs:** atomic full synchronization and existing maintenance hardening ([#334](https://github.com/S0lidByte/CineFlow/issues/334)) ([ec93967](https://github.com/S0lidByte/CineFlow/commit/ec93967e8cef4fabbc008214d5b65844cf340744))
+
 ## [1.45.0](https://github.com/S0lidByte/CineFlow/compare/v1.44.4...v1.45.0) (2026-10-12)
 
 
