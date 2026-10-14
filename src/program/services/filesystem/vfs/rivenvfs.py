@@ -39,14 +39,16 @@ import subprocess
 import threading
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import Enum
+from functools import wraps
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
+    Concatenate,
     Literal,
     NoReturn,
     TypedDict,
@@ -128,6 +130,18 @@ class VfsMediaHandleState:
 class CachedDirectoryEntry(TypedDict):
     name: str
     is_directory: bool
+
+
+def _serialize_tree_update[R, **P](
+    method: Callable[Concatenate[RivenVFS, P], R],
+) -> Callable[Concatenate[RivenVFS, P], R]:
+    @wraps(method)
+    def wrapped(self: RivenVFS, *args: P.args, **kwargs: P.kwargs) -> R:
+        # FUSE readers never acquire this lock. Nested registration is reentrant.
+        with self._update_lock:  # pyright: ignore[reportPrivateUsage]
+            return method(self, *args, **kwargs)
+
+    return wrapped
 
 
 class RivenVFS(pyfuse3.Operations):
@@ -261,6 +275,14 @@ class RivenVFS(pyfuse3.Operations):
         self._root = VFSRoot()
         self._inode_to_node: dict[int, VFSNode] = {pyfuse3.ROOT_INODE: self._root}
         self._next_inode = pyfuse3.InodeT(pyfuse3.ROOT_INODE + 1)
+
+        # Private staging tree for zero-downtime atomic full sync rebuilds:
+        # (staging_root, staging_inode_to_node)
+        self._staging_context = threading.local()
+        self._update_lock = threading.RLock()
+        self._lookup_counts: dict[int, int] = {}
+        self._directory_handles: dict[int, int] = {}
+        self._retired_inodes: set[int] = set()
 
         # Tree lock to prevent race conditions between FUSE operations and tree rebuilds
         # pyfuse3 runs FUSE operations in threads, so we use threading.RLock()
@@ -653,9 +675,39 @@ class RivenVFS(pyfuse3.Operations):
 
     # ========== VFS Tree Helper Methods ==========
 
+    @property
+    def _staging_tree(self) -> tuple[VFSRoot, dict[int, VFSNode]] | None:
+        return getattr(self._staging_context, "tree", None)
+
+    @_staging_tree.setter
+    def _staging_tree(self, value: tuple[VFSRoot, dict[int, VFSNode]] | None) -> None:
+        self._staging_context.tree = value
+
+    def _collect_retired_inodes(self) -> None:
+        """Retain detached nodes until kernel references and handles are released."""
+        retained = set(self._lookup_counts) | set(self._directory_handles)
+        retained.update(
+            int(h["inode"]) for h in self._file_handles.values() if h.get("inode")
+        )
+        pending = list(retained)
+        while pending:
+            node = self._inode_to_node.get(pending.pop())
+            if node is None:
+                continue
+            related: list[VFSNode] = [node.parent] if node.parent else []
+            if isinstance(node, VFSDirectory) and node.inode in self._retired_inodes:
+                related.extend(node.children.values())
+            for other in related:
+                if other.inode not in retained:
+                    retained.add(other.inode)
+                    pending.append(other.inode)
+        for inode in self._retired_inodes - retained:
+            self._inode_to_node.pop(inode, None)
+        self._retired_inodes.intersection_update(retained)
+
     def _get_node_by_path(self, path: str) -> VFSNode | None:
         """
-        Get a VFSNode by walking the tree from root.
+        Get a VFSNode by walking the tree from root (or staging root if rebuild is active).
 
         This is O(depth) instead of O(n) like the old path iteration approach.
 
@@ -666,12 +718,16 @@ class RivenVFS(pyfuse3.Operations):
         Returns:
             VFSNode if found, None otherwise
         """
+        target_root = (
+            self._staging_tree[0] if self._staging_tree is not None else self._root
+        )
+
         if path == "/":
-            return self._root
+            return target_root
 
         # Split path and walk tree
         parts = [p for p in path.split("/") if p]
-        current = self._root
+        current = target_root
 
         for part in parts:
             if isinstance(current, VFSDirectory):
@@ -694,6 +750,7 @@ class RivenVFS(pyfuse3.Operations):
     ) -> VFSNode:
         """
         Get or create a node at the given path, creating parent directories as needed.
+        Targets self._staging_tree if a full rebuild is in progress, otherwise self._root.
 
         Args:
             path: NORMALIZED VFS path (caller must normalize)
@@ -703,12 +760,21 @@ class RivenVFS(pyfuse3.Operations):
         Returns:
             The VFSNode at the path
         """
+        target_root = (
+            self._staging_tree[0] if self._staging_tree is not None else self._root
+        )
+        target_inode_map = (
+            self._staging_tree[1]
+            if self._staging_tree is not None
+            else self._inode_to_node
+        )
+
         if path == "/":
-            return self._root
+            return target_root
 
         # Split path and walk/create tree
         parts = [p for p in path.split("/") if p]
-        current = self._root
+        current = target_root
 
         for i, part in enumerate(parts):
             if isinstance(current, VFSDirectory):
@@ -760,7 +826,7 @@ class RivenVFS(pyfuse3.Operations):
 
                     current.add_child(child)
 
-                    self._inode_to_node[child.inode] = child
+                    target_inode_map[child.inode] = child
 
                 current = child
 
@@ -825,11 +891,14 @@ class RivenVFS(pyfuse3.Operations):
         Returns:
             List of parent inodes (excluding root)
         """
+        target_root = (
+            self._staging_tree[0] if self._staging_tree is not None else self._root
+        )
 
         inodes = list[pyfuse3.InodeT]()
         current = node.parent
 
-        while current and current != self._root:
+        while current and current != target_root:
             if current.inode:
                 inodes.append(current.inode)
 
@@ -870,6 +939,7 @@ class RivenVFS(pyfuse3.Operations):
         else:
             self._sync_individual(item)
 
+    @_serialize_tree_update
     def add(self, item: MediaItem) -> bool:
         """
         Add a MediaItem to the VFS.
@@ -905,6 +975,7 @@ class RivenVFS(pyfuse3.Operations):
 
         return True
 
+    @_serialize_tree_update
     def remove(self, item: MediaItem) -> bool:
         """
         Remove a MediaItem from the VFS.
@@ -1156,6 +1227,7 @@ class RivenVFS(pyfuse3.Operations):
         except Exception:
             logger.exception("pyfuse3.terminate() failed")
 
+    @_serialize_tree_update
     def _sync_full(self) -> None:
         """
         Full VFS sync: Re-match all entries and rebuild entire VFS tree.
@@ -1188,7 +1260,6 @@ class RivenVFS(pyfuse3.Operations):
             current_profile_hash is not None
             and current_profile_hash == self._last_profile_hash
         )
-        self._last_profile_hash = current_profile_hash
 
         matcher = LibraryProfileMatcher()
 
@@ -1230,73 +1301,116 @@ class RivenVFS(pyfuse3.Operations):
 
             logger.debug(f"Re-matched {rematched_count} entries with updated profiles")
 
-        # Step 2: Clear VFS tree and rebuild from scratch.
-        # M-4: Preserve inodes currently held by open file handles so in-progress
-        # reads do not immediately receive ENOENT during a settings-triggered sync.
-        logger.debug("Clearing VFS tree for rebuild")
+        # Step 2: Build new VFS tree in an isolated staging structure.
+        # Concurrent FUSE operations continue to read from self._root and self._inode_to_node
+        # without seeing an empty or partially populated tree.
+        logger.debug("Building new VFS tree in staging structure")
 
-        with self._tree_lock:
-            # Collect inodes that are pinned by open file handles.
-            pinned_inodes: set[int] = set()
-            for handle_info in self._file_handles.values():
-                inode = handle_info.get("inode")
-                if inode:
-                    pinned_inodes.add(int(inode))
+        staged_root = VFSRoot()
+        staged_inode_map: dict[int, VFSNode] = {pyfuse3.ROOT_INODE: staged_root}
+        self._staging_tree = (staged_root, staged_inode_map)
+        previous_invalidations = self._pending_invalidations.copy()
 
-            # Retain the existing root as the boundary while preserving old nodes.
-            old_root = self._root
-            self._root = VFSRoot()
-            new_inode_map: dict[int, VFSNode] = {pyfuse3.ROOT_INODE: self._root}
+        try:
+            # Clear pending invalidations for this sync
+            self._pending_invalidations.clear()
 
-            # Re-insert pinned nodes so in-progress reads keep working.
-            # Also pin their parent directories so getattr(parent) doesn't ENOENT
-            # while a file is still streaming.
-            for inode_int, node in self._inode_to_node.items():
-                if inode_int in pinned_inodes:
-                    new_inode_map[inode_int] = node
-                    # Walk up and preserve all ancestor inodes, but never replace
-                    # the new root with the stale root from the previous tree.
-                    ancestor = node.parent
-                    while ancestor is not None and ancestor is not old_root:
-                        if ancestor.inode and ancestor.inode != pyfuse3.ROOT_INODE:
-                            new_inode_map[int(ancestor.inode)] = ancestor
-                        ancestor = ancestor.parent
+            # Ensure persistent library profile directories exist in staging
+            # This creates /movies, /shows, and /{profile}/movies, /{profile}/shows
+            # These directories are never pruned, even when empty
+            self._ensure_library_profile_directories()
 
-            self._inode_to_node = new_inode_map
+            # Step 3: Register all items into staging tree
+            logger.debug(f"Registering {len(item_ids)} items into staging tree")
 
-        # Clear pending invalidations for this sync
-        self._pending_invalidations.clear()
+            registered_count = 0
 
-        # Step 3: Re-register all items
-        logger.debug(f"Re-registering {len(item_ids)} items")
+            with db_session() as session:
+                from program.media.item import MediaItem
 
-        registered_count = 0
+                items = (
+                    session.query(MediaItem).filter(MediaItem.id.in_(item_ids)).all()
+                )
+                item_map = {item.id: item for item in items}
 
-        with db_session() as session:
-            from program.media.item import MediaItem
+                for idx, item_id in enumerate(item_ids, 1):
+                    try:
+                        item = item_map.get(item_id)
 
-            items = session.query(MediaItem).filter(MediaItem.id.in_(item_ids)).all()
-            item_map = {item.id: item for item in items}
+                        if not item:
+                            raise RuntimeError(
+                                f"Media item {item_id} disappeared during full sync"
+                            )
 
-            for item_id in item_ids:
-                try:
-                    item = item_map.get(item_id)
+                        # Use add() to register the item (handles both media and subtitles)
+                        if self.add(item):
+                            registered_count += 1
 
-                    if not item:
-                        continue
+                        if idx % 1000 == 0 or idx == len(item_ids):
+                            logger.info(
+                                f"VFS full sync progress: {idx}/{len(item_ids)} items processed ({registered_count} registered)"
+                            )
+                    except Exception as e:
+                        logger.exception(f"Failed to register item {item_id}: {e}")
+                        raise
+                if registered_count > 0:
+                    session.commit()
 
-                    # Use add() to register the item (handles both media and subtitles)
-                    if self.add(item):
-                        registered_count += 1
-                except Exception as e:
-                    logger.exception(f"Failed to register item {item_id}: {e}")
-            if registered_count > 0:
-                session.commit()
+            # Match live paths only; detached identities must never be resurrected.
+            with self._tree_lock:
+                old_nodes = self._inode_to_node
+                live_by_path = {
+                    node.path: node
+                    for inode, node in old_nodes.items()
+                    if inode not in self._retired_inodes
+                }
+                published: dict[int, VFSNode] = {}
+                for node in staged_inode_map.values():
+                    old = live_by_path.get(node.path)
+                    if (
+                        old is not None
+                        and type(old) is type(node)
+                        and (
+                            not isinstance(node, VFSFile)
+                            or (
+                                isinstance(old, VFSFile)
+                                and old.original_filename == node.original_filename
+                                and old.entry_type == node.entry_type
+                            )
+                        )
+                    ):
+                        node.inode = old.inode
+                    published[node.inode] = node
+                changed_entries = [
+                    (node.parent.inode, node.name, inode)
+                    for inode, node in old_nodes.items()
+                    if inode not in self._retired_inodes
+                    and inode not in published
+                    and node.parent is not None
+                ]
+                removed = set(old_nodes) - set(published)
+                self._retired_inodes.update(removed)
+                published.update((inode, old_nodes[inode]) for inode in removed)
+                self._root = staged_root
+                self._inode_to_node = published
+                self._collect_retired_inodes()
+                self._pending_invalidations = previous_invalidations | {
+                    pyfuse3.InodeT(inode)
+                    for inode, node in published.items()
+                    if isinstance(node, VFSDirectory)
+                }
+                self._last_profile_hash = current_profile_hash
 
-        logger.log(
-            "VFS",
-            f"Full sync complete: re-registered {registered_count}/{len(item_ids)} items",
-        )
+            logger.log(
+                "VFS",
+                f"Full sync complete: published {registered_count}/{len(item_ids)} items",
+            )
+        except Exception:
+            self._pending_invalidations = previous_invalidations
+            raise
+        finally:
+            # Always tear down staging pointer so normal path operations revert to self._root
+            self._staging_tree = None
 
         # If all add() calls failed (e.g. debrid URLs not yet refreshed after restart),
         # reset the profile hash so the next sync() is not short-circuited by the
@@ -1310,10 +1424,17 @@ class RivenVFS(pyfuse3.Operations):
             )
             self._last_profile_hash = None
 
-        # Step 4: Ensure persistent library profile directories exist
-        # This creates /movies, /shows, and /{profile}/movies, /{profile}/shows
-        # These directories are never pruned, even when empty
-        self._ensure_library_profile_directories()
+        # Dentry notifications must run outside the handler/tree lock.
+        for parent_inode, name, inode in changed_entries:
+            try:
+                pyfuse3.invalidate_entry_async(
+                    pyfuse3.InodeT(parent_inode),
+                    pyfuse3.FileNameT(name.encode("utf-8")),
+                    deleted=pyfuse3.InodeT(inode),
+                    ignore_enoent=True,
+                )
+            except Exception as exc:
+                logger.trace(f"Could not invalidate removed entry {name}: {exc}")
 
         # Step 5: Batch invalidate all collected inodes
         # This is critical: reduces syscalls from O(n) to O(1)
@@ -1361,6 +1482,7 @@ class RivenVFS(pyfuse3.Operations):
         finally:
             self._pending_invalidations.clear()
 
+    @_serialize_tree_update
     def _sync_individual(self, item: "MediaItem") -> None:
         """
         Individual sync: Re-register a specific item (unregister + register).
@@ -1436,6 +1558,7 @@ class RivenVFS(pyfuse3.Operations):
 
         logger.debug(f"Individual sync complete for item {item.id}")
 
+    @_serialize_tree_update
     def _ensure_library_profile_directories(self) -> None:
         """
         Ensure persistent /movies and /shows directories exist for each library profile.
@@ -1619,6 +1742,7 @@ class RivenVFS(pyfuse3.Operations):
             logger.warning(f"Unknown FilesystemEntry type: {type(entry)}")
             return []
 
+    @_serialize_tree_update
     def _register_clean_path(
         self,
         clean_path: str,
@@ -1722,6 +1846,7 @@ class RivenVFS(pyfuse3.Operations):
                 node
                 for node in self._inode_to_node.values()
                 if isinstance(node, VFSFile)
+                and node.inode not in self._retired_inodes
                 and node.original_filename == original_filename
             ]
 
@@ -1751,6 +1876,7 @@ class RivenVFS(pyfuse3.Operations):
 
         return unregistered_paths
 
+    @_serialize_tree_update
     def _unregister_clean_path(self, path: str) -> bool:
         """
         Unregister a VFS path and prune empty parent directories.
@@ -1789,10 +1915,8 @@ class RivenVFS(pyfuse3.Operations):
             if not parent:
                 return False
 
-            parent.remove_child(node.name)
-
-            if node.inode in self._inode_to_node:
-                del self._inode_to_node[node.inode]
+            parent.children.pop(node.name, None)
+            self._retired_inodes.add(node.inode)
 
             # Walk up and remove empty parent directories
             # Skip persistent library profile directories (/movies, /shows, /{profile}/movies, /{profile}/shows)
@@ -1812,9 +1936,8 @@ class RivenVFS(pyfuse3.Operations):
                     # Remove empty directory
                     grandparent = current.parent
                     inodes_to_invalidate.add(current.inode)
-                    grandparent.remove_child(current.name)
-                    if current.inode in self._inode_to_node:
-                        del self._inode_to_node[current.inode]
+                    grandparent.children.pop(current.name, None)
+                    self._retired_inodes.add(current.inode)
 
                     # Move up to check grandparent
                     current = grandparent
@@ -1823,6 +1946,8 @@ class RivenVFS(pyfuse3.Operations):
                     # But still invalidate this directory's cache
                     inodes_to_invalidate.add(current.inode)
                     break
+
+            self._collect_retired_inodes()
 
         # Invalidate directory caches
         for inode in inodes_to_invalidate:
@@ -1983,7 +2108,11 @@ class RivenVFS(pyfuse3.Operations):
     ) -> pyfuse3.EntryAttributes:
         """Get file/directory attributes."""
         try:
-            path = self._get_path_from_inode(inode)
+            with self._tree_lock:
+                node = self._inode_to_node.get(inode)
+                if node is None:
+                    raise pyfuse3.FUSEError(errno.ENOENT)
+                path = node.path
 
             attrs = pyfuse3.EntryAttributes()
             attrs.st_ino = inode
@@ -2011,9 +2140,6 @@ class RivenVFS(pyfuse3.Operations):
                 return attrs
 
             # For other paths, get node from tree
-            node = self._get_node_by_path(path)
-            if node is None:
-                raise pyfuse3.FUSEError(errno.ENOENT)
 
             # Check if it's a directory
             if isinstance(node, VFSDirectory):
@@ -2120,7 +2246,11 @@ class RivenVFS(pyfuse3.Operations):
 
                     child_inode = child_node.inode
 
-            return await self.getattr(child_inode, ctx)
+                attrs = await self.getattr(child_inode, ctx)
+                self._lookup_counts[child_inode] = (
+                    self._lookup_counts.get(child_inode, 0) + 1
+                )
+                return attrs
         except pyfuse3.FUSEError:
             raise
         except Exception:
@@ -2144,6 +2274,10 @@ class RivenVFS(pyfuse3.Operations):
                 if not isinstance(node, VFSDirectory):
                     raise pyfuse3.FUSEError(errno.ENOTDIR)
 
+                self._directory_handles[inode] = (
+                    self._directory_handles.get(inode, 0) + 1
+                )
+
             # Return the inode as file handle for directories
             return pyfuse3.FileHandleT(inode)
         except pyfuse3.FUSEError:
@@ -2151,6 +2285,25 @@ class RivenVFS(pyfuse3.Operations):
         except Exception:
             logger.exception(f"opendir error for inode={inode}")
             raise pyfuse3.FUSEError(errno.EIO)
+
+    async def forget(self, inode_list: list[tuple[pyfuse3.InodeT, int]]) -> None:
+        with self._tree_lock:
+            for inode, count in inode_list:
+                remaining = self._lookup_counts.get(inode, 0) - count
+                if remaining > 0:
+                    self._lookup_counts[inode] = remaining
+                else:
+                    self._lookup_counts.pop(inode, None)
+            self._collect_retired_inodes()
+
+    async def releasedir(self, fh: pyfuse3.FileHandleT) -> None:
+        with self._tree_lock:
+            remaining = self._directory_handles.get(fh, 0) - 1
+            if remaining > 0:
+                self._directory_handles[fh] = remaining
+            else:
+                self._directory_handles.pop(fh, None)
+            self._collect_retired_inodes()
 
     async def readdir(
         self,
@@ -2160,9 +2313,6 @@ class RivenVFS(pyfuse3.Operations):
     ) -> None:
         """Read directory entries."""
         try:
-            path = self._get_path_from_inode(fh)
-            entries = self._list_directory_cached(path)
-
             # Build directory listing
             with self._tree_lock:
                 node = self._inode_to_node.get(fh)
@@ -2172,29 +2322,28 @@ class RivenVFS(pyfuse3.Operations):
 
                 items = [(b".", pyfuse3.InodeT(fh)), (b"..", parent_inode)]
 
-                for entry in entries or []:
-                    name_bytes = entry["name"].encode("utf-8")
+                if not isinstance(node, VFSDirectory):
+                    raise pyfuse3.FUSEError(errno.ENOTDIR)
+                for child_node in node.children.values():
+                    items.append((child_node.name.encode("utf-8"), child_node.inode))
 
-                    # Get child node from tree
-                    if isinstance(node, VFSDirectory):
-                        child_node = node.get_child(entry["name"])
+                # Send directory entries starting from offset
+                for idx in range(start_id, len(items)):
+                    name_bytes, child_ino = items[idx]
 
-                        if child_node and child_node.inode:
-                            items.append((name_bytes, child_node.inode))
+                    if child_ino:
+                        attrs = await self.getattr(child_ino)
+                    else:
+                        attrs = pyfuse3.EntryAttributes()
 
-            # Send directory entries starting from offset
-            for idx in range(start_id, len(items)):
-                name_bytes, child_ino = items[idx]
-
-                if child_ino:
-                    attrs = await self.getattr(child_ino)
-                else:
-                    attrs = pyfuse3.EntryAttributes()
-
-                if not pyfuse3.readdir_reply(
-                    token, pyfuse3.FileNameT(name_bytes), attrs, idx + 1
-                ):
-                    break
+                    if not pyfuse3.readdir_reply(
+                        token, pyfuse3.FileNameT(name_bytes), attrs, idx + 1
+                    ):
+                        break
+                    if name_bytes not in (b".", b".."):
+                        self._lookup_counts[child_ino] = (
+                            self._lookup_counts.get(child_ino, 0) + 1
+                        )
         except pyfuse3.FUSEError:
             raise
         except Exception:
@@ -2730,6 +2879,8 @@ class RivenVFS(pyfuse3.Operations):
                 except Exception:
                     pass
 
+            with self._tree_lock:
+                self._collect_retired_inodes()
             logger.trace(f"release: fh={fh} path={path}")
         except pyfuse3.FUSEError:
             raise
