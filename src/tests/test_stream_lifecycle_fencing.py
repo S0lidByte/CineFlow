@@ -66,6 +66,7 @@ def _ensure_pyfuse3() -> None:
 
     stub.Operations = object
     stub.InodeT = InodeT
+    stub.FileNameT = bytes
     stub.FileHandleT = FileHandleT
     stub.ModeT = ModeT
     stub.FileInfo = FileInfo
@@ -138,6 +139,9 @@ def mock_vfs():
         vfs._active_stream_count = 0
         vfs._file_handles = {}
         vfs._inode_to_node = {}
+        vfs._lookup_counts = {}
+        vfs._directory_handles = {}
+        vfs._retired_inodes = set()
         vfs.vfs_db = MagicMock()
         vfs.stream_nursery = MagicMock()
         vfs.http_pool = MagicMock()
