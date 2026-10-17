@@ -480,12 +480,13 @@ class RivenVFS(pyfuse3.Operations):
                             nursery.cancel_scope.cancel()
                             register_stream_shed_callback(None)
                             self.http_pool = None
-                            try:
-                                await pool.teardown()
-                            except Exception:
-                                logger.exception(
-                                    f"[{self.lifecycle_id}] Error tearing down HTTP pool"
-                                )
+                            with trio.CancelScope(shield=True):
+                                try:
+                                    await pool.teardown()
+                                except Exception:
+                                    logger.exception(
+                                        f"[{self.lifecycle_id}] Error tearing down HTTP pool"
+                                    )
         finally:
             self._cleanup_mountpoint(self._mountpoint)
             self.mounted = False
