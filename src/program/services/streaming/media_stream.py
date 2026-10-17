@@ -3512,7 +3512,9 @@ class MediaStream:
         else:
             state = getattr(self, "_recovery_state", None)
             if state is not None and state.recovery_deadline is not None:
-                effective_deadline = state.recovery_deadline
+                # Trio deadlines have a different epoch from provider monotonic time.
+                remaining = state.recovery_deadline - trio.current_time()
+                effective_deadline = now_mono + max(0.0, remaining)
             else:
                 effective_deadline = now_mono + 20.0
 

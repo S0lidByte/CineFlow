@@ -272,13 +272,13 @@ def test_mediastream_refresh_derives_producer_recovery_deadline():
     mock_vfs_db.get_entry_by_original_filename.side_effect = mock_get_entry
 
     now = 2000.0
-    producer_deadline = now + 15.0
 
     async def _run():
         async with trio.open_nursery() as nursery:
             stream = _make_dummy_stream(nursery)
+            producer_deadline = trio.current_time() + 15.0
             stream._recovery_state = StreamRecoveryState(
-                start_time=now,
+                start_time=trio.current_time(),
                 generation=0,
                 recovery_deadline=producer_deadline,
             )
@@ -302,7 +302,7 @@ def test_mediastream_refresh_derives_producer_recovery_deadline():
 
     trio.run(_run)
     assert len(captured_deadline) >= 1
-    assert captured_deadline[0] == pytest.approx(producer_deadline)
+    assert captured_deadline[0] == pytest.approx(now + 15.0)
 
 
 def test_mediastream_refresh_aborts_if_deadline_exceeded_before_thread():

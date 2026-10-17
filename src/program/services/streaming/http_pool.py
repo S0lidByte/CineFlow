@@ -328,22 +328,23 @@ class TrioStreamingHttpPool:
 
     async def teardown(self) -> None:
         """Close all active and retired clients cleanly under Trio."""
-        self._closed = True
-        clients_to_close: list[httpx.AsyncClient] = []
+        with trio.CancelScope(shield=True):
+            self._closed = True
+            clients_to_close: list[httpx.AsyncClient] = []
 
-        async with self._lock:
-            clients_to_close.extend(self._clients.values())
-            self._clients.clear()
-            for retired in self._retired_generations.values():
-                clients_to_close.extend(retired)
-            self._retired_generations.clear()
-            self._active_leases_by_gen.clear()
+            async with self._lock:
+                clients_to_close.extend(self._clients.values())
+                self._clients.clear()
+                for retired in self._retired_generations.values():
+                    clients_to_close.extend(retired)
+                self._retired_generations.clear()
+                self._active_leases_by_gen.clear()
 
-        for client in clients_to_close:
-            try:
-                await client.aclose()
-            except Exception:
-                logger.exception("Failed to aclose VFS HTTP client during teardown")
+            for client in clients_to_close:
+                try:
+                    await client.aclose()
+                except Exception:
+                    logger.exception("Failed to aclose VFS HTTP client during teardown")
 
 
 # ============================================================================
