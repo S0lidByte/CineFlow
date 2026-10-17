@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.45.2](https://github.com/S0lidByte/CineFlow/compare/v1.45.1...v1.45.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **streaming:** harden VFS teardown and cache integrity (D60) ([#336](https://github.com/S0lidByte/CineFlow/issues/336)) ([5cc0daf](https://github.com/S0lidByte/CineFlow/commit/5cc0daf2629c96d8ad845fad16e763203a9ad0f3))
+
 ## [1.45.1](https://github.com/S0lidByte/CineFlow/compare/v1.45.0...v1.45.1) (2026-10-14)
 
 
