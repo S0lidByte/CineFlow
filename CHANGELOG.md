@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.45.3](https://github.com/S0lidByte/CineFlow/compare/v1.45.2...v1.45.3) (2026-10-24)
+
+
+### Performance Improvements
+
+* **cache:** reduce hot-tier admission stalls and batch eviction cleanup ([#338](https://github.com/S0lidByte/CineFlow/issues/338)) ([5e619e4](https://github.com/S0lidByte/CineFlow/commit/5e619e441f3bcb236237f9d29d6787ded4a69aa5))
+
 ## [1.45.2](https://github.com/S0lidByte/CineFlow/compare/v1.45.1...v1.45.2) (2026-10-17)
 
 
