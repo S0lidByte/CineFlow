@@ -1419,31 +1419,20 @@ class Cache:
         need_bytes: int,
         put_breakdown: CachePutLatencyBreakdown | None = None,
     ) -> bool:
-        """Reserve hot-tier bytes, returning false when disk fallback is safer."""
-        with trio.move_on_after(self._HOT_RESERVATION_TIMEOUT_SECONDS):
-            while True:
-                async with self._hot_write_lock:
-                    await self._ensure_hot_capacity(
-                        need_bytes, put_breakdown=put_breakdown
-                    )
-                    available = (
-                        self.cfg.hot_max_size_bytes
-                        - self._hot_bytes
-                        - self._hot_reserved_bytes
-                    )
-                    if need_bytes <= available:
-                        self._hot_reserved_bytes += need_bytes
-                        return True
+        """Reserve hot-tier bytes, immediately returning false for warm fallback if congested."""
+        async with self._hot_write_lock:
+            await self._ensure_hot_capacity(need_bytes, put_breakdown=put_breakdown)
+            available = (
+                self.cfg.hot_max_size_bytes - self._hot_bytes - self._hot_reserved_bytes
+            )
+            if need_bytes <= available:
+                self._hot_reserved_bytes += need_bytes
+                return True
 
-                    # With no pending writer to wake us, failure to free enough
-                    # space cannot resolve by waiting. Use the warm tier instead.
-                    if self._hot_reserved_bytes == 0:
-                        return False
-                    capacity_changed = self._hot_capacity_changed
-
-                await capacity_changed.wait()
-
-        return False
+            # If hot tier space cannot be immediately satisfied after demotion,
+            # avoid queuing writers behind trio.Event waits (which stalls prefetchers).
+            # Fast-fallback immediately to warm tier.
+            return False
 
     async def _release_hot_capacity(self, reserved_bytes: int) -> None:
         """Release a pending hot-tier reservation and wake blocked writers."""
@@ -1457,13 +1446,22 @@ class Cache:
         entries: list[tuple[str, int]],
         tiers: dict[str, Literal["hot", "warm"]],
     ) -> None:
+        if not entries:
+            return
+
+        # Group evicted keys by cache_key so all chunks for a shard are unlinked
+        # in a single worker thread call rather than flooding the threadpool.
+        by_cache_key: dict[str, list[str]] = {}
         for cache_key, start in entries:
             key = self._key(cache_key, start)
+            by_cache_key.setdefault(cache_key, []).append(key)
+
+        for cache_key, keys in by_cache_key.items():
             # Never wait for a title shard while holding the index or hot-capacity
             # lock. Writers hold this shard through payload and index publication.
             async with self._shard(cache_key):
                 await trio.to_thread.run_sync(
-                    lambda key=key: self._unlink_cache_files([key], tiers=tiers)
+                    lambda keys=keys: self._unlink_cache_files(keys, tiers=tiers)
                 )
 
     async def _evict_lru(
@@ -1584,7 +1582,8 @@ class Cache:
                         evicted += 1
         finally:
             if to_unlink:
-                await self._unlink_evicted_files(evicted_entries, tiers)
+                with trio.CancelScope(shield=True):
+                    await self._unlink_evicted_files(evicted_entries, tiers)
             if evicted:
                 self._metrics.record_evictions(evicted)
             for ck, st in evicted_entries:
@@ -1645,7 +1644,8 @@ class Cache:
                     evicted_entries.append((cache_entry.cache_key, cache_entry.start))
 
         if to_unlink:
-            await self._unlink_evicted_files(evicted_entries, tiers)
+            with trio.CancelScope(shield=True):
+                await self._unlink_evicted_files(evicted_entries, tiers)
             self._metrics.record_evictions(len(to_unlink))
             for ck, st in evicted_entries:
                 try:

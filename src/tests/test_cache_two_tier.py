@@ -375,3 +375,83 @@ def test_delayed_eviction_preserves_replacement(tmp_path, monkeypatch, policy, w
         assert cache._total_bytes == 100
 
     trio.run(run)
+
+
+def test_hot_capacity_congestion_falls_back_to_warm_without_blocking(
+    tmp_path: Path,
+) -> None:
+    """When hot capacity is full, writers fall back to warm immediately without blocking."""
+    warm = tmp_path / "warm"
+    hot = tmp_path / "hot"
+    cache = Cache(
+        CacheConfig(
+            cache_dir=warm,
+            max_size_bytes=10 * 1024 * 1024,
+            hot_dir=hot,
+            hot_max_size_bytes=100,
+            metrics_enabled=False,
+        )
+    )
+
+    async def _run() -> None:
+        with trio.fail_after(2):
+            # Fill hot tier to capacity
+            await cache.put("movie1", 0, b"a" * 100)
+            assert cache._index[cache._key("movie1", 0)].tier == "hot"
+
+            # Demotion target is movie1, but if demotion fails or hot capacity is 0,
+            # second put falls back immediately to warm tier without waiting
+            await cache.put("movie2", 0, b"b" * 100)
+            key2 = cache._key("movie2", 0)
+            # Entry exists in cache and was written safely
+            assert key2 in cache._index
+            assert await cache.get("movie2", 0, 99) == b"b" * 100
+
+    trio.run(_run)
+
+
+def test_unlink_evicted_files_batches_per_title_shard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Evicted file unlinking groups entries by cache_key and submits batches to threadpool."""
+    warm = tmp_path / "warm"
+    hot = tmp_path / "hot"
+    cache = Cache(
+        CacheConfig(
+            cache_dir=warm,
+            max_size_bytes=10 * 1024 * 1024,
+            hot_dir=hot,
+            hot_max_size_bytes=10 * 1024 * 1024,
+            metrics_enabled=False,
+        )
+    )
+
+    unlinked_batches: list[list[str]] = []
+    real_unlink = cache._unlink_cache_files
+
+    def recording_unlink(keys: list[str], tiers: dict[str, str]) -> None:
+        unlinked_batches.append(list(keys))
+        real_unlink(keys, tiers=tiers)
+
+    monkeypatch.setattr(cache, "_unlink_cache_files", recording_unlink)
+
+    entries = [
+        ("movie1", 0),
+        ("movie1", 1000),
+        ("movie1", 2000),
+        ("movie2", 0),
+        ("movie2", 1000),
+    ]
+    tiers = {cache._key(ck, st): "hot" for ck, st in entries}
+
+    async def _run() -> None:
+        await cache._unlink_evicted_files(entries, tiers=tiers)
+
+    trio.run(_run)
+
+    # Must be batched by cache_key: exactly 2 worker calls (one for movie1, one for movie2)
+    assert len(unlinked_batches) == 2
+    movie1_keys = [cache._key("movie1", st) for st in (0, 1000, 2000)]
+    movie2_keys = [cache._key("movie2", st) for st in (0, 1000)]
+    assert unlinked_batches[0] == movie1_keys
+    assert unlinked_batches[1] == movie2_keys
