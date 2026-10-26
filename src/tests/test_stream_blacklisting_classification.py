@@ -175,19 +175,12 @@ def test_dead_or_corrupt_torrent_is_blacklisted(mock_downloader):
     assert stream not in movie.streams
 
 
-def test_infringing_torrent_is_blacklisted(mock_downloader):
-    """Infringing or DMCA removed content must trigger permanent blacklisting."""
+def test_infringing_torrent_is_not_blacklisted(mock_downloader):
+    """Infringing or DMCA removed content is provider-specific and must NOT trigger permanent blacklisting."""
     movie = _make_movie()
     stream = _make_stream("dmca444")
     movie.streams = [stream]
-
-    def _blacklist(s):
-        if s in movie.streams:
-            movie.streams.remove(s)
-        if s not in movie.blacklisted_streams:
-            movie.blacklisted_streams.append(s)
-
-    movie.blacklist_stream = Mock(side_effect=_blacklist)
+    movie.blacklist_stream = Mock()
 
     with patch.object(
         mock_downloader,
@@ -196,8 +189,28 @@ def test_infringing_torrent_is_blacklisted(mock_downloader):
     ):
         results = list(mock_downloader.run(movie))
 
-    movie.blacklist_stream.assert_called_once_with(stream)
-    assert stream in movie.blacklisted_streams
+    movie.blacklist_stream.assert_not_called()
+    assert stream not in movie.blacklisted_streams
+
+
+def test_single_provider_infringing_torrent_excluded_locally_without_mutating_relationship(
+    mock_downloader,
+):
+    """When single provider is initialized and returns DebridInfringingError, exclude locally without DB blacklist."""
+    movie = _make_movie()
+    stream = _make_stream("dmcaSingle444")
+    movie.streams = [stream]
+    movie.blacklist_stream = Mock()
+
+    with patch.object(
+        mock_downloader,
+        "validate_stream_on_service",
+        side_effect=DebridInfringingError("Real-Debrid 451 Infringing Torrent"),
+    ):
+        results = list(mock_downloader.run(movie))
+
+    movie.blacklist_stream.assert_not_called()
+    assert stream not in movie.blacklisted_streams
 
 
 def test_multi_service_requires_all_services_permanent_rejection():
@@ -240,7 +253,7 @@ def test_multi_service_requires_all_services_permanent_rejection():
 
 
 def test_multi_service_blacklists_when_both_confirm_permanent():
-    """When all services report permanent errors, stream is blacklisted."""
+    """When all services report permanent errors (dead/corrupt), stream is blacklisted."""
     with patch.object(Downloader, "__init__", lambda *_: None):
         dl = Downloader()
         dl.initialized = True
@@ -274,10 +287,47 @@ def test_multi_service_blacklists_when_both_confirm_permanent():
         def mock_validate(s, item, srv):
             if srv.key == "realdebrid":
                 raise TorrentDeadOrCorruptError("dead on RD")
-            raise DebridInfringingError("DMCA on AD")
+            raise TorrentDeadOrCorruptError("dead on AD")
 
         with patch.object(dl, "validate_stream_on_service", side_effect=mock_validate):
             list(dl.run(movie))
 
         movie.blacklist_stream.assert_called_once_with(stream)
         assert stream in movie.blacklisted_streams
+
+
+def test_multi_service_mixed_infringing_and_dead_does_not_blacklist():
+    """When one service reports dead and another reports infringing, do NOT blacklist globally."""
+    with patch.object(Downloader, "__init__", lambda *_: None):
+        dl = Downloader()
+        dl.initialized = True
+
+        service1 = Mock()
+        service1.key = "realdebrid"
+        service1.initialized = True
+
+        service2 = Mock()
+        service2.key = "alldebrid"
+        service2.initialized = True
+
+        dl.services = {type(service1): service1, type(service2): service2}
+        dl.initialized_services = [service1, service2]
+        dl.service = service1
+        dl._service_cooldowns = {}
+        dl.subtitles_enabled = False
+
+        movie = _make_movie()
+        stream = _make_stream("mixed777")
+        movie.streams = [stream]
+        movie.blacklist_stream = Mock()
+
+        def mock_validate(s, item, srv):
+            if srv.key == "realdebrid":
+                raise TorrentDeadOrCorruptError("dead on RD")
+            raise DebridInfringingError("DMCA on AD")
+
+        with patch.object(dl, "validate_stream_on_service", side_effect=mock_validate):
+            list(dl.run(movie))
+
+        movie.blacklist_stream.assert_not_called()
+        assert stream not in movie.blacklisted_streams

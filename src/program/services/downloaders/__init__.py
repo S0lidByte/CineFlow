@@ -329,28 +329,15 @@ class Downloader(Runner[None, DownloaderBase]):
                             self._excluded_stream_hashes[item_key].discard(
                                 stream.infohash
                             )
-                    elif (
-                        available_services
-                        and len(available_services) == len(self.initialized_services)
-                        and (
-                            len(stream_permanent_rejections)
-                            + len(stream_infringing_rejections)
-                        )
-                        == len(available_services)
-                    ):
-                        logger.debug(
-                            f"Stream {stream.infohash} confirmed permanently rejected/infringing across all "
-                            f"{len(available_services)} available service(s), blacklisting"
-                        )
-                        item.blacklist_stream(stream)
-                        if item_key in self._excluded_stream_hashes:
-                            self._excluded_stream_hashes[item_key].discard(
-                                stream.infohash
-                            )
                     else:
+                        reason = (
+                            "infringing"
+                            if stream_infringing_rejections
+                            else "uncached, preference, or non-matching files"
+                        )
                         logger.debug(
                             f"Stream {stream.infohash} failed non-permanently on available service(s) "
-                            f"(uncached, preference, or non-matching files); excluding locally without mutating persistent relationship"
+                            f"({reason}); excluding locally without mutating persistent relationship"
                         )
                         empty_set: set[str] = set()
                         self._excluded_stream_hashes.setdefault(
