@@ -38,9 +38,8 @@ def setup_logger(
         if icon is None:
             icon = os.getenv(f"RIVEN_LOGGER_{name}_ICON", default_icon)
 
-        return f"<fg #{color if color != '' else default_color}>", (
-            icon if icon != "" else default_icon
-        )
+        color_clean = (color if color != "" else default_color).strip().lstrip("#")
+        return f"<fg #{color_clean}>", (icon if icon != "" else default_icon)
 
     # TRACE: 5
     # DEBUG: 10
@@ -51,16 +50,16 @@ def setup_logger(
     # CRITICAL: 50
 
     log_levels = {
-        "PROGRAM": (20, "cc6600", "🤖"),
-        "DATABASE": (5, "d834eb", "🛢️"),  # trace
-        "DEBRID": (20, "cc3333", "🔗"),
+        "PROGRAM": (20, "FB923C", "🤖"),
+        "DATABASE": (5, "E879F9", "🛢️"),  # trace
+        "DEBRID": (20, "FB923C", "🔗"),
         "FILESYSTEM": (5, "F9E79F", "🔗"),  # trace
-        "VFS": (10, "9B59B6", "🧲"),  # debug
+        "VFS": (10, "C084FC", "🧲"),  # debug
         "FUSE": (5, "999999", "⚙️"),  # trace
-        "SCRAPER": (20, "3D5A80", "👻"),
-        "COMPLETED": (20, "FFFFFF", "🟢"),
-        "CACHE": (5, "527826", "📜"),  # trace
-        "NOT_FOUND": (20, "818589", "🤷‍"),
+        "SCRAPER": (20, "06B6D4", "👻"),
+        "COMPLETED": (20, "10B981", "🟢"),
+        "CACHE": (5, "4ADE80", "📜"),  # trace
+        "NOT_FOUND": (20, "94A3B8", "🤷‍"),
         "NEW": (20, "ce7fab", "✨"),
         "FILES": (20, "FFFFE0", "🗃️ "),
         "ITEM": (20, "92a1cf", "🗃️ "),
@@ -71,7 +70,7 @@ def setup_logger(
         "JELLYFIN": (20, "DAD3BE", "📽️ "),
         "EMBY": (20, "DAD3BE", "📽️ "),
         "TRAKT": (20, "006989", "🍿"),
-        "STREAM": (10, "9B59B6", "▶️ "),  # debug
+        "STREAM": (10, "C084FC", "▶️ "),  # debug
         "NETWORK": (5, "235789", "🌐"),  # debug
     }
 
@@ -189,6 +188,60 @@ def log_cleaner():
             logger.debug(f"Cleaned up old logs older than {retention_hours} hours.")
     except Exception as e:
         logger.error(f"Failed to clean old logs: {e}")
+
+
+STATE_COLORS: dict[str, str] = {
+    "Unknown": "94A3B8",
+    "Unreleased": "A78BFA",
+    "Ongoing": "38BDF8",
+    "Requested": "F59E0B",
+    "Indexed": "38BDF8",
+    "Scraped": "818CF8",
+    "Downloaded": "34D399",
+    "Symlinked": "C084FC",
+    "Completed": "10B981",
+    "PartiallyCompleted": "FBBF24",
+    "Paused": "94A3B8",
+    "Failed": "F87171",
+}
+
+
+def get_state_color(name: str) -> str:
+    """Get the color hex for a lifecycle state, with env override support."""
+    default = STATE_COLORS.get(name, "94A3B8")
+    override = os.getenv(f"CINEFLOW_LOGGER_STATE_{name.upper()}_FG")
+    if override is None:
+        override = os.getenv(f"CINEFLOW_LOGGER_{name.upper()}_FG")
+    if override is None:
+        override = os.getenv(f"RIVEN_LOGGER_{name.upper()}_FG", default)
+    clean = override.strip() if override else default
+    return f"#{clean.lstrip('#')}"
+
+
+def format_state(state: object) -> str:
+    """Format a lifecycle state with inline Loguru color tags."""
+    if state is None:
+        return "None"
+    name = getattr(state, "name", None) or str(state)
+    color = get_state_color(name)
+    return f"<fg {color}>{name}</fg {color}>"
+
+
+def escape_loguru_tags(text: object) -> str:
+    """Escape angle brackets so Loguru opt(colors=True) does not parse arbitrary text as color tags."""
+    return str(text).replace("<", r"\<")
+
+
+def format_blacklisted(text: str = "BLACKLISTED") -> str:
+    """Format permanent blacklisted event tag with WCAG AA compliant rose hex."""
+    color = os.getenv("CINEFLOW_LOGGER_BLACKLIST_FG", "FB7185").strip().lstrip("#")
+    return f"<fg #{color}>{text}</fg #{color}>"
+
+
+def format_excluded(text: str = "EXCLUDED") -> str:
+    """Format temporary exclusion event tag with WCAG AA compliant amber hex."""
+    color = os.getenv("CINEFLOW_LOGGER_EXCLUDED_FG", "FBBF24").strip().lstrip("#")
+    return f"<fg #{color}>{text}</fg #{color}>"
 
 
 setup_logger(settings_manager.settings.log_level)
