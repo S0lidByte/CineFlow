@@ -107,3 +107,6 @@ venv.bak/
 
 # MacOs
 **/.DS_Store
+
+# Tool caches
+.pi-cache/
