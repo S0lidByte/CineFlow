@@ -63,6 +63,7 @@ def _ensure_pyfuse3() -> None:
     stub.FUSEError = FUSEError
     stub.RequestContext = RequestContext
     stub.ROOT_INODE = InodeT(1)
+    stub.FileNameT = bytes
     stub.errno = errno_mod
 
     def _noop(*_args, **_kwargs):

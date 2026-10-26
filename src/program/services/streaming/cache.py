@@ -816,6 +816,10 @@ class Cache:
     ) -> None:
         """Delete cache payload + metadata files outside the index lock."""
         for k in keys:
+            with self._thread_lock:
+                if k in self._index:
+                    # Key was re-admitted / re-written concurrently; do not unlink new file!
+                    continue
             tier = (tiers or {}).get(k, "warm")
             fp = self._file_for(k, tier=tier)
             try:
@@ -1415,31 +1419,20 @@ class Cache:
         need_bytes: int,
         put_breakdown: CachePutLatencyBreakdown | None = None,
     ) -> bool:
-        """Reserve hot-tier bytes, returning false when disk fallback is safer."""
-        with trio.move_on_after(self._HOT_RESERVATION_TIMEOUT_SECONDS):
-            while True:
-                async with self._hot_write_lock:
-                    await self._ensure_hot_capacity(
-                        need_bytes, put_breakdown=put_breakdown
-                    )
-                    available = (
-                        self.cfg.hot_max_size_bytes
-                        - self._hot_bytes
-                        - self._hot_reserved_bytes
-                    )
-                    if need_bytes <= available:
-                        self._hot_reserved_bytes += need_bytes
-                        return True
+        """Reserve hot-tier bytes, immediately returning false for warm fallback if congested."""
+        async with self._hot_write_lock:
+            await self._ensure_hot_capacity(need_bytes, put_breakdown=put_breakdown)
+            available = (
+                self.cfg.hot_max_size_bytes - self._hot_bytes - self._hot_reserved_bytes
+            )
+            if need_bytes <= available:
+                self._hot_reserved_bytes += need_bytes
+                return True
 
-                    # With no pending writer to wake us, failure to free enough
-                    # space cannot resolve by waiting. Use the warm tier instead.
-                    if self._hot_reserved_bytes == 0:
-                        return False
-                    capacity_changed = self._hot_capacity_changed
-
-                await capacity_changed.wait()
-
-        return False
+            # If hot tier space cannot be immediately satisfied after demotion,
+            # avoid queuing writers behind trio.Event waits (which stalls prefetchers).
+            # Fast-fallback immediately to warm tier.
+            return False
 
     async def _release_hot_capacity(self, reserved_bytes: int) -> None:
         """Release a pending hot-tier reservation and wake blocked writers."""
@@ -1447,6 +1440,29 @@ class Cache:
             self._hot_reserved_bytes = max(0, self._hot_reserved_bytes - reserved_bytes)
             self._hot_capacity_changed.set()
             self._hot_capacity_changed = trio.Event()
+
+    async def _unlink_evicted_files(
+        self,
+        entries: list[tuple[str, int]],
+        tiers: dict[str, Literal["hot", "warm"]],
+    ) -> None:
+        if not entries:
+            return
+
+        # Group evicted keys by cache_key so all chunks for a shard are unlinked
+        # in a single worker thread call rather than flooding the threadpool.
+        by_cache_key: dict[str, list[str]] = {}
+        for cache_key, start in entries:
+            key = self._key(cache_key, start)
+            by_cache_key.setdefault(cache_key, []).append(key)
+
+        for cache_key, keys in by_cache_key.items():
+            # Never wait for a title shard while holding the index or hot-capacity
+            # lock. Writers hold this shard through payload and index publication.
+            async with self._shard(cache_key):
+                await trio.to_thread.run_sync(
+                    lambda keys=keys: self._unlink_cache_files(keys, tiers=tiers)
+                )
 
     async def _evict_lru(
         self,
@@ -1566,9 +1582,8 @@ class Cache:
                         evicted += 1
         finally:
             if to_unlink:
-                await trio.to_thread.run_sync(
-                    lambda: self._unlink_cache_files(to_unlink, tiers=tiers)
-                )
+                with trio.CancelScope(shield=True):
+                    await self._unlink_evicted_files(evicted_entries, tiers)
             if evicted:
                 self._metrics.record_evictions(evicted)
             for ck, st in evicted_entries:
@@ -1629,9 +1644,8 @@ class Cache:
                     evicted_entries.append((cache_entry.cache_key, cache_entry.start))
 
         if to_unlink:
-            await trio.to_thread.run_sync(
-                lambda: self._unlink_cache_files(to_unlink, tiers=tiers)
-            )
+            with trio.CancelScope(shield=True):
+                await self._unlink_evicted_files(evicted_entries, tiers)
             self._metrics.record_evictions(len(to_unlink))
             for ck, st in evicted_entries:
                 try:
@@ -2153,65 +2167,90 @@ class Cache:
                     else CachePutResult.STORED_WARM
                 )
 
-            # Check admission under pressure:
-            # If admission is prefetch and cache is under tight watermark pressure,
-            # drop speculative prefetch caching early.
-            if admission == "prefetch":
+        # Check admission under pressure:
+        # If admission is prefetch and cache is under tight watermark pressure,
+        # drop speculative prefetch caching early.
+        if admission == "prefetch":
+            with self._thread_lock:
+                warm_bytes = max(0, self._total_bytes - self._hot_bytes)
+            warm_hard_cap = self.cfg.max_size_bytes
+            effective_warm_high, _ = self._effective_warm_watermarks()
+            warm_high_pct = effective_warm_high / 100.0
+            if warm_hard_cap > 0 and (warm_bytes + need) > int(
+                warm_hard_cap * warm_high_pct
+            ):
+                # Check if all or most is protected
                 with self._thread_lock:
-                    warm_bytes = max(0, self._total_bytes - self._hot_bytes)
-                warm_hard_cap = self.cfg.max_size_bytes
-                effective_warm_high, _ = self._effective_warm_watermarks()
-                warm_high_pct = effective_warm_high / 100.0
-                if warm_hard_cap > 0 and (warm_bytes + need) > int(
-                    warm_hard_cap * warm_high_pct
-                ):
-                    # Check if all or most is protected
-                    with self._thread_lock:
-                        has_unprotected = any(
-                            getattr(e, "tier", None) == "warm"
-                            and not self._is_entry_protected(ck, e)
-                            for ck, e in self._index.items()
-                        )
-                    if not has_unprotected:
-                        return CachePutResult.SKIPPED_PREFETCH_PRESSURE
-
-            hot_reservation = 0
-            reservation_started = time.perf_counter()
-            if write_tier == "hot":
-                if await self._reserve_hot_capacity(need, put_breakdown=timing):
-                    hot_reservation = need
-                else:
-                    write_tier = "warm"
-
-            if timing is not None:
-                timing.hot_reservation_s = time.perf_counter() - reservation_started
-                timing.target_tier = write_tier
-            try:
-                if self.cfg.eviction == "TTL":
-                    await self._evict_ttl(put_breakdown=timing)
-                else:
-                    # The warm budget describes persistent-tier retention. A hot
-                    # write must not evict warm history merely because the total
-                    # two-tier footprint temporarily grows.
-                    eviction_ok = await self._evict_lru(
-                        need if write_tier == "warm" else 0, put_breakdown=timing
+                    has_unprotected = any(
+                        getattr(e, "tier", None) == "warm"
+                        and not self._is_entry_protected(ck, e)
+                        for ck, e in self._index.items()
                     )
-                    if not eviction_ok and write_tier == "warm":
-                        # Eviction could not reach the low-watermark target because all
-                        # remaining entries are protected by active playback leases.
-                        # ACTIVE PLAYBACK DATA > CACHE RETENTION:
-                        # - If this chunk itself is active playback (stream_id set), always
-                        #   admit it even if the hard cap is breached. Dropping active
-                        #   playback data causes buffer stalls; cap overflow is preferable.
-                        # - If this is an unprotected/demand chunk, only refuse when the
-                        #   hard cap itself would be exceeded (not just the watermark).
-                        if stream_id is None or admission == "prefetch":
-                            with self._thread_lock:
-                                warm_after = max(0, self._total_bytes - self._hot_bytes)
-                            if warm_after + need > self.cfg.max_size_bytes:
-                                # Hard cap would be breached and we cannot evict anything.
-                                return CachePutResult.REFUSED_PHYSICAL_PRESSURE
+                if not has_unprotected:
+                    return CachePutResult.SKIPPED_PREFETCH_PRESSURE
 
+        hot_reservation = 0
+        reservation_started = time.perf_counter()
+        if write_tier == "hot":
+            if await self._reserve_hot_capacity(need, put_breakdown=timing):
+                hot_reservation = need
+            else:
+                write_tier = "warm"
+
+        if timing is not None:
+            timing.hot_reservation_s = time.perf_counter() - reservation_started
+            timing.target_tier = write_tier
+        try:
+            if self.cfg.eviction == "TTL":
+                await self._evict_ttl(put_breakdown=timing)
+            else:
+                # The warm budget describes persistent-tier retention. A hot
+                # write must not evict warm history merely because the total
+                # two-tier footprint temporarily grows.
+                eviction_ok = await self._evict_lru(
+                    need if write_tier == "warm" else 0, put_breakdown=timing
+                )
+                if not eviction_ok and write_tier == "warm":
+                    # Eviction could not reach the low-watermark target because all
+                    # remaining entries are protected by active playback leases.
+                    # ACTIVE PLAYBACK DATA > CACHE RETENTION:
+                    # - If this chunk itself is active playback (stream_id set), always
+                    #   admit it even if the hard cap is breached. Dropping active
+                    #   playback data causes buffer stalls; cap overflow is preferable.
+                    # - If this is an unprotected/demand chunk, only refuse when the
+                    #   hard cap itself would be exceeded (not just the watermark).
+                    if stream_id is None or admission == "prefetch":
+                        with self._thread_lock:
+                            warm_after = max(0, self._total_bytes - self._hot_bytes)
+                        if warm_after + need > self.cfg.max_size_bytes:
+                            # Hard cap would be breached and we cannot evict anything.
+                            return CachePutResult.REFUSED_PHYSICAL_PRESSURE
+
+            # A concurrent writer can publish while eviction waits; recheck under
+            # the title shard before replacing payload or publishing a new entry.
+            async with self._shard(cache_key):
+                with self._thread_lock:
+                    current = self._index.get(k)
+                if current is not None and current.size >= need:
+                    for probe_tier in self._tier_probe_order(current.tier):
+                        if await trio.to_thread.run_sync(
+                            self._file_has_size,
+                            self._file_for(k, tier=probe_tier),
+                            current.size,
+                        ):
+                            if stream_id is not None:
+                                self.acquire_lease(
+                                    stream_id=stream_id,
+                                    cache_key=cache_key,
+                                    start=start,
+                                    size=current.size,
+                                    lease_seconds=lease_seconds,
+                                )
+                            return (
+                                CachePutResult.STORED_HOT
+                                if current.tier == "hot"
+                                else CachePutResult.STORED_WARM
+                            )
                 fp = self._file_for(k, tier=write_tier)
 
                 try:
@@ -2291,8 +2330,9 @@ class Cache:
                     if write_tier == "hot"
                     else CachePutResult.STORED_WARM
                 )
-            finally:
-                if hot_reservation:
+        finally:
+            if hot_reservation:
+                with trio.CancelScope(shield=True):
                     await self._release_hot_capacity(hot_reservation)
 
     def has(self, cache_key: str, start: int, end: int) -> bool:
