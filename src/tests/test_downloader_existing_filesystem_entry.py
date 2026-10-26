@@ -264,7 +264,9 @@ def test_run_raises_no_matching_files_when_attributes_fail(downloader):
     ):
         list(downloader.run(item))
 
-    item.blacklist_stream.assert_called_once_with(stream)
+    # NoMatchingFilesException is non-permanent; stream must NOT be permanently blacklisted
+    item.blacklist_stream.assert_not_called()
+    assert stream not in item.streams
 
 
 def test_update_item_attributes_no_episode_match_returns_false(downloader):

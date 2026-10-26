@@ -103,11 +103,11 @@ class VFSDatabase:
         self,
         entry: MediaEntry,
         session: Session,
+        permanent: bool = False,
     ) -> bool:
         """
-        Blacklist the active stream, tear down VFS/download state (preserving
-        blacklisted streams), and enqueue a VFS event so a working download can
-        replace a dead CDN link.
+        Tear down VFS/download state (blacklisting active stream only when permanent=True),
+        and enqueue a VFS event so a working download can replace a dead CDN link.
 
         Returns True when a re-scrape was scheduled.
         """
@@ -120,7 +120,7 @@ class VFSDatabase:
         log_string = entry.media_item.log_string
 
         def mutation(i: MediaItem, s: Session) -> None:
-            i.prepare_for_automatic_rescrape()
+            i.prepare_for_automatic_rescrape(blacklist=permanent)
 
         apply_item_mutation(
             program=di[Program],
@@ -133,7 +133,7 @@ class VFSDatabase:
 
         logger.info(
             f"Scheduling automatic re-scrape for item {item_id} "
-            f"({log_string}) after dead CDN link"
+            f"({log_string}) after dead CDN link (permanent={permanent})"
         )
 
         # overrides bypass scrape cooldown so the pipeline re-runs immediately
@@ -223,8 +223,10 @@ class VFSDatabase:
                     f"Failed to unrestrict URL for {entry.original_filename}: {e}"
                 )
 
-                # If un-restricting fails, reset the MediaItem to trigger a new download
-                if self.schedule_dead_link_rescrape(entry=entry, session=session):
+                # If un-restricting fails, reset the MediaItem to trigger a new download without blacklisting
+                if self.schedule_dead_link_rescrape(
+                    entry=entry, session=session, permanent=False
+                ):
                     return None
                 raise
             except Exception as e:

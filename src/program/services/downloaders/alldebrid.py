@@ -34,7 +34,13 @@ from program.services.downloaders.models import (
 from program.settings import settings_manager
 from program.utils.request import CircuitBreakerOpen, SmartResponse, SmartSession
 
-from .shared import DebridVpnBlockedError, DownloaderBase, premium_days_left
+from .shared import (
+    DebridInfringingError,
+    DebridVpnBlockedError,
+    DownloaderBase,
+    TorrentDeadOrCorruptError,
+    premium_days_left,
+)
 
 
 class AllDebridErrorCode(str, Enum):
@@ -461,6 +467,17 @@ def _error_from_detail(
         return DebridVpnBlockedError(error.message)
 
     if code_upper in {
+        "MAGNET_INVALID_URI",
+        "MAGNET_INVALID_ID",
+        "BAD_TORRENT",
+        "MAGNET_FILE_INVALID",
+    }:
+        return TorrentDeadOrCorruptError(error.message)
+
+    if code_upper in {"INFRINGING_FILE", "DMCA"}:
+        return DebridInfringingError(error.message)
+
+    if code_upper in {
         "AUTH_MISSING_APIKEY",
         "AUTH_BAD_APIKEY",
         "AUTH_USER_BANNED",
@@ -838,6 +855,14 @@ class AllDebridDownloader(DownloaderBase):
                     pass
 
             raise
+        except (TorrentDeadOrCorruptError, DebridInfringingError):
+            if torrent_id:
+                try:
+                    self.delete_torrent(torrent_id)
+                except Exception:
+                    pass
+
+            raise
         except (DebridVpnBlockedError, ProviderAuthError):
             if torrent_id:
                 try:
@@ -896,6 +921,20 @@ class AllDebridDownloader(DownloaderBase):
 
         if not info:
             return None, "no torrent info returned by AllDebrid", None
+
+        # Detect confirmed dead/corrupted torrents (BAD_TORRENT, virus, dead).
+        # Generic ERROR (6) and DELETED (9) are provider-specific or transfer errors,
+        # not proof of corrupted torrent files, so they are handled as non-ready availability.
+        status_code = getattr(info, "status_code", None)
+        status_str = (info.status or "").lower()
+        if status_code == AllDebridMagnetStatusCode.BAD_TORRENT or status_str in (
+            "bad_torrent",
+            "dead",
+            "virus",
+        ):
+            raise TorrentDeadOrCorruptError(
+                f"Invalid on AllDebrid (status={info.status}, statusCode={status_code})"
+            )
 
         # Check if torrent is ready (statusCode 4 = Ready)
         # Status codes: 0=In Queue, 1=Downloading, 2=Compressing, 3=Uploading, 4=Ready
