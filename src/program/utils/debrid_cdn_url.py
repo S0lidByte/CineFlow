@@ -206,7 +206,7 @@ class DebridCDNUrl:
     def _clear_validate_none_count(self) -> None:
         _validate_none_counts.pop(self.filename, None)
 
-    def _schedule_dead_link_now(self, *, reason: str) -> bool:
+    def _schedule_dead_link_now(self, *, reason: str, permanent: bool = False) -> bool:
         """
         Schedule dead-link re-scrape once per filename within the dedupe window.
 
@@ -231,6 +231,7 @@ class DebridCDNUrl:
                 scheduled = di[VFSDatabase].schedule_dead_link_rescrape(
                     entry=entry,
                     session=session,
+                    permanent=permanent,
                 )
                 if not scheduled:
                     _rescrape_scheduled_until.pop(filename, None)
@@ -242,7 +243,7 @@ class DebridCDNUrl:
 
             logger.warning(
                 f"CDN link dead for {filename} ({reason}); "
-                f"scheduled automatic re-scrape"
+                f"scheduled automatic re-scrape (permanent={permanent})"
             )
             return True
         except Exception as e:
@@ -280,7 +281,8 @@ class DebridCDNUrl:
             return
 
         self._schedule_dead_link_now(
-            reason=f"{PERSISTENT_VALIDATE_NONE_THRESHOLD} soft validate failures"
+            reason=f"{PERSISTENT_VALIDATE_NONE_THRESHOLD} soft validate failures",
+            permanent=False,
         )
 
     def validate(
@@ -352,7 +354,9 @@ class DebridCDNUrl:
                         or self._cdn_hosts_equivalent(self.url, url_before_refresh)
                     )
                 ):
-                    self._schedule_dead_link_now(reason="NXDOMAIN CDN host")
+                    self._schedule_dead_link_now(
+                        reason="NXDOMAIN CDN host", permanent=False
+                    )
                     raise DebridServiceLinkUnavailable(
                         provider=self.provider,
                         link=self.url or url_before_refresh or "Unknown URL",
@@ -433,6 +437,7 @@ class DebridCDNUrl:
                 di[VFSDatabase].schedule_dead_link_rescrape(
                     entry=entry,
                     session=session,
+                    permanent=False,
                 )
                 raise RefreshedURLIdenticalException
 

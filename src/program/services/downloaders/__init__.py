@@ -26,7 +26,9 @@ from program.services.downloaders.models import (
     UserInfo,
 )
 from program.services.downloaders.shared import (
+    DebridInfringingError,
     DownloaderBase,
+    TorrentDeadOrCorruptError,
     parse_filename,
     sort_streams_by_quality,
 )
@@ -39,6 +41,8 @@ from .realdebrid import RealDebridDownloader
 
 
 class Downloader(Runner[None, DownloaderBase]):
+    _excluded_stream_hashes: dict[int, set[str]] = {}
+
     def __init__(self):
         super().__init__()
 
@@ -63,9 +67,16 @@ class Downloader(Runner[None, DownloaderBase]):
 
         # Track per-service cooldowns when circuit breaker is open
         self._service_cooldowns = dict[str, datetime]()
+        # Execution-local stream candidate exclusion cache: maps item key -> set of infohashes
+        # that failed non-permanently in this evaluation cycle, avoiding mutating the persistent
+        # SQLAlchemy relationship (item.streams) across database transactions.
+        self._excluded_stream_hashes: dict[int, set[str]] = {}
         self.subtitles_enabled = (
             settings_manager.settings.post_processing.subtitle.enabled
         )
+
+    def _get_item_key(self, item: MediaItem) -> int:
+        return item.id if getattr(item, "id", None) is not None else id(item)
 
     def validate(self):
         if not self.initialized_services:
@@ -111,10 +122,19 @@ class Downloader(Runner[None, DownloaderBase]):
 
         # Track if we hit circuit breaker on any service
         hit_circuit_breaker = False
+        item_key = self._get_item_key(item)
 
         try:
             # Sort streams by resolution and rank (highest first) using simple, fast sorting
             sorted_streams = sort_streams_by_quality(item.streams)
+
+            # Filter candidate streams against execution-local exclusion cache so non-permanently
+            # failed streams are skipped within the active run cycle without mutating the persistent
+            # SQLAlchemy relationship (item.streams).
+            excluded_hashes = self._excluded_stream_hashes.get(item_key, set())
+            candidate_streams = [
+                s for s in sorted_streams if s.infohash not in excluded_hashes
+            ]
 
             tried_streams = 0
             # run_thread_with_db_item uses next() so only the first yield is consumed.
@@ -123,10 +143,12 @@ class Downloader(Runner[None, DownloaderBase]):
             # Blacklisted streams are skipped on the next invocation.
             MAX_STREAMS_PER_RUN = 3
 
-            for stream in sorted_streams:
+            for stream in candidate_streams:
                 # Try each available service for this stream before blacklisting
                 stream_failed_on_all_services = True
                 stream_hit_circuit_breaker = False
+                stream_permanent_rejections: list[Exception] = []
+                stream_infringing_rejections: list[Exception] = []
 
                 for service in available_services:
                     logger.debug(
@@ -194,6 +216,50 @@ class Downloader(Runner[None, DownloaderBase]):
                         # Break out of service loop — all subsequent streams will also fail on this service
                         break
 
+                    except TorrentDeadOrCorruptError as e:
+                        logger.warning(
+                            f"Stream {stream.infohash} confirmed permanently invalid/dead on {service.key}: {e}"
+                        )
+                        stream_permanent_rejections.append(e)
+
+                        if download_result and download_result.id:
+                            try:
+                                service.delete_torrent(download_result.id)
+                            except Exception as del_e:
+                                logger.debug(
+                                    f"Failed to delete failed torrent {stream.infohash} on {service.key}: {del_e}"
+                                )
+                        continue
+
+                    except DebridInfringingError as e:
+                        logger.warning(
+                            f"Stream {stream.infohash} blocked as infringing on {service.key}: {e}"
+                        )
+                        stream_infringing_rejections.append(e)
+
+                        if download_result and download_result.id:
+                            try:
+                                service.delete_torrent(download_result.id)
+                            except Exception as del_e:
+                                logger.debug(
+                                    f"Failed to delete failed torrent {stream.infohash} on {service.key}: {del_e}"
+                                )
+                        continue
+
+                    except NoMatchingFilesException as e:
+                        logger.debug(
+                            f"Stream {stream.infohash} has no matching files for {item.log_string} on {service.key}: {e}"
+                        )
+
+                        if download_result and download_result.id:
+                            try:
+                                service.delete_torrent(download_result.id)
+                            except Exception as del_e:
+                                logger.debug(
+                                    f"Failed to delete failed torrent {stream.infohash} on {service.key}: {del_e}"
+                                )
+                        continue
+
                     except Exception as e:
                         logger.debug(
                             f"Stream {stream.infohash} failed on {service.key}: {e}"
@@ -214,6 +280,7 @@ class Downloader(Runner[None, DownloaderBase]):
 
                 # If stream succeeded on any service, we're done
                 if download_success:
+                    self._excluded_stream_hashes.pop(item_key, None)
                     # Add probed data if required
                     if self.subtitles_enabled:
                         from program.services.media_analysis import (
@@ -235,8 +302,11 @@ class Downloader(Runner[None, DownloaderBase]):
                     else:
                         break
 
-                # Only blacklist if stream genuinely failed on ALL available services
-                # Don't blacklist if we hit circuit breaker in single-provider mode
+                # Classification of stream failure outcome:
+                # Only blacklist if ALL initialized services explicitly confirmed permanent failure
+                # (e.g., dead torrent, invalid infohash, infringing / removed content, corrupt metadata).
+                # Inconclusive failures (uncached, preferences, no matching files for this episode,
+                # timeouts, rate limits) must NEVER permanently blacklist the stream.
                 if stream_failed_on_all_services:
                     if (
                         stream_hit_circuit_breaker
@@ -245,21 +315,62 @@ class Downloader(Runner[None, DownloaderBase]):
                         logger.debug(
                             f"Stream {stream.infohash} hit circuit breaker on single provider, will retry after cooldown"
                         )
-                    else:
+                    elif (
+                        available_services
+                        and len(available_services) == len(self.initialized_services)
+                        and len(stream_permanent_rejections) == len(available_services)
+                    ):
                         logger.debug(
-                            f"Stream {stream.infohash} failed on all {len(available_services)} available service(s), blacklisting"
+                            f"Stream {stream.infohash} confirmed permanently invalid on all "
+                            f"{len(available_services)} available service(s), blacklisting"
                         )
                         item.blacklist_stream(stream)
+                        if item_key in self._excluded_stream_hashes:
+                            self._excluded_stream_hashes[item_key].discard(
+                                stream.infohash
+                            )
+                    elif (
+                        available_services
+                        and len(available_services) == len(self.initialized_services)
+                        and (
+                            len(stream_permanent_rejections)
+                            + len(stream_infringing_rejections)
+                        )
+                        == len(available_services)
+                    ):
+                        logger.debug(
+                            f"Stream {stream.infohash} confirmed permanently rejected/infringing across all "
+                            f"{len(available_services)} available service(s), blacklisting"
+                        )
+                        item.blacklist_stream(stream)
+                        if item_key in self._excluded_stream_hashes:
+                            self._excluded_stream_hashes[item_key].discard(
+                                stream.infohash
+                            )
+                    else:
+                        logger.debug(
+                            f"Stream {stream.infohash} failed non-permanently on available service(s) "
+                            f"(uncached, preference, or non-matching files); excluding locally without mutating persistent relationship"
+                        )
+                        empty_set: set[str] = set()
+                        self._excluded_stream_hashes.setdefault(
+                            item_key, empty_set
+                        ).add(stream.infohash)
 
                 tried_streams += 1
 
                 if tried_streams >= MAX_STREAMS_PER_RUN:
-                    # Yield early only when more streams remain for a later run.
-                    # blacklist_stream() removes from item.streams; if none are
-                    # left, fall through to exhaustion backoff (preserve
-                    # blacklist + schedule run_at) instead of Indexed with an
-                    # immediate re-queue (Descendants 3 / ≤3-stream case).
-                    if item.streams:
+                    # Yield early only when more un-excluded streams remain for a later run.
+                    # blacklist_stream() removes from item.streams; non-permanently failed
+                    # streams are excluded locally in self._excluded_stream_hashes without
+                    # mutating the persistent SQLAlchemy relationship (item.streams).
+                    remaining_streams = [
+                        s
+                        for s in item.streams
+                        if s.infohash
+                        not in self._excluded_stream_hashes.get(item_key, set())
+                    ]
+                    if remaining_streams:
                         yield RunnerResult(media_items=[item])
                         return
                     break
@@ -286,6 +397,7 @@ class Downloader(Runner[None, DownloaderBase]):
                 logger.warning(
                     f"Single provider hit circuit breaker for {item.log_string} ({item.id}), rescheduling for {next_attempt.strftime('%m/%d/%y %H:%M:%S')}"
                 )
+                self._excluded_stream_hashes.pop(item_key, None)
 
                 yield RunnerResult(media_items=[item], run_at=next_attempt)
 
@@ -294,6 +406,7 @@ class Downloader(Runner[None, DownloaderBase]):
                 logger.debug(
                     f"Failed to download any streams for {item.log_string} ({item.id})"
                 )
+                self._excluded_stream_hashes.pop(item_key, None)
                 # All streams exhausted: fall back to Indexed so the Scraper can
                 # search for new streams instead of looping in the Downloader forever.
                 #

@@ -302,16 +302,20 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
         if find_and_blacklist_stream(self.streams):
             return True
 
-        if isinstance(self, Episode):
-            if self.parent and find_and_blacklist_stream(self.parent.streams):
-                return True
+        if isinstance(self, Episode) or getattr(self, "type", None) == "episode":
+            parent = getattr(self, "parent", None)
+            if parent:
+                parent_streams = cast(list[Stream], getattr(parent, "streams", []))
+                if find_and_blacklist_stream(parent_streams):
+                    return True
 
-            if (
-                self.parent
-                and self.parent.parent
-                and find_and_blacklist_stream(self.parent.parent.streams)
-            ):
-                return True
+                grandparent = getattr(parent, "parent", None)
+                if grandparent:
+                    grandparent_streams = cast(
+                        list[Stream], getattr(grandparent, "streams", [])
+                    )
+                    if find_and_blacklist_stream(grandparent_streams):
+                        return True
 
         logger.debug(
             f"Unable to find stream from item hierarchy for {self.log_string}, will not blacklist"
@@ -352,30 +356,31 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
         return None
 
     def blacklist_stream(self, stream: Stream) -> bool:
-        """Blacklist a stream on its hierarchy owner."""
+        """Blacklist a stream on this item or its hierarchy owner.
 
-        owner = MediaItem.get_stream_owner(
-            self, stream_id=stream.id, infohash=stream.infohash
-        )
-        if owner is not None and owner is not self:
-            return MediaItem.blacklist_stream(owner, stream)
-        if owner is None:
-            return False
+        Episode blacklists are strictly scoped to the episode itself, ensuring
+        parent season packs and sibling episodes are never tainted by an episode failure.
+        """
+        if isinstance(self, Episode) or getattr(self, "type", None) == "episode":
+            target = self
+        else:
+            owner = MediaItem.get_stream_owner(
+                self, stream_id=stream.id, infohash=stream.infohash
+            )
+            target = owner if owner is not None else self
 
-        _dedupe_stream_list_in_place(self.streams)
-        _dedupe_stream_list_in_place(self.blacklisted_streams)
+        _dedupe_stream_list_in_place(target.streams)
+        _dedupe_stream_list_in_place(target.blacklisted_streams)
 
-        removed_from_active = False
-        if stream in self.streams:
-            self.streams.remove(stream)
-            removed_from_active = True
+        if stream in target.streams:
+            target.streams.remove(stream)
 
-        if stream in self.blacklisted_streams:
+        if stream in target.blacklisted_streams:
             return True
 
-        session = object_session(self)
+        session = object_session(target)
         stream_id = getattr(stream, "id", None)
-        item_id = getattr(self, "id", None)
+        item_id = getattr(target, "id", None)
         if session is not None and stream_id is not None and item_id is not None:
             existing = (
                 session.query(StreamBlacklistRelation.id)
@@ -383,39 +388,35 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
                 .first()
             )
             if existing is not None:
-                session.expire(self, ["blacklisted_streams"])
+                session.expire(target, ["blacklisted_streams"])
                 return True
 
-        if not removed_from_active:
-            return False
-
-        self.blacklisted_streams.append(stream)
-        logger.debug(f"Blacklisted stream {stream.infohash} for {self.log_string}")
+        target.blacklisted_streams.append(stream)
+        logger.debug(f"Blacklisted stream {stream.infohash} for {target.log_string}")
         return True
 
     def unblacklist_stream(self, stream: Stream) -> None:
-        """Unblacklist a stream on its hierarchy owner."""
-
-        owner = MediaItem.get_stream_owner(
-            self, stream_id=stream.id, infohash=stream.infohash
-        )
-        if owner is not None and owner is not self:
-            MediaItem.unblacklist_stream(owner, stream)
-            return
-        if owner is None:
-            return
-
-        _dedupe_stream_list_in_place(self.streams)
-        _dedupe_stream_list_in_place(self.blacklisted_streams)
+        """Unblacklist a stream on this item or its hierarchy owner."""
 
         if stream in self.blacklisted_streams:
-            self.blacklisted_streams.remove(stream)
+            target = self
+        else:
+            owner = MediaItem.get_stream_owner(
+                self, stream_id=stream.id, infohash=stream.infohash
+            )
+            target = owner if owner is not None else self
 
-            if stream not in self.streams:
-                self.streams.append(stream)
+        _dedupe_stream_list_in_place(target.streams)
+        _dedupe_stream_list_in_place(target.blacklisted_streams)
+
+        if stream in target.blacklisted_streams:
+            target.blacklisted_streams.remove(stream)
+
+            if stream not in target.streams:
+                target.streams.append(stream)
 
             logger.debug(
-                f"Unblacklisted stream {stream.infohash} for {self.log_string}"
+                f"Unblacklisted stream {stream.infohash} for {target.log_string}"
             )
 
     def schedule(
@@ -794,15 +795,18 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
         self._reset()
         self.store_state()
 
-    def prepare_for_automatic_rescrape(self) -> None:
+    def prepare_for_automatic_rescrape(self, blacklist: bool = True) -> None:
         """
         Tear down VFS/download state after an automatic dead-link removal.
 
-        Blacklists the active stream and keeps existing ``blacklisted_streams`` so
-        scrapers and the downloader do not immediately retry the same dead torrent.
+        When ``blacklist`` is True, blacklists the active stream and keeps existing
+        ``blacklisted_streams`` so scrapers and the downloader do not immediately retry
+        the same dead torrent. When False (soft/inconclusive validate failures), clears
+        the active stream without blacklisting.
         Unlike :meth:`reset`, this does not recurse into child seasons/episodes.
         """
-        self.blacklist_active_stream()
+        if blacklist:
+            self.blacklist_active_stream()
 
         from program.program import riven
 
@@ -823,7 +827,7 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
 
         logger.info(
             f"Prepared {self.log_string} for automatic re-scrape after dead link "
-            f"({len(self.blacklisted_streams)} stream(s) blacklisted)"
+            f"(blacklist={blacklist}, {len(self.blacklisted_streams)} stream(s) blacklisted)"
         )
 
     def _reset(self):

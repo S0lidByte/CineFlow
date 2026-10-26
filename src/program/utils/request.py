@@ -982,8 +982,8 @@ class SmartSession:
             except Exception:
                 try:
                     parsed_retry_at = cast(datetime, parsedate_to_datetime(ra))
-                    retry_ts = parsed_retry_at.timestamp()
-                    delay = max(0.0, float(int(round(retry_ts - time.time()))))
+                    retry_ts: float = float(parsed_retry_at.timestamp())
+                    delay = max(0.0, float(int(round(float(retry_ts - time.time())))))
                 except Exception:
                     delay = None
 

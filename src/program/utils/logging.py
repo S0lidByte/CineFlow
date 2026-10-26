@@ -78,7 +78,10 @@ def setup_logger(
     # Set log levels
     for name, (no, default_color, default_icon) in log_levels.items():
         color, icon = get_log_settings(name, default_color, default_icon)
-        logger.level(name, no=no, color=color, icon=icon)
+        try:
+            logger.level(name, no=no, color=color, icon=icon)
+        except ValueError:
+            logger.level(name, color=color, icon=icon)
 
     # Default log levels
     debug_color, debug_icon = get_log_settings("DEBUG", "98C1D9", "🐞")

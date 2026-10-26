@@ -266,7 +266,8 @@ def test_stream_exhaustion_preserves_blacklist_and_reschedules(downloader, mock_
     assert mock_item.scraped_at is not None
     assert mock_item.scraped_times == 1
     mock_item.store_state.assert_called_with(States.Indexed)
-    mock_item.blacklist_stream.assert_called()
+    # Uncached stream failure is non-permanent; must not blacklist stream
+    mock_item.blacklist_stream.assert_not_called()
 
 
 def test_max_streams_early_exit_when_more_remain(downloader, mock_item):
@@ -295,7 +296,15 @@ def test_max_streams_early_exit_when_more_remain(downloader, mock_item):
 
     assert len(results) == 1
     assert results[0].run_at is None
-    assert len(mock_item.streams) == 1  # 4 - 3 tried
+    # With execution-local exclusion, mock_item.streams is preserved (4 total)
+    # and un-excluded streams remaining for subsequent runs is 1 (4 - 3 tried)
+    assert len(mock_item.streams) == 4
+    unexcluded = [
+        s
+        for s in mock_item.streams
+        if s.infohash not in downloader._excluded_stream_hashes.get(mock_item.id, set())
+    ]
+    assert len(unexcluded) == 1  # 4 - 3 tried
     mock_item.store_state.assert_not_called()
 
 
@@ -331,5 +340,6 @@ def test_max_streams_exhaustion_applies_backoff_when_none_remain(downloader, moc
     expected = datetime.now() + timedelta(minutes=30)
     assert abs((results[0].run_at - expected).total_seconds()) < 5
     assert len(mock_item.streams) == 0
-    assert len(mock_item.blacklisted_streams) == 3
+    # Non-permanent failures (uncached) do not add to blacklisted_streams
+    assert len(mock_item.blacklisted_streams) == 0
     mock_item.store_state.assert_called_with(States.Indexed)

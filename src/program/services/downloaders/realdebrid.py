@@ -32,6 +32,7 @@ from program.utils.request import CircuitBreakerOpen, SmartResponse, SmartSessio
 from .shared import (
     DebridInfringingError,
     DownloaderBase,
+    TorrentDeadOrCorruptError,
     premium_days_left,
 )
 
@@ -491,18 +492,22 @@ class RealDebridDownloader(DownloaderBase):
             # Return container WITH the TorrentInfo to avoid re-fetching in download phase
             return TorrentContainer(infohash=infohash, files=files), None, info
 
-        if info.status in ("downloading", "queued"):
+        if info.status in ("downloading", "queued", "compressing", "uploading"):
             return None, f"Not instantly available (status={info.status})", None
 
+        # Confirmed corrupted / dead torrent states:
         if info.status in (
             "magnet_error",
-            "error",
             "virus",
             "dead",
-            "compressing",
-            "uploading",
         ):
-            return None, f"Invalid on Real-Debrid (status={info.status})", None
+            raise TorrentDeadOrCorruptError(
+                f"Invalid on Real-Debrid (status={info.status})"
+            )
+
+        # Generic transfer / provider error is non-permanent:
+        if info.status == "error":
+            return None, f"Real-Debrid transfer error (status={info.status})", None
 
         return None, f"unsupported torrent status: {info.status}", None
 
@@ -515,6 +520,8 @@ class RealDebridDownloader(DownloaderBase):
 
         Raises:
             CircuitBreakerOpen: If the per-domain breaker is OPEN.
+            DebridInfringingError: If the content is blocked/infringing.
+            TorrentDeadOrCorruptError: If the torrent file or magnet is invalid.
             RealDebridError: If the API returns a failing status.
         """
 
@@ -531,6 +538,10 @@ class RealDebridDownloader(DownloaderBase):
                 response, RealDebridErrorCode.INFRINGING_FILE
             ):
                 raise DebridInfringingError(self._handle_error(response))
+            if self._response_has_error_code(
+                response, RealDebridErrorCode.TORRENT_FILE_INVALID
+            ):
+                raise TorrentDeadOrCorruptError(self._handle_error(response))
             raise RealDebridError(self._handle_error(response))
 
         class RealDebridAddMagnetResponse(BaseModel):
