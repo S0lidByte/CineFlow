@@ -189,7 +189,7 @@ class Mediafusion(ScraperService[MediafusionConfig]):
                     f"Mediafusion rate-limit exceeded for item: {item.log_string}"
                 )
 
-            if not all(stream.info_hash for stream in data.streams):
+            if not stream.info_hash:
                 logger.debug(
                     "Streams were found but were filtered due to your MediaFusion settings."
                 )
@@ -203,8 +203,7 @@ class Mediafusion(ScraperService[MediafusionConfig]):
                     .replace("🚫", "")
                 )
                 logger.debug(filtered_message)
-
-                return torrents
+                continue
 
             description_split = stream.description.replace("📂 ", "")
             raw_title = description_split.split("\n")[0]
