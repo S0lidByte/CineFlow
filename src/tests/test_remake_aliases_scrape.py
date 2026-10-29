@@ -10,6 +10,7 @@ import pytest
 from RTN.exceptions import GarbageTorrent
 from RTN.models import SettingsModel
 
+from program.media.item import Movie, Show
 from program.services.scrapers.funnel import bucket_rtn_reason
 from program.services.scrapers.shared import (
     _merge_remake_aliases,
@@ -248,3 +249,76 @@ def test_rejects_unrelated_franchise_title():
         )
 
     assert bucket_rtn_reason(exc.value) == "title_mismatch"
+
+
+def test_hope_movie_rejects_unrelated_substring_release_alias_recovery():
+    """Ordinary movie Hope (2026) must not accept an unrelated title like Star Wars via alias recovery."""
+    settings = SettingsModel()
+    settings.options.title_similarity = 0.85
+    settings.languages.required = []
+
+    from RTN import RTN, DefaultRanking
+
+    raw_title = "Star.Wars.Episode.IV.A.New.Hope.1977.1080p"
+    movie = Movie({"title": "Hope", "year": 2026})
+
+    with pytest.raises(GarbageTorrent) as exc:
+        _rank_with_language_compat(
+            RTN(settings, DefaultRanking()),
+            settings,
+            raw_title=raw_title,
+            infohash=INFOHASH,
+            correct_title="Hope",
+            remove_trash=True,
+            aliases={},
+            item=movie,
+        )
+
+    assert bucket_rtn_reason(exc.value) == "title_mismatch"
+
+    # End-to-end parse_results must yield 0 streams
+    streams = parse_results(movie, {INFOHASH: raw_title})
+    assert streams == {}
+
+
+def test_resident_evil_2026_rejects_dated_2002_release_via_year_validation():
+    """Resident Evil (2026) must reject explicitly dated 2002 release via existing year validation."""
+    raw_title = "Resident.Evil.2002.1080p.BluRay.x264"
+    re_2026 = Movie({"title": "Resident Evil", "year": 2026})
+
+    streams = parse_results(re_2026, {INFOHASH: raw_title})
+    assert streams == {}
+
+
+def test_legitimate_anime_series_arc_title_aliases_continue_working():
+    """Legitimate anime/series arc-title aliases must continue to be accepted for Show items."""
+    settings = SettingsModel()
+    settings.options.title_similarity = 0.85
+    settings.languages.required = []
+
+    from RTN import RTN, DefaultRanking
+
+    raw_title = "[Grupa Mirai] Super Dragon Ball Heroes Big Bang Mission - 19 [WEB 1080p AAC] [PL]"
+    show = Show({"title": "Super Dragon Ball Heroes"})
+
+    torrent = _rank_with_language_compat(
+        RTN(settings, DefaultRanking()),
+        settings,
+        raw_title=raw_title,
+        infohash=INFOHASH,
+        correct_title="Super Dragon Ball Heroes",
+        remove_trash=True,
+        aliases={},
+        item=show,
+    )
+    assert torrent.infohash.lower() == INFOHASH
+
+
+def test_existing_valid_movie_match_unaffected():
+    """Standard matching for a valid movie release remains completely unaffected."""
+    raw_title = "Inception.2010.1080p.BluRay.x264"
+    movie = Movie({"title": "Inception", "year": 2010})
+
+    streams = parse_results(movie, {INFOHASH: raw_title})
+    assert len(streams) == 1
+    assert INFOHASH in streams
