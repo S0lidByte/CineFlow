@@ -163,3 +163,77 @@ def test_escape_loguru_tags_prevents_parsing_errors():
         logger.remove(logger_id)
 
     assert any("Movie <2024>" in line for line in logs)
+
+
+def test_escape_loguru_tags_with_existing_backslashes():
+    """Verify escape_loguru_tags handles strings with backslashes immediately preceding tags."""
+    path_with_tag = r"C:\path\<tag>\file.mkv"
+    escaped = escape_loguru_tags(path_with_tag)
+
+    logs = []
+    logger_id = logger.add(lambda msg: logs.append(msg))
+    try:
+        logger.opt(colors=True).debug(f"Path: {escaped}")
+    finally:
+        logger.remove(logger_id)
+
+    assert any(r"C:\path\<tag>\file.mkv" in line for line in logs)
+
+    # Ordinary backslashes without tags remain untouched
+    normal_path = r"C:\normal\path\to\file.mkv"
+    assert escape_loguru_tags(normal_path) == normal_path
+
+
+def test_invalid_hex_color_overrides_fall_back_safely():
+    """Verify invalid/empty/8-digit color overrides fall back safely to defaults and never crash."""
+    # Invalid blacklist override falls back to default FB7185
+    with patch.dict(os.environ, {"CINEFLOW_LOGGER_BLACKLIST_FG": "not-a-color"}):
+        assert format_blacklisted() == "<fg #FB7185>BLACKLISTED</fg #FB7185>"
+
+    with patch.dict(os.environ, {"CINEFLOW_LOGGER_BLACKLIST_FG": "12345678"}):
+        assert format_blacklisted() == "<fg #FB7185>BLACKLISTED</fg #FB7185>"
+
+    with patch.dict(os.environ, {"CINEFLOW_LOGGER_BLACKLIST_FG": ""}):
+        assert format_blacklisted() == "<fg #FB7185>BLACKLISTED</fg #FB7185>"
+
+    # Valid 3-digit hex works
+    with patch.dict(os.environ, {"CINEFLOW_LOGGER_BLACKLIST_FG": "#abc"}):
+        assert format_blacklisted() == "<fg #abc>BLACKLISTED</fg #abc>"
+
+    # Invalid excluded override falls back to default FBBF24
+    with patch.dict(os.environ, {"CINEFLOW_LOGGER_EXCLUDED_FG": "XYZ-INVALID"}):
+        assert format_excluded() == "<fg #FBBF24>EXCLUDED</fg #FBBF24>"
+
+    # Invalid state color override falls back to default
+    default_requested = STATE_COLORS["Requested"]
+    with patch.dict(os.environ, {"CINEFLOW_LOGGER_STATE_REQUESTED_FG": "invalid-hex"}):
+        assert get_state_color("Requested") == f"#{default_requested}"
+        assert (
+            format_state(States.Requested)
+            == f"<fg #{default_requested}>Requested</fg #{default_requested}>"
+        )
+
+    # Valid 6-digit hex override
+    with patch.dict(os.environ, {"CINEFLOW_LOGGER_STATE_REQUESTED_FG": "00FF00"}):
+        assert get_state_color("Requested") == "#00FF00"
+
+
+def test_loguru_positional_args_safe_from_tag_injection():
+    """Verify dynamic untrusted values passed as format args are never parsed as markup."""
+    untrusted_hash = "abc<malformed_tag>123"
+    untrusted_error = "Exception: <InfringingTorrent: 403>"
+
+    logs = []
+    logger_id = logger.add(lambda msg: logs.append(msg))
+    try:
+        # Template has color tags, values passed as args
+        logger.opt(colors=True).warning(
+            f"Stream {{}} confirmed {format_blacklisted('permanently invalid/dead')} on {{}}: {{}}",
+            untrusted_hash,
+            "realdebrid",
+            untrusted_error,
+        )
+    finally:
+        logger.remove(logger_id)
+
+    assert any(untrusted_hash in line and untrusted_error in line for line in logs)
