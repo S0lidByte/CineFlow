@@ -6,12 +6,18 @@ import pytest
 
 from program.media.item import ProcessedItemType
 from program.services.downloaders.alldebrid import AllDebridDownloader
-from program.services.downloaders.models import DebridFile, TorrentContainer
+from program.services.downloaders.models import (
+    DebridFile,
+    TorrentContainer,
+    TorrentFile,
+    TorrentInfo,
+)
 from program.services.downloaders.realdebrid import RealDebridDownloader
 from program.services.downloaders.shared import (
     DebridInfringingError,
     DebridVpnBlockedError,
 )
+from program.utils.request import CircuitBreakerOpen
 from routers.secure.scrape import resolve_torrent_container
 
 
@@ -99,6 +105,58 @@ async def test_vpn_block_error_skips_fallback_probe():
         await resolve_torrent_container("deadbeef", FakeDownloader([service]))
 
     service.add_torrent.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_open_skips_fallback_and_uses_later_provider():
+    open_service = FakeService(
+        "realdebrid", CircuitBreakerOpen("api.real-debrid.com", 12.0)
+    )
+    later_service = FakeService("alldebrid")
+    later_service.add_torrent.return_value = "torrent-id"
+    later_service.get_torrent_info = Mock(
+        return_value=TorrentInfo(
+            id="torrent-id",
+            name="Movie",
+            files={
+                1: TorrentFile(
+                    id=1,
+                    path="movie.mkv",
+                    bytes=2_000_000,
+                    selected=1,
+                    download_url="https://files.example/movie.mkv",
+                )
+            },
+        )
+    )
+    later_service.get_instant_availability = Mock(return_value=None)
+
+    container, error, service = await resolve_torrent_container(
+        "deadbeef",
+        FakeDownloader([open_service, later_service]),
+        min_filesize_override=0,
+    )
+
+    assert container is not None
+    assert container.files[0].filename == "movie.mkv"
+    assert error is None
+    assert service is later_service
+    open_service.add_torrent.assert_not_called()
+    later_service.add_torrent.assert_called_once_with("deadbeef")
+
+
+@pytest.mark.asyncio
+async def test_normal_availability_miss_still_uses_fallback_probe():
+    service = FakeService("realdebrid")
+    service.add_torrent.side_effect = RuntimeError("fallback attempted")
+
+    container, error, _ = await resolve_torrent_container(
+        "deadbeef", FakeDownloader([service])
+    )
+
+    assert container is None
+    assert "fallback attempted" in error
+    service.add_torrent.assert_called_once_with("deadbeef")
 
 
 @pytest.mark.asyncio
