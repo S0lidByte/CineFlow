@@ -415,6 +415,7 @@ async def resolve_torrent_container(
                 logger.warning(
                     f"Circuit breaker OPEN for {service_key} while checking {infohash}: {e}"
                 )
+                continue
             except Exception as e:
                 service_errors.append(
                     (service_name, f"{service_key} service error: {e}")

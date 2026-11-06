@@ -60,7 +60,10 @@ CLAUDE.md
 release_manager.py
 container_data
 AGENTS.md
-docs/
+docs/*
+!docs/runbooks/
+docs/runbooks/*
+!docs/runbooks/real-debrid-egress.md
 .augment/
 .editorconfig
 

@@ -1,10 +1,20 @@
 import json
+import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
+from threading import Barrier, Event, Lock
 
 import httpx
 import pytest
+import requests
 
-from program.utils.request import CircuitBreaker, SmartResponse, SmartSession
+from program.utils.request import (
+    CircuitBreaker,
+    CircuitBreakerOpen,
+    OperationDeadlineExceeded,
+    SmartResponse,
+    SmartSession,
+)
 
 
 @pytest.fixture
@@ -197,13 +207,8 @@ def test_adapter_retries_on_500_then_success(requests_mock):
         ],
     )
     r = session.get(url)
-    # Note: requests_mock may not properly simulate HTTPAdapter retries
-    # So we'll just verify that we get a response (either 500 or 200)
-    assert r.status_code in [200, 500]
-    if r.status_code == 200:
-        assert r.data.ok is True
-    else:
-        assert r.data.err == "boom"
+    assert r.status_code == 200
+    assert r.data.ok is True
 
 
 def test_tokenbucket_waits_without_real_sleep(monkeypatch, requests_mock):
@@ -299,16 +304,451 @@ def test_circuit_breaker_opens_and_recovers(monkeypatch, requests_mock):
     br = session.breakers["cb.local"]
     assert br.state == "OPEN"
 
-    # Immediate call while OPEN → fail fast before sending HTTP
-    with pytest.raises(RuntimeError) as ei:
+    # Immediate call while OPEN → fail fast before limiter waiting or HTTP
+    limiter = session.limiters["cb.local"]
+    waits = []
+    monkeypatch.setattr(limiter, "wait", lambda **kwargs: waits.append(kwargs))
+    with pytest.raises(CircuitBreakerOpen) as ei:
         session.get(url)
-    assert "Circuit breaker OPEN" in str(ei.value)
+    assert ei.value.retry_after_seconds == 5.0
+    assert waits == []
 
     # Advance time past recovery window → HALF_OPEN
     clock.t += 6.0  # > recovery_time
     r = session.get(url)  # probe should be allowed, returns 200
     assert r.status_code == 200
     assert br.state == "CLOSED"
+
+
+def test_circuit_breaker_allows_only_one_half_open_probe(requests_mock):
+    breaker = CircuitBreaker(failure_threshold=1, recovery_time=30, name="cb.local")
+    breaker.after_request(False)
+    breaker.last_failure_time = time.monotonic() - 31
+    entered = Event()
+    release = Event()
+    calls = 0
+    calls_lock = Lock()
+
+    session = SmartSession(retries=0)
+    session.breakers["cb.local"] = breaker
+
+    class BlockingClient:
+        timeout = httpx.Timeout(5.0)
+
+        def request(self, *args, **kwargs):
+            nonlocal calls
+            with calls_lock:
+                calls += 1
+            entered.set()
+            assert release.wait(timeout=3)
+            return httpx.Response(200, request=httpx.Request("GET", args[1]))
+
+    session._client.close()
+    session._client = BlockingClient()
+    url = "https://cb.local/probe"
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(session.get, url)
+            assert entered.wait(timeout=3)
+            with pytest.raises(CircuitBreakerOpen) as blocked:
+                session.get(url)
+            assert blocked.value.retry_after_seconds is None
+            release.set()
+            assert first.result(timeout=3).status_code == 200
+    finally:
+        release.set()
+
+    assert calls == 1
+    assert breaker.state == "CLOSED"
+
+
+def test_half_open_rejected_request_refunds_rate_limit_token(monkeypatch):
+    import program.utils.request as request_mod
+
+    breaker = CircuitBreaker(failure_threshold=1, recovery_time=30, name="cb.local")
+    breaker.after_request(False)
+    breaker.last_failure_time = time.monotonic() - 31
+    session = SmartSession(
+        rate_limits={"cb.local": {"rate": 0, "capacity": 2}}, retries=0
+    )
+    session.breakers["cb.local"] = breaker
+    limiter = session.limiters["cb.local"]
+    admission_barrier = Barrier(2)
+    original_before_request = breaker.before_request
+
+    def synchronized_before_request():
+        admission_barrier.wait(timeout=3)
+        return original_before_request()
+
+    monkeypatch.setattr(breaker, "before_request", synchronized_before_request)
+    entered = Event()
+    release = Event()
+    calls = 0
+
+    class BlockingClient:
+        timeout = httpx.Timeout(5.0)
+
+        def request(self, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            entered.set()
+            assert release.wait(timeout=3)
+            return httpx.Response(200, request=httpx.Request("GET", args[1]))
+
+    session._client.close()
+    session._client = BlockingClient()
+    url = "https://cb.local/probe"
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            admitted = pool.submit(session.get, url)
+            rejected = pool.submit(session.get, url)
+            assert entered.wait(timeout=3)
+            completed, pending = wait(
+                (admitted, rejected), timeout=3, return_when=FIRST_COMPLETED
+            )
+            assert len(completed) == 1
+            rejected_future = next(iter(completed))
+            admitted_future = next(iter(pending))
+            with pytest.raises(CircuitBreakerOpen):
+                rejected_future.result()
+            assert limiter.tokens == pytest.approx(1.0)
+            release.set()
+            assert admitted_future.result(timeout=3).status_code == 200
+    finally:
+        release.set()
+
+    assert calls == 1
+
+
+def test_circuit_breaker_open_at_zero_timestamp_still_fails_fast(monkeypatch):
+    import program.utils.request as request_mod
+
+    monkeypatch.setattr(request_mod.time, "monotonic", lambda: 0.0)
+    breaker = CircuitBreaker(failure_threshold=1, recovery_time=30, name="cb.local")
+    breaker.state = "OPEN"
+    breaker.failures = 1
+    breaker.last_failure_time = 0.0
+
+    with pytest.raises(CircuitBreakerOpen):
+        breaker.before_request()
+
+
+def test_circuit_breaker_stale_success_does_not_close_new_open_generation():
+    breaker = CircuitBreaker(failure_threshold=1, name="cb.local")
+    old_permit = breaker.before_request()
+    breaker.after_request(False, breaker.before_request())
+    assert breaker.state == "OPEN"
+
+    breaker.after_request(True, old_permit)
+
+    assert breaker.state == "OPEN"
+    assert breaker.failures == 1
+
+
+def test_circuit_breaker_half_open_failure_reopens():
+    from program.utils.request import CircuitBreakerOpen
+
+    breaker = CircuitBreaker(failure_threshold=1, recovery_time=30, name="cb.local")
+    breaker.after_request(False)
+    breaker.last_failure_time = time.monotonic() - 31
+    probe_permit = breaker.before_request()
+    assert breaker.state == "HALF_OPEN"
+
+    breaker.after_request(False, probe_permit)
+
+    assert breaker.state == "OPEN"
+    with pytest.raises(CircuitBreakerOpen):
+        breaker.before_request()
+
+
+def test_session_releases_half_open_probe_after_base_exception(monkeypatch):
+    import program.utils.request as request_mod
+
+    class ProbeInterrupted(BaseException):
+        pass
+
+    clock = FakeClock(start=100.0)
+    monkeypatch.setattr(request_mod.time, "monotonic", clock.monotonic)
+    breaker = CircuitBreaker(failure_threshold=1, recovery_time=0, name="cb.local")
+    breaker.after_request(False)
+    clock.t += 1
+    session = SmartSession(retries=0)
+    session.breakers["cb.local"] = breaker
+
+    class InterruptingClient:
+        timeout = httpx.Timeout(5.0)
+
+        def request(self, *args, **kwargs):
+            raise ProbeInterrupted("probe interrupted")
+
+    session._client.close()
+    session._client = InterruptingClient()
+
+    with pytest.raises(ProbeInterrupted):
+        session.get("https://cb.local/probe")
+
+    assert breaker.state == "OPEN"
+    assert breaker.last_failure_time == clock.t
+    clock.t += 1
+    retry_permit = breaker.before_request()
+    assert retry_permit[1] is True
+
+
+@pytest.mark.parametrize(
+    ("failure", "deadline"),
+    [
+        (httpx.TimeoutException("timeout"), None),
+        (httpx.ConnectError("connection failed"), None),
+        (RuntimeError("unexpected failure"), None),
+        (httpx.TimeoutException("deadline timeout"), 102.0),
+    ],
+)
+def test_session_releases_half_open_probe_after_terminal_exception(
+    monkeypatch, failure, deadline
+):
+    import program.utils.request as request_mod
+
+    clock = FakeClock(start=100.0)
+    monkeypatch.setattr(request_mod.time, "monotonic", clock.monotonic)
+    breaker = CircuitBreaker(failure_threshold=1, recovery_time=0, name="cb.local")
+    breaker.after_request(False)
+    clock.t += 1
+    session = SmartSession(retries=0)
+    session.breakers["cb.local"] = breaker
+
+    class FailingClient:
+        timeout = httpx.Timeout(5.0)
+
+        def request(self, *args, **kwargs):
+            if deadline is not None:
+                clock.t = deadline
+            raise failure
+
+    session._client.close()
+    session._client = FailingClient()
+
+    expected_exception = (
+        OperationDeadlineExceeded
+        if isinstance(failure, httpx.TimeoutException) and deadline is not None
+        else (
+            requests.exceptions.Timeout
+            if isinstance(failure, httpx.TimeoutException)
+            else (
+                requests.exceptions.ConnectionError
+                if isinstance(failure, httpx.RequestError)
+                else RuntimeError
+            )
+        )
+    )
+    with pytest.raises(expected_exception):
+        session.get("https://cb.local/probe", operation_deadline=deadline)
+
+    assert breaker.state == "OPEN"
+    assert breaker.last_failure_time is not None
+    breaker.last_failure_time = clock.t - 1
+    retry_permit = breaker.before_request()
+    assert retry_permit[1] is True
+
+
+def test_session_releases_probe_when_operation_deadline_expires_during_retry(
+    monkeypatch,
+):
+    import program.utils.request as request_mod
+
+    clock = FakeClock(start=100.0)
+    monkeypatch.setattr(request_mod.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(request_mod.time, "sleep", clock.sleep)
+    breaker = CircuitBreaker(failure_threshold=1, recovery_time=0, name="cb.local")
+    breaker.after_request(False)
+    clock.t += 1
+    session = SmartSession(retries=1)
+    session.breakers["cb.local"] = breaker
+    session._compute_retry_delay = lambda *_: 2.0
+
+    class RetryClient:
+        timeout = httpx.Timeout(5.0)
+
+        def request(self, *args, **kwargs):
+            return httpx.Response(503, request=httpx.Request("GET", args[1]))
+
+    session._client.close()
+    session._client = RetryClient()
+
+    with pytest.raises(OperationDeadlineExceeded):
+        session.get("https://cb.local/probe", operation_deadline=102.0)
+
+    assert breaker.state == "OPEN"
+    clock.t += 1
+    retry_permit = breaker.before_request()
+    assert retry_permit[1] is True
+
+
+def test_session_releases_probe_when_operation_deadline_expires_before_dispatch(
+    monkeypatch,
+):
+    import program.utils.request as request_mod
+
+    clock = FakeClock(start=100.0)
+    monkeypatch.setattr(request_mod.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(request_mod.time, "sleep", clock.sleep)
+    breaker = CircuitBreaker(failure_threshold=1, recovery_time=0, name="cb.local")
+    breaker.after_request(False)
+    clock.t += 1
+    session = SmartSession(
+        rate_limits={"cb.local": {"rate": 1, "capacity": 1}}, retries=0
+    )
+    session.breakers["cb.local"] = breaker
+    limiter = session.limiters["cb.local"]
+    assert limiter.consume()
+
+    with pytest.raises(OperationDeadlineExceeded):
+        session.get("https://cb.local/probe", operation_deadline=101.25)
+
+    retry_permit = breaker.before_request()
+    assert retry_permit[1] is True
+
+
+def test_session_proxy_client_setup_failure_does_not_admit_probe(monkeypatch):
+    import program.utils.request as request_mod
+
+    breaker = CircuitBreaker(failure_threshold=1, recovery_time=0, name="cb.local")
+    breaker.after_request(False)
+    session = SmartSession(retries=0)
+    session.breakers["cb.local"] = breaker
+
+    def fail_client_setup(*args, **kwargs):
+        raise ValueError("client setup failed")
+
+    monkeypatch.setattr(request_mod.httpx, "Client", fail_client_setup)
+    with pytest.raises(ValueError, match="client setup failed"):
+        session.get(
+            "https://cb.local/probe",
+            proxies={"https": "http://proxy.local:3128"},
+        )
+
+    assert breaker.state == "OPEN"
+    assert breaker.last_failure_time is not None
+    breaker.last_failure_time = time.monotonic() - breaker.recovery_time - 1
+    retry_permit = breaker.before_request()
+    assert retry_permit[1] is True
+
+
+def test_session_records_probe_success_once_when_client_cleanup_fails(monkeypatch):
+    import program.utils.request as request_mod
+
+    breaker = CircuitBreaker(failure_threshold=1, recovery_time=0, name="cb.local")
+    breaker.after_request(False)
+    session = SmartSession(retries=0)
+    session.breakers["cb.local"] = breaker
+
+    class CleanupFailingClient:
+        timeout = httpx.Timeout(5.0)
+
+        def request(self, *args, **kwargs):
+            return httpx.Response(200, request=httpx.Request("GET", args[1]))
+
+        def close(self):
+            raise RuntimeError("cleanup failed")
+
+    monkeypatch.setattr(
+        request_mod.httpx, "Client", lambda *args, **kwargs: CleanupFailingClient()
+    )
+
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        session.get(
+            "https://cb.local/probe",
+            proxies={"https": "http://proxy.local:3128"},
+        )
+
+    assert breaker.state == "CLOSED"
+
+
+def test_streaming_status_retry_closes_intermediate_response(monkeypatch):
+    import program.utils.request as request_mod
+
+    responses = []
+
+    class RetryClient:
+        timeout = httpx.Timeout(5.0)
+
+        def send(self, request, **kwargs):
+            response = httpx.Response(
+                503 if not responses else 200,
+                request=request,
+                headers={"Content-Type": "application/octet-stream"},
+                stream=httpx.ByteStream(b"ok"),
+            )
+            original_close = response.close
+            response.closed_by_test = False
+
+            def close():
+                response.closed_by_test = True
+                original_close()
+
+            response.close = close
+            responses.append(response)
+            return response
+
+        def build_request(self, *args, **kwargs):
+            return httpx.Request(args[0], args[1])
+
+        def close(self):
+            pass
+
+    session = SmartSession(retries=1, backoff_factor=0)
+    session._client.close()
+    session._client = RetryClient()
+    monkeypatch.setattr(request_mod.time, "sleep", lambda _: None)
+
+    result = session.get("https://stream.local/blob", stream=True)
+
+    assert result.status_code == 200
+    assert len(responses) == 2
+    assert responses[0].closed_by_test is True
+    assert responses[1].closed_by_test is False
+    result.close()
+    assert responses[1].closed_by_test is True
+
+
+def test_streaming_proxy_response_close_closes_temporary_client(monkeypatch):
+    import program.utils.request as request_mod
+
+    clients = []
+
+    class ProxyClient:
+        timeout = httpx.Timeout(5.0)
+
+        def __init__(self, *args, **kwargs):
+            self.closed_by_test = False
+            clients.append(self)
+
+        def build_request(self, *args, **kwargs):
+            return httpx.Request(args[0], args[1])
+
+        def send(self, request, **kwargs):
+            return httpx.Response(
+                200,
+                request=request,
+                headers={"Content-Type": "application/octet-stream"},
+                stream=httpx.ByteStream(b"ok"),
+            )
+
+        def close(self):
+            self.closed_by_test = True
+
+    session = SmartSession(retries=0)
+    monkeypatch.setattr(request_mod.httpx, "Client", ProxyClient)
+
+    response = session.get(
+        "https://proxy.local/blob",
+        stream=True,
+        proxies={"https": "http://proxy.local:3128"},
+    )
+
+    assert len(clients) == 1
+    assert clients[0].closed_by_test is False
+    response.close()
+    assert clients[0].closed_by_test is True
 
 
 def test_streaming_iter_content_and_no_error_with_stream(requests_mock):
