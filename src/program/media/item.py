@@ -250,8 +250,10 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
             from program.media.state_matrix import can_transition
 
             if not can_transition(previous_state, new_state):
-                logger.warning(
-                    f"Non-standard state transition detected: {previous_state.name} -> {new_state.name} for {self.log_string}"
+                from program.utils.logging import escape_loguru_tags, format_state
+
+                logger.opt(colors=True).warning(
+                    f"Non-standard state transition detected: {format_state(previous_state)} -> {format_state(new_state)} for {escape_loguru_tags(self.log_string)}"
                 )
 
             try:
@@ -291,8 +293,10 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
             if stream:
                 self.blacklist_stream(stream)
 
-                logger.debug(
-                    f"Blacklisted stream {stream.infohash} for {self.log_string}"
+                from program.utils.logging import escape_loguru_tags, format_blacklisted
+
+                logger.opt(colors=True).debug(
+                    f"{format_blacklisted('Blacklisted')} stream {stream.infohash} for {escape_loguru_tags(self.log_string)}"
                 )
 
                 return True
@@ -392,7 +396,11 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
                 return True
 
         target.blacklisted_streams.append(stream)
-        logger.debug(f"Blacklisted stream {stream.infohash} for {target.log_string}")
+        from program.utils.logging import escape_loguru_tags, format_blacklisted
+
+        logger.opt(colors=True).debug(
+            f"{format_blacklisted('Blacklisted')} stream {stream.infohash} for {escape_loguru_tags(target.log_string)}"
+        )
         return True
 
     def unblacklist_stream(self, stream: Stream) -> None:
@@ -415,8 +423,10 @@ class MediaItem(MappedAsDataclass, Base, kw_only=True):
             if stream not in target.streams:
                 target.streams.append(stream)
 
-            logger.debug(
-                f"Unblacklisted stream {stream.infohash} for {target.log_string}"
+            from program.utils.logging import escape_loguru_tags
+
+            logger.opt(colors=True).debug(
+                f"<fg #34D399>Unblacklisted</fg #34D399> stream {stream.infohash} for {escape_loguru_tags(target.log_string)}"
             )
 
     def schedule(

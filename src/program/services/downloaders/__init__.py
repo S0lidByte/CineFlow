@@ -33,6 +33,11 @@ from program.services.downloaders.shared import (
     sort_streams_by_quality,
 )
 from program.settings import settings_manager
+from program.utils.logging import (
+    escape_loguru_tags,
+    format_blacklisted,
+    format_excluded,
+)
 from program.utils.request import CircuitBreakerOpen
 
 from .alldebrid import AllDebridDownloader
@@ -203,8 +208,8 @@ class Downloader(Runner[None, DownloaderBase]):
                         self._service_cooldowns[service.key] = (
                             datetime.now() + cooldown_duration
                         )
-                        logger.warning(
-                            f"Circuit breaker OPEN for {service.key}, trying next service for stream {stream.infohash}"
+                        logger.opt(colors=True).warning(
+                            f"Circuit breaker <fg #FBBF24>OPEN</fg #FBBF24> for {service.key}, trying next service for stream {stream.infohash}"
                         )
                         stream_hit_circuit_breaker = True
                         hit_circuit_breaker = True
@@ -217,8 +222,8 @@ class Downloader(Runner[None, DownloaderBase]):
                         break
 
                     except TorrentDeadOrCorruptError as e:
-                        logger.warning(
-                            f"Stream {stream.infohash} confirmed permanently invalid/dead on {service.key}: {e}"
+                        logger.opt(colors=True).warning(
+                            f"Stream {stream.infohash} confirmed {format_blacklisted('permanently invalid/dead')} on {service.key}: {escape_loguru_tags(e)}"
                         )
                         stream_permanent_rejections.append(e)
 
@@ -232,8 +237,8 @@ class Downloader(Runner[None, DownloaderBase]):
                         continue
 
                     except DebridInfringingError as e:
-                        logger.warning(
-                            f"Stream {stream.infohash} blocked as infringing on {service.key}: {e}"
+                        logger.opt(colors=True).warning(
+                            f"Stream {stream.infohash} {format_excluded('blocked as infringing')} on {service.key}: {escape_loguru_tags(e)}"
                         )
                         stream_infringing_rejections.append(e)
 
@@ -312,17 +317,17 @@ class Downloader(Runner[None, DownloaderBase]):
                         stream_hit_circuit_breaker
                         and len(self.initialized_services) == 1
                     ):
-                        logger.debug(
-                            f"Stream {stream.infohash} hit circuit breaker on single provider, will retry after cooldown"
+                        logger.opt(colors=True).debug(
+                            f"Stream {stream.infohash} hit circuit breaker on single provider, will retry after {format_excluded('cooldown')}"
                         )
                     elif (
                         available_services
                         and len(available_services) == len(self.initialized_services)
                         and len(stream_permanent_rejections) == len(available_services)
                     ):
-                        logger.debug(
+                        logger.opt(colors=True).debug(
                             f"Stream {stream.infohash} confirmed permanently invalid on all "
-                            f"{len(available_services)} available service(s), blacklisting"
+                            f"{len(available_services)} available service(s), {format_blacklisted('blacklisting')}"
                         )
                         item.blacklist_stream(stream)
                         if item_key in self._excluded_stream_hashes:
@@ -335,9 +340,9 @@ class Downloader(Runner[None, DownloaderBase]):
                             if stream_infringing_rejections
                             else "uncached, preference, or non-matching files"
                         )
-                        logger.debug(
+                        logger.opt(colors=True).debug(
                             f"Stream {stream.infohash} failed non-permanently on available service(s) "
-                            f"({reason}); excluding locally without mutating persistent relationship"
+                            f"({reason}); {format_excluded('excluding locally')} without mutating persistent relationship"
                         )
                         empty_set: set[str] = set()
                         self._excluded_stream_hashes.setdefault(
