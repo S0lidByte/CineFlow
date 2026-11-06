@@ -118,7 +118,24 @@ def test_circuit_breaker_sets_cooldown_and_reschedules(downloader, mock_item):
     expected = datetime.now() + timedelta(seconds=25)
     assert abs((cooldown - expected).total_seconds()) < 5
 
-    # Should reschedule
+
+def test_circuit_breaker_single_provider_emits_cooldown_log(downloader, mock_item):
+    """When a single provider hits CB, it logs cooldown retry and does NOT blacklist the stream."""
+    cb_exc = CircuitBreakerOpen("api.real-debrid.com", retry_after_seconds=30.0)
+
+    logs = []
+    logger_id = logger.add(lambda msg: logs.append(str(msg)))
+    try:
+        with patch.object(downloader, "validate_stream_on_service", side_effect=cb_exc):
+            results = list(downloader.run(mock_item))
+    finally:
+        logger.remove(logger_id)
+
+    mock_item.blacklist_stream.assert_not_called()
+    assert any(
+        "hit circuit breaker on single provider, will retry after" in log
+        for log in logs
+    )
     assert len(results) == 1
     assert results[0].run_at is not None
 

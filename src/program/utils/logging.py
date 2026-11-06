@@ -1,6 +1,7 @@
 """Logging utils"""
 
 import os
+import re
 import sys
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
@@ -14,6 +15,33 @@ if TYPE_CHECKING:
     from loguru import HandlerConfig
 
 last_logs_cleaned_time: datetime | None = None
+
+
+STATE_COLORS: dict[str, str] = {
+    "Unknown": "94A3B8",
+    "Unreleased": "A78BFA",
+    "Ongoing": "38BDF8",
+    "Requested": "F59E0B",
+    "Indexed": "38BDF8",
+    "Scraped": "818CF8",
+    "Downloaded": "34D399",
+    "Symlinked": "C084FC",
+    "Completed": "10B981",
+    "PartiallyCompleted": "FBBF24",
+    "Paused": "94A3B8",
+    "Failed": "F87171",
+}
+
+HEX_COLOR_PATTERN = re.compile(r"^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$")
+
+
+def _clean_hex_color(color: str | None, default: str) -> str:
+    """Return a validated hex color string without '#' or default if invalid."""
+    if color:
+        clean = color.strip().lstrip("#")
+        if HEX_COLOR_PATTERN.fullmatch(clean):
+            return clean
+    return default.strip().lstrip("#")
 
 
 def setup_logger(
@@ -38,7 +66,7 @@ def setup_logger(
         if icon is None:
             icon = os.getenv(f"RIVEN_LOGGER_{name}_ICON", default_icon)
 
-        color_clean = (color if color != "" else default_color).strip().lstrip("#")
+        color_clean = _clean_hex_color(color, default_color)
         return f"<fg #{color_clean}>", (icon if icon != "" else default_icon)
 
     # TRACE: 5
@@ -190,22 +218,6 @@ def log_cleaner():
         logger.error(f"Failed to clean old logs: {e}")
 
 
-STATE_COLORS: dict[str, str] = {
-    "Unknown": "94A3B8",
-    "Unreleased": "A78BFA",
-    "Ongoing": "38BDF8",
-    "Requested": "F59E0B",
-    "Indexed": "38BDF8",
-    "Scraped": "818CF8",
-    "Downloaded": "34D399",
-    "Symlinked": "C084FC",
-    "Completed": "10B981",
-    "PartiallyCompleted": "FBBF24",
-    "Paused": "94A3B8",
-    "Failed": "F87171",
-}
-
-
 def get_state_color(name: str) -> str:
     """Get the color hex for a lifecycle state, with env override support."""
     default = STATE_COLORS.get(name, "94A3B8")
@@ -214,8 +226,7 @@ def get_state_color(name: str) -> str:
         override = os.getenv(f"CINEFLOW_LOGGER_{name.upper()}_FG")
     if override is None:
         override = os.getenv(f"RIVEN_LOGGER_{name.upper()}_FG", default)
-    clean = override.strip() if override else default
-    return f"#{clean.lstrip('#')}"
+    return f"#{_clean_hex_color(override, default)}"
 
 
 def format_state(state: object) -> str:
@@ -229,18 +240,22 @@ def format_state(state: object) -> str:
 
 def escape_loguru_tags(text: object) -> str:
     """Escape angle brackets so Loguru opt(colors=True) does not parse arbitrary text as color tags."""
-    return str(text).replace("<", r"\<")
+    return re.sub(
+        r"(\\*)(</?(?:[fb]g\s)?[^<>\s]*>)",
+        lambda match: match.group(1) * 2 + "\\" + match.group(2),
+        str(text),
+    )
 
 
 def format_blacklisted(text: str = "BLACKLISTED") -> str:
     """Format permanent blacklisted event tag with WCAG AA compliant rose hex."""
-    color = os.getenv("CINEFLOW_LOGGER_BLACKLIST_FG", "FB7185").strip().lstrip("#")
+    color = _clean_hex_color(os.getenv("CINEFLOW_LOGGER_BLACKLIST_FG"), "FB7185")
     return f"<fg #{color}>{text}</fg #{color}>"
 
 
 def format_excluded(text: str = "EXCLUDED") -> str:
     """Format temporary exclusion event tag with WCAG AA compliant amber hex."""
-    color = os.getenv("CINEFLOW_LOGGER_EXCLUDED_FG", "FBBF24").strip().lstrip("#")
+    color = _clean_hex_color(os.getenv("CINEFLOW_LOGGER_EXCLUDED_FG"), "FBBF24")
     return f"<fg #{color}>{text}</fg #{color}>"
 
 
