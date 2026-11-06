@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.45.4](https://github.com/S0lidByte/CineFlow/compare/v1.45.3...v1.45.4) (2026-11-06)
+
+
+### Bug Fixes
+
+* **ci:** add labeler configuration and checkout step ([be1789c](https://github.com/S0lidByte/CineFlow/commit/be1789c5a061022a64065fb2ff896b5c215ffa4b))
+* **downloaders:** harden Real-Debrid circuit breaker recovery ([#348](https://github.com/S0lidByte/CineFlow/issues/348)) ([5e015ab](https://github.com/S0lidByte/CineFlow/commit/5e015abe5410dd6e130b1d69a4d9a5a3a4bc43f0))
+
 ## [1.45.3](https://github.com/S0lidByte/CineFlow/compare/v1.45.2...v1.45.3) (2026-10-24)
 
 
