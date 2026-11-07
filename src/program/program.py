@@ -113,6 +113,9 @@ class Program(threading.Thread):
         self.outbox_dispatcher.register_handler(
             "retry_library_item", self._handle_retry_library_item
         )
+        self.outbox_dispatcher.register_handler(
+            "realdebrid.poll_transfer", self._handle_realdebrid_poll_transfer
+        )
 
         if self.enable_trace:
             import tracemalloc
@@ -656,6 +659,19 @@ class Program(threading.Thread):
             logger.info(
                 f"RetryLibrary: EventManager skipped/deduped retry event for MediaItem ID {item_id}"
             )
+
+    def _handle_realdebrid_poll_transfer(
+        self, op: OperationLedger, payload: dict[str, Any]
+    ) -> None:
+        """
+        Durable outbox worker handler for 'realdebrid.poll_transfer' operations.
+        Polls active transfer and ingests into CineFlow once cloud download completes.
+        """
+        from program.services.downloaders.realdebrid_transfers import (
+            rd_transfers_service,
+        )
+
+        rd_transfers_service.poll_and_ingest_transfers()
 
     def stop(self):
         if not self.initialized:

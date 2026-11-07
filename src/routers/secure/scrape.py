@@ -914,6 +914,12 @@ async def start_manual_session(
         Literal["movie", "tv"] | None,
         Query(description="The media type"),
     ] = None,
+    allow_uncached: Annotated[
+        bool,
+        Query(
+            description="Allow queuing uncached torrents for Real-Debrid cloud download"
+        ),
+    ] = False,
 ) -> StartSessionResponse:
     scraping_session_manager.cleanup_expired(background_tasks)
 
@@ -975,6 +981,47 @@ async def start_manual_session(
             ) from e
 
         if not container or not container.cached:
+            if allow_uncached and used_service and hasattr(used_service, "add_torrent"):
+                from program.services.downloaders.realdebrid_transfers import (
+                    rd_transfers_service,
+                )
+
+                submit_res = rd_transfers_service.submit_transfer(
+                    magnet_or_infohash=magnet,
+                    media_item_id=item.id,
+                )
+                tid = submit_res.transfer_id
+                info = used_service.get_torrent_info(tid)
+                session_obj = scraping_session_manager.create_session(
+                    item.id,
+                    info_hash,
+                    media_type=media_type,
+                    imdb_id=imdb_id,
+                    tmdb_id=tmdb_id,
+                    tvdb_id=tvdb_id,
+                    downloader_service=used_service.key,
+                )
+                scraping_session_manager.update_session(
+                    session_id=session_obj.id,
+                    torrent_id=tid,
+                    torrent_info=info,
+                    containers=None,
+                )
+                return StartSessionResponse(
+                    message=f"Uncached torrent queued for cloud download (status: {info.status})",
+                    session_id=session_obj.id,
+                    item_id=item.id,
+                    media_type=media_type,
+                    tmdb_id=tmdb_id,
+                    tvdb_id=tvdb_id,
+                    imdb_id=imdb_id,
+                    torrent_id=tid,
+                    torrent_info=info,
+                    containers=None,
+                    parsed_files=[],
+                    expires_at=session_obj.expires_at.isoformat(),
+                )
+
             raise HTTPException(
                 status_code=400,
                 detail=error or "Torrent is not cached, please try another stream",

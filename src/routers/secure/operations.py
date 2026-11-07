@@ -17,6 +17,12 @@ from program.contracts.operation_ledger import OperationLedger
 from program.contracts.operation_timeline import serialize_operation_timeline_item
 from program.db.db import db_session
 from program.managers.sse_manager import sse_manager
+from program.services.downloaders.realdebrid_transfers import (
+    RealDebridTransferDetail,
+    RealDebridTransfersResponse,
+    TransferActionResponse,
+    rd_transfers_service,
+)
 
 router = APIRouter(
     prefix="/operations",
@@ -236,3 +242,117 @@ async def retry_operation_timeline_item(
             message="Operation re-queued for execution.",
             operation=_to_redacted_item(retried),
         )
+
+
+@router.get(
+    "/realdebrid/transfers",
+    operation_id="list_realdebrid_transfers",
+    response_model=RealDebridTransfersResponse,
+)
+async def list_realdebrid_transfers(
+    status: Annotated[
+        str | None,
+        Query(
+            description="Filter by transfer status (all, active, downloading, queued, downloaded, failed)"
+        ),
+    ] = None,
+    search: Annotated[
+        str | None,
+        Query(description="Search transfers by filename, infohash, or media title"),
+    ] = None,
+    force_refresh: Annotated[
+        bool,
+        Query(
+            description="Bypass short-lived cache and fetch fresh state from Real-Debrid"
+        ),
+    ] = False,
+) -> RealDebridTransfersResponse:
+    """List Real-Debrid transfers with CineFlow correlation and summary statistics."""
+    return rd_transfers_service.get_transfers(
+        force_refresh=force_refresh,
+        status=status,
+        search=search,
+    )
+
+
+@router.get(
+    "/realdebrid/transfers/{transfer_id}",
+    operation_id="get_realdebrid_transfer_detail",
+    response_model=RealDebridTransferDetail,
+)
+async def get_realdebrid_transfer_detail(
+    transfer_id: Annotated[str, Path(description="The Real-Debrid torrent ID")],
+) -> RealDebridTransferDetail:
+    """Get detailed information and file breakdown for a specific Real-Debrid transfer."""
+    return rd_transfers_service.get_transfer_detail(transfer_id)
+
+
+@router.post(
+    "/realdebrid/transfers/{transfer_id}/cancel",
+    operation_id="cancel_realdebrid_transfer",
+    response_model=TransferActionResponse,
+    dependencies=[Depends(require_role("platform:admin"))],
+)
+async def cancel_realdebrid_transfer(
+    transfer_id: Annotated[
+        str, Path(description="The Real-Debrid torrent ID to cancel")
+    ],
+) -> TransferActionResponse:
+    """Safely cancel an active CineFlow-managed Real-Debrid transfer and update outbox ledger."""
+    return rd_transfers_service.cancel_transfer(transfer_id)
+
+
+@router.post(
+    "/realdebrid/transfers/{transfer_id}/retry",
+    operation_id="retry_realdebrid_transfer",
+    response_model=TransferActionResponse,
+    dependencies=[Depends(require_role("platform:admin"))],
+)
+async def retry_realdebrid_transfer(
+    transfer_id: Annotated[
+        str, Path(description="The Real-Debrid torrent ID to retry")
+    ],
+) -> TransferActionResponse:
+    """Retry a failed CineFlow-managed transfer and re-queue corresponding operation."""
+    return rd_transfers_service.retry_transfer(transfer_id)
+
+
+class SubmitTransferRequest(BaseModel):
+    magnet: str
+    media_item_id: int | None = None
+
+
+class PollTransfersResponse(BaseModel):
+    polled: int
+    ingested: int
+
+
+@router.post(
+    "/realdebrid/transfers/submit",
+    operation_id="submit_realdebrid_transfer",
+    response_model=TransferActionResponse,
+    dependencies=[Depends(require_role("platform:admin"))],
+)
+async def submit_realdebrid_transfer(
+    request: SubmitTransferRequest,
+) -> TransferActionResponse:
+    """Submit a magnet or infohash to Real-Debrid and track it in CineFlow."""
+    return rd_transfers_service.submit_transfer(
+        magnet_or_infohash=request.magnet,
+        media_item_id=request.media_item_id,
+    )
+
+
+@router.post(
+    "/realdebrid/transfers/poll",
+    operation_id="poll_realdebrid_transfers",
+    response_model=PollTransfersResponse,
+    dependencies=[Depends(require_role("platform:admin"))],
+)
+async def poll_realdebrid_transfers() -> PollTransfersResponse:
+    """Trigger an immediate poll and completion ingestion sweep for active transfers."""
+    result = rd_transfers_service.poll_and_ingest_transfers()
+    return PollTransfersResponse(
+        polled=result.get("polled", 0),
+        ingested=result.get("ingested", 0),
+    )
