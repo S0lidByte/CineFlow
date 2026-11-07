@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta
 
 from loguru import logger
@@ -22,6 +23,7 @@ from program.services.downloaders.models import (
     NoMatchingFilesException,
     NotCachedException,
     TorrentContainer,
+    TorrentContentMismatchException,
     TorrentInfo,
     UserInfo,
 )
@@ -123,6 +125,7 @@ class Downloader(Runner[None, DownloaderBase]):
             return
 
         download_success = False
+        successful_service: DownloaderBase | None = None
 
         # Track if we hit circuit breaker on any service
         hit_circuit_breaker = False
@@ -155,6 +158,12 @@ class Downloader(Runner[None, DownloaderBase]):
                 stream_infringing_rejections: list[Exception] = []
 
                 for service in available_services:
+                    if (
+                        service.key in self._service_cooldowns
+                        and self._service_cooldowns[service.key] > datetime.now()
+                    ):
+                        continue
+
                     logger.debug(
                         f"Trying stream {stream.infohash} on {service.key} for {item.log_string}"
                     )
@@ -191,6 +200,7 @@ class Downloader(Runner[None, DownloaderBase]):
                             )
 
                             download_success = True
+                            successful_service = service
                             stream_failed_on_all_services = False
 
                             break
@@ -219,8 +229,8 @@ class Downloader(Runner[None, DownloaderBase]):
                         # We want to retry this stream after cooldown
                         if len(self.initialized_services) == 1:
                             stream_failed_on_all_services = False
-                        # Break out of service loop — all subsequent streams will also fail on this service
-                        break
+                        # Continue to other initialized services for this stream.
+                        continue
 
                     except TorrentDeadOrCorruptError as e:
                         logger.opt(colors=True).warning(
@@ -262,6 +272,17 @@ class Downloader(Runner[None, DownloaderBase]):
                         logger.debug(
                             f"Stream {stream.infohash} has no matching files for {item.log_string} on {service.key}: {e}"
                         )
+                        if isinstance(e, TorrentContentMismatchException):
+                            stream_permanent_rejections.append(e)
+                            if download_result and download_result.id:
+                                try:
+                                    service.delete_torrent(download_result.id)
+                                except Exception as del_e:
+                                    logger.debug(
+                                        f"Failed to delete wrong-content torrent "
+                                        f"{stream.infohash} on {service.key}: {del_e}"
+                                    )
+                            continue
 
                         if download_result and download_result.id:
                             try:
@@ -290,35 +311,32 @@ class Downloader(Runner[None, DownloaderBase]):
                                 )
                         continue
 
-                # If stream succeeded on any service, we're done
+                # If stream succeeded on any service, stop candidate selection.
                 if download_success:
                     self._excluded_stream_hashes.pop(item_key, None)
-                    # Add probed data if required
+                    # Add probed data if required; analysis failure must not cause
+                    # a later candidate to overwrite the successful media entry.
                     if self.subtitles_enabled:
                         from program.services.media_analysis import (
                             media_analysis_service,
                         )
 
                         if media_analysis_service.should_submit(item):
-                            success = media_analysis_service.run(item)
-
-                            if success:
+                            if media_analysis_service.run(item):
                                 logger.debug(
                                     f"Media analysis completed for {item.log_string}"
                                 )
-                                break
                             else:
                                 logger.error(
                                     f"Failed to analyze media file for {item.log_string}"
                                 )
-                    else:
-                        break
+                    break
 
                 # Classification of stream failure outcome:
-                # Only blacklist if ALL initialized services explicitly confirmed permanent failure
-                # (e.g., dead torrent, invalid infohash, infringing / removed content, corrupt metadata).
-                # Inconclusive failures (uncached, preferences, no matching files for this episode,
-                # timeouts, rate limits) must NEVER permanently blacklist the stream.
+                # Only blacklist when every initialized provider explicitly confirms
+                # the torrent itself is dead/corrupt. Infringing/DMCA, uncached,
+                # preference, no matching file, timeout, and rate-limit outcomes are
+                # provider- or item-specific and must not poison the global candidate.
                 if stream_hit_circuit_breaker and len(self.initialized_services) == 1:
                     logger.opt(colors=True).debug(
                         f"Stream {{}} hit circuit breaker on single provider, will retry after {format_excluded('cooldown')}",
@@ -432,8 +450,10 @@ class Downloader(Runner[None, DownloaderBase]):
                 )
                 yield RunnerResult(media_items=[item], run_at=next_attempt)
         else:
-            # Clear service cooldowns on successful download
-            self._service_cooldowns.clear()
+            # A provider succeeding does not reset cooldowns for other providers.
+            # Expired entries are ignored when available_services is computed.
+            if successful_service is not None:
+                self._service_cooldowns.pop(successful_service.key, None)
 
             yield RunnerResult(media_items=[item])
 
@@ -532,28 +552,102 @@ class Downloader(Runner[None, DownloaderBase]):
                     pass
 
             found = False
+            identity_mismatch = False
             files = download_result.container.files
+            parsed_files: list[tuple[DebridFile, ParsedData]] = []
+            for file in files:
+                try:
+                    assert file.filename
+                    parsed_files.append((file, parse_filename(file.filename)))
+                except Exception:
+                    continue
+
+            if isinstance(item, Movie):
+                movie_files = [pair for pair in parsed_files if pair[1].type == "movie"]
+                identity_results = [
+                    self._file_matches_item_identity(item, data)
+                    for _, data in movie_files
+                ]
+                movie_candidates = [
+                    pair
+                    for pair, matches in zip(movie_files, identity_results, strict=True)
+                    if matches is True
+                ]
+                has_unknown_identity = any(
+                    matches is None for matches in identity_results
+                )
+                identity_mismatch = bool(
+                    movie_files and not movie_candidates and not has_unknown_identity
+                )
+                item_year = getattr(item, "year", None)
+
+                if item_year and movie_candidates:
+                    dated_candidates = [
+                        pair for pair in movie_candidates if pair[1].year is not None
+                    ]
+                    yearless_candidates = [
+                        pair for pair in movie_candidates if pair[1].year is None
+                    ]
+                    within_tolerance = [
+                        pair
+                        for pair in dated_candidates
+                        if abs(pair[1].year - item_year) <= 1
+                    ]
+                    if within_tolerance:
+                        best_distance = min(
+                            abs(pair[1].year - item_year) for pair in within_tolerance
+                        )
+                        movie_candidates = [
+                            pair
+                            for pair in within_tolerance
+                            if abs(pair[1].year - item_year) == best_distance
+                        ]
+                    elif dated_candidates and yearless_candidates:
+                        # A title-matching yearless file cannot prove which
+                        # same-title edition it contains; keep it non-permanent.
+                        movie_candidates = yearless_candidates
+                    elif dated_candidates:
+                        identity_mismatch = True
+                        movie_candidates = []
+                    else:
+                        movie_candidates = movie_candidates[:1]
+
+                # Exact/closest-year candidates have priority; never let a later
+                # sequel/remaster overwrite the file already matched to this movie.
+                parsed_files = movie_candidates[:1]
+            elif isinstance(item, (Show, Season, Episode)):
+                parsed_files = [
+                    (file, data)
+                    for file, data in parsed_files
+                    if data.episodes
+                    and not (0 in data.episodes and len(data.episodes) == 1)
+                    and not (data.seasons and data.seasons[0] == 0)
+                ]
 
             # Track episodes we've already processed to avoid duplicates
             processed_episode_ids = set[str]()
 
-            for file in files:
-                try:
-                    assert file.filename
-
-                    file_data = parse_filename(file.filename)
-                except Exception:
+            for file, file_data in parsed_files:
+                if isinstance(item, (Show, Season, Episode)) and (
+                    not file_data.episodes
+                    or 0 in file_data.episodes
+                    and len(file_data.episodes) == 1
+                    or file_data.seasons
+                    and file_data.seasons[0] == 0
+                ):
                     continue
 
-                if isinstance(item, (Show, Season, Episode)):
-                    if (
-                        not file_data.episodes
-                        or 0 in file_data.episodes
-                        and len(file_data.episodes) == 1
-                        or file_data.seasons
-                        and file_data.seasons[0] == 0
-                    ):
-                        continue
+                if not isinstance(item, Movie) and not self._file_matches_item_identity(
+                    item, file_data
+                ):
+                    identity_mismatch = True
+                    logger.debug(
+                        "Skipping debrid file that does not match media identity: "
+                        f"item={item.log_string!r} year={getattr(item, 'year', None)!r} "
+                        f"file={file.filename!r} parsed_title={file_data.parsed_title!r} "
+                        f"parsed_year={file_data.year!r}"
+                    )
+                    continue
 
                 if self.match_file_to_item(
                     item,
@@ -567,10 +661,49 @@ class Downloader(Runner[None, DownloaderBase]):
                 ):
                     found = True
 
+            if not found and identity_mismatch:
+                raise TorrentContentMismatchException(
+                    f"Provider files do not match requested media identity for "
+                    f"{item.log_string} ({item.id})"
+                )
+
             return found
         except Exception as e:
             logger.debug(f"update_item_attributes: exception for item {item.id}: {e}")
             raise
+
+    @staticmethod
+    def _file_matches_item_identity(
+        item: MediaItem, file_data: ParsedData
+    ) -> bool | None:
+        """Return title identity match, mismatch, or unknown when title metadata is absent."""
+        if file_data.type != "movie" or isinstance(item, (Show, Season, Episode)):
+            return True
+
+        parsed_title = getattr(file_data, "parsed_title", None)
+        expected_title = getattr(item, "top_title", None) or getattr(item, "title", "")
+        if not parsed_title or not expected_title:
+            return None
+
+        from program.utils.title_normalizer import normalize_title
+
+        parsed_normalized = normalize_title(parsed_title)
+        expected_names = [expected_title]
+        try:
+            expected_names.extend(
+                name
+                for aliases in (item.get_aliases() or {}).values()
+                for name in aliases
+            )
+        except (AttributeError, TypeError):
+            pass
+
+        expected_normalized = {normalize_title(name) for name in expected_names if name}
+        parsed_identity = re.sub(r"^(?:the|a|an)\s+", "", parsed_normalized)
+        expected_identities = {
+            re.sub(r"^(?:the|a|an)\s+", "", title) for title in expected_normalized
+        }
+        return parsed_identity in expected_identities
 
     def match_file_to_item(
         self,
@@ -939,7 +1072,16 @@ class Downloader(Runner[None, DownloaderBase]):
             return False
 
         # 4. Update item attributes (same as standard flow)
-        if self.update_item_attributes(item, result, service):
+        try:
+            matched = self.update_item_attributes(item, result, service)
+        except NoMatchingFilesException as e:
+            logger.warning(
+                f"START_MANUAL_DOWNLOAD: selected files do not match "
+                f"{item.log_string}: {e}"
+            )
+            return False
+
+        if matched:
             # Store state - Manual download completes the 'Downloader' phase, so we are now Downloaded
             item.store_state(States.Downloaded)
             logger.info(

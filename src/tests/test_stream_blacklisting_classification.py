@@ -14,12 +14,14 @@ from program.services.downloaders.models import (
     DownloadedTorrent,
     NoMatchingFilesException,
     TorrentContainer,
+    TorrentContentMismatchException,
     TorrentInfo,
 )
 from program.services.downloaders.shared import (
     DebridInfringingError,
     TorrentDeadOrCorruptError,
 )
+from program.utils.request import CircuitBreakerOpen
 
 
 @pytest.fixture
@@ -175,6 +177,41 @@ def test_dead_or_corrupt_torrent_is_blacklisted(mock_downloader):
     assert stream not in movie.streams
 
 
+def test_content_mismatch_is_permanent_bad_candidate(mock_downloader):
+    """A cached torrent serving another movie is not valid for this media item."""
+    movie = _make_movie()
+    stream = _make_stream("wrongcontent555")
+    movie.streams = [stream]
+    movie.blacklist_stream = Mock()
+
+    container = SimpleNamespace(files=[])
+    download_result = SimpleNamespace(id="torrent-1", container=container)
+    with (
+        patch.object(
+            mock_downloader,
+            "validate_stream_on_service",
+            return_value=container,
+        ),
+        patch.object(
+            mock_downloader,
+            "download_cached_stream_on_service",
+            return_value=download_result,
+        ),
+        patch.object(
+            mock_downloader,
+            "update_item_attributes",
+            side_effect=TorrentContentMismatchException("wrong movie"),
+        ),
+        patch(
+            "program.services.downloaders.sort_streams_by_quality",
+            return_value=[stream],
+        ),
+    ):
+        list(mock_downloader.run(movie))
+
+    movie.blacklist_stream.assert_called_once_with(stream)
+
+
 def test_infringing_torrent_is_not_blacklisted(mock_downloader):
     """Infringing or DMCA removed content is provider-specific and must NOT trigger permanent blacklisting."""
     movie = _make_movie()
@@ -211,6 +248,101 @@ def test_single_provider_infringing_torrent_excluded_locally_without_mutating_re
 
     movie.blacklist_stream.assert_not_called()
     assert stream not in movie.blacklisted_streams
+
+
+@pytest.mark.parametrize(
+    "should_submit,analysis_result",
+    [(False, False), (True, False)],
+)
+def test_successful_candidate_is_not_overwritten_when_analysis_skips_or_fails(
+    mock_downloader, should_submit, analysis_result
+):
+    movie = _make_movie()
+    first = _make_stream("subtitlefirst111")
+    second = _make_stream("subtitlesecond222")
+    movie.streams = [first, second]
+    mock_downloader.subtitles_enabled = True
+    container = SimpleNamespace(files=[])
+    download = SimpleNamespace(id="download", container=container)
+    with (
+        patch.object(
+            mock_downloader, "validate_stream_on_service", return_value=container
+        ) as validate,
+        patch.object(
+            mock_downloader, "download_cached_stream_on_service", return_value=download
+        ),
+        patch.object(mock_downloader, "update_item_attributes", return_value=True),
+        patch(
+            "program.services.downloaders.sort_streams_by_quality",
+            return_value=[first, second],
+        ),
+        patch(
+            "program.services.media_analysis.media_analysis_service.should_submit",
+            return_value=should_submit,
+        ),
+        patch(
+            "program.services.media_analysis.media_analysis_service.run",
+            return_value=analysis_result,
+        ) as analyze,
+    ):
+        list(mock_downloader.run(movie))
+
+    assert validate.call_count == 1
+    assert validate.call_args.args[0] is first
+    if should_submit:
+        analyze.assert_called_once_with(movie)
+    else:
+        analyze.assert_not_called()
+
+
+def test_multi_service_circuit_breaker_fails_over_to_healthy_provider():
+    with patch.object(Downloader, "__init__", lambda *_: None):
+        dl = Downloader()
+        dl.initialized = True
+        blocked = Mock()
+        blocked.key = "realdebrid"
+        blocked.initialized = True
+        healthy = Mock()
+        healthy.key = "alldebrid"
+        healthy.initialized = True
+        dl.services = {type(blocked): blocked, type(healthy): healthy}
+        dl.initialized_services = [blocked, healthy]
+        dl.service = blocked
+        dl._service_cooldowns = {}
+        dl._excluded_stream_hashes = {}
+        dl.subtitles_enabled = False
+
+        movie = _make_movie()
+        stream = _make_stream("failover888")
+        movie.streams = [stream]
+        movie.blacklist_stream = Mock()
+        container = SimpleNamespace(files=[])
+        download = SimpleNamespace(id="ok", container=container)
+
+        def validate(_stream, _item, service):
+            if service.key == "realdebrid":
+                raise CircuitBreakerOpen("rd", retry_after_seconds=60)
+            return container
+
+        with (
+            patch.object(
+                dl, "validate_stream_on_service", side_effect=validate
+            ) as validate_mock,
+            patch.object(
+                dl, "download_cached_stream_on_service", return_value=download
+            ),
+            patch.object(dl, "update_item_attributes", return_value=True),
+            patch(
+                "program.services.downloaders.sort_streams_by_quality",
+                return_value=[stream],
+            ),
+        ):
+            list(dl.run(movie))
+
+        assert validate_mock.call_count == 2
+        assert validate_mock.call_args_list[0].args[2] is blocked
+        assert validate_mock.call_args_list[1].args[2] is healthy
+        movie.blacklist_stream.assert_not_called()
 
 
 def test_multi_service_requires_all_services_permanent_rejection():

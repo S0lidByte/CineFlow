@@ -356,7 +356,7 @@ class RealDebridDownloader(DownloaderBase):
                 "api.real-debrid.com",
                 retry_after_seconds=e.retry_after_seconds,
             ) from e
-        except DebridInfringingError:
+        except (DebridInfringingError, TorrentDeadOrCorruptError):
             if torrent_id:
                 try:
                     self.delete_torrent(torrent_id)
@@ -570,6 +570,7 @@ class RealDebridDownloader(DownloaderBase):
             f"torrents/selectFiles/{torrent_id}",
             data={"files": selection},
         )
+        self._maybe_backoff(response)
 
         if not response.ok:
             raise RealDebridError(self._handle_error(response))

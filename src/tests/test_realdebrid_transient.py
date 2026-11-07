@@ -74,13 +74,63 @@ def test_get_instant_availability_429_raises_circuit_breaker(rd_downloader):
 
 
 def test_get_instant_availability_451_returns_none(rd_downloader):
-    """Genuine infringing torrents still fail as not-available (blacklist OK)."""
+    """Genuine infringing torrents remain provider-specific availability misses."""
     with patch.object(
         rd_downloader,
         "add_torrent",
         side_effect=RealDebridError("[451] Infringing Torrent"),
     ):
         assert rd_downloader.get_instant_availability("deadbeef", "movie") is None
+
+
+@pytest.mark.parametrize("status", ["magnet_error", "virus", "dead"])
+def test_get_instant_availability_propagates_permanent_torrent_state(
+    rd_downloader, status
+):
+    from program.services.downloaders.shared import TorrentDeadOrCorruptError
+
+    with (
+        patch.object(rd_downloader, "add_torrent", return_value="torrent-1"),
+        patch.object(
+            rd_downloader,
+            "_process_torrent",
+            side_effect=TorrentDeadOrCorruptError(f"status={status}"),
+        ),
+        patch.object(rd_downloader, "delete_torrent"),
+        pytest.raises(TorrentDeadOrCorruptError),
+    ):
+        rd_downloader.get_instant_availability("deadbeef", "movie")
+
+
+def test_get_instant_availability_select_files_429_raises_circuit_breaker(
+    rd_downloader,
+):
+    from program.services.downloaders.models import TorrentFile, TorrentInfo
+
+    info = TorrentInfo(
+        id="torrent-1",
+        name="Movie",
+        status="waiting_files_selection",
+        files={
+            1: TorrentFile(
+                id=1,
+                path="Movie.mkv",
+                bytes=1_000_000_000,
+                selected=0,
+                download_url="",
+            )
+        },
+    )
+    response = Mock(status_code=429, ok=False, reason="Too Many Requests")
+    rd_downloader.api.session.post.return_value = response
+
+    with (
+        patch.object(rd_downloader, "add_torrent", return_value="torrent-1"),
+        patch.object(rd_downloader, "get_torrent_info", return_value=info),
+        patch.object(rd_downloader, "delete_torrent"),
+        pytest.raises(CircuitBreakerOpen),
+    ):
+        rd_downloader.get_instant_availability("deadbeef", "movie")
 
 
 def _unrestrict_error_response(error: str, code: RealDebridErrorCode) -> Mock:
