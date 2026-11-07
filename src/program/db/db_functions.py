@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import func, inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, joinedload, lazyload, selectinload
 
 from program.core.runner import MediaItemGenerator
 from program.db.base_model import get_base_metadata
@@ -318,11 +318,41 @@ def create_calendar(
     if end.tzinfo is not None:
         end = end.astimezone(timezone.utc).replace(tzinfo=None)
 
+    media_lazy_opts = [
+        lazyload(MediaItem.streams),
+        lazyload(MediaItem.blacklisted_streams),
+        lazyload(MediaItem.filesystem_entries),
+        lazyload(MediaItem.subtitles),
+    ]
+    ep_parent_show = joinedload(Episode.parent).joinedload(Season.parent)
+    season_show = joinedload(Season.parent)
+
+    query1_opts = [
+        *media_lazy_opts,
+        lazyload(Show.seasons),
+        lazyload(Season.episodes),
+        joinedload(Episode.parent).lazyload(MediaItem.streams),
+        joinedload(Episode.parent).lazyload(MediaItem.blacklisted_streams),
+        joinedload(Episode.parent).lazyload(MediaItem.filesystem_entries),
+        joinedload(Episode.parent).lazyload(MediaItem.subtitles),
+        joinedload(Episode.parent).lazyload(Season.episodes),
+        ep_parent_show.lazyload(MediaItem.streams),
+        ep_parent_show.lazyload(MediaItem.blacklisted_streams),
+        ep_parent_show.lazyload(MediaItem.filesystem_entries),
+        ep_parent_show.lazyload(MediaItem.subtitles),
+        ep_parent_show.lazyload(Show.seasons),
+        season_show.lazyload(MediaItem.streams),
+        season_show.lazyload(MediaItem.blacklisted_streams),
+        season_show.lazyload(MediaItem.filesystem_entries),
+        season_show.lazyload(MediaItem.subtitles),
+        season_show.lazyload(Show.seasons),
+    ]
+
     with _maybe_session(session) as (s, _owns):
         # Query 1: All MediaItems with aired_at in the bounded window
         result = s.execute(
             select(MediaItem)
-            .options(selectinload(Show.seasons).selectinload(Season.episodes))
+            .options(*query1_opts)
             .where(MediaItem.aired_at.is_not(None))
             .where(MediaItem.aired_at >= start)
             .where(MediaItem.aired_at <= end)
@@ -330,15 +360,32 @@ def create_calendar(
 
         calendar_items = list(result.scalars().all())
 
-        # Query 2: Shows with release_data that might have upcoming airings
-        # NOTE: release_data is a custom SeriesReleaseDecorator (Pydantic model serialized
-        # as JSON), NOT raw JSONB. SQL-level JSON subscript access (release_data->>'key')
-        # does not work with SQLAlchemy TypeDecorator columns. Date filtering is done
-        # in Python below instead.
-        shows_result = s.execute(
-            select(Show).where(Show.release_data.is_not(None))
-        ).unique()
+        # Collect parent Show IDs from child airings to exclude from Query 2
+        child_show_ids: set[int] = set()
+        for item in calendar_items:
+            if isinstance(item, Season) and item.parent_id:
+                child_show_ids.add(item.parent_id)
+            elif isinstance(item, Episode) and item.parent and item.parent.parent_id:
+                child_show_ids.add(item.parent.parent_id)
 
+        exclude_ids = child_show_ids.union(
+            {it.id for it in calendar_items if isinstance(it, Show)}
+        )
+
+        # Query 2: Shows with release_data that might have upcoming airings.
+        # Exclude shows already represented by child airings, and lazyload all relations
+        # to avoid N+1 queries across large libraries.
+        query2_opts = [
+            *media_lazy_opts,
+            lazyload(Show.seasons),
+        ]
+        shows_stmt = (
+            select(Show).options(*query2_opts).where(Show.release_data.is_not(None))
+        )
+        if exclude_ids:
+            shows_stmt = shows_stmt.where(Show.id.not_in(exclude_ids))
+
+        shows_result = s.execute(shows_stmt).unique()
         potential_shows = list(shows_result.scalars().all())
 
     calendar = dict[int, dict[str, Any]]()
@@ -375,15 +422,6 @@ def create_calendar(
 
     for item in calendar_items:
         calendar[item.id] = build_calendar_dict(item)
-
-    # O(1) deduplication: collect parent Show IDs from child airings
-    child_show_ids: set[int] = set()
-    for item in calendar_items:
-        if isinstance(item, Season) and item.parent_id:
-            child_show_ids.add(item.parent_id)
-        elif isinstance(item, Episode) and item.parent and item.parent.parent_id:
-            # Defensive: guard against orphaned episodes with no parent chain
-            child_show_ids.add(item.parent.parent_id)
 
     # Shows with child airings are already represented — skip them.
     # Only add Show fallback entries when no specific child is present.
