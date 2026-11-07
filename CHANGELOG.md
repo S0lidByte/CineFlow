@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.46.0](https://github.com/S0lidByte/CineFlow/compare/v1.45.4...v1.46.0) (2026-11-07)
+
+
+### Features
+
+* **plex:** secure webhook contract and harden playback session telemetry ([2f1ddc0](https://github.com/S0lidByte/CineFlow/commit/2f1ddc061f07e7f089d930f0b10fe196e610c462))
+* **settings:** redact sensitive credentials and preserve on save ([7445a11](https://github.com/S0lidByte/CineFlow/commit/7445a11ba16f3220cc0cfefcf045ef68c5d51ac7))
+
+
+### Bug Fixes
+
+* **core:** gate server readiness on initial vfs synchronization ([83616ab](https://github.com/S0lidByte/CineFlow/commit/83616abd5c62d634dc1af17b8adc7fe56ce92257))
+* **downloader:** correct movie pack matching and provider failover ([0f75235](https://github.com/S0lidByte/CineFlow/commit/0f75235bbf713bbfbaa7b7258ff701f2ace49260))
+
 ## [1.45.4](https://github.com/S0lidByte/CineFlow/compare/v1.45.3...v1.45.4) (2026-11-06)
 
 
