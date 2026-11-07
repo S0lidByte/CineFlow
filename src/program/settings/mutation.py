@@ -12,8 +12,12 @@ from typing import Any, cast
 from program.settings import settings_manager
 from program.settings.models import AppModel
 from program.settings.ranking_patterns import validate_ranking_payload_patterns
+from program.settings.secrets import (
+    ROOT_API_KEY_SENTINEL,
+    preserve_redacted_settings_secrets,
+)
 
-API_KEY_SENTINEL = "********"
+API_KEY_SENTINEL = ROOT_API_KEY_SENTINEL
 
 
 def _validate_ranking_in_settings_dict(settings_dict: dict[str, Any]) -> None:
@@ -65,6 +69,7 @@ def apply_canonical_settings_mutation(new_settings: dict[str, Any]) -> AppModel:
             raise ValueError("api_key cannot be empty or whitespace")
 
     current_settings = settings_manager.settings.model_dump()
+    preserve_redacted_settings_secrets(current_settings, mutated_payload)
     deep_merge_settings(current_settings, mutated_payload)
     _validate_ranking_in_settings_dict(current_settings)
 

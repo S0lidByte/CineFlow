@@ -13,6 +13,9 @@ SENSITIVE_URL_QUERY_PARAMS: frozenset[str] = frozenset(
         "refresh_token",
         "client_secret",
         "password",
+        "secret",
+        "webhook_secret",
+        "x-webhook-secret",
         "x-plex-token",
     }
 )
