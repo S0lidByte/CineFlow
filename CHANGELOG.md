@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.47.0](https://github.com/S0lidByte/CineFlow/compare/v1.46.1...v1.47.0) (2026-11-07)
+
+
+### Features
+
+* **realdebrid:** add cloud transfer management and durable monitoring ([fc697b0](https://github.com/S0lidByte/CineFlow/commit/fc697b08e87a32507b3f4f3c2afbdd97a4d50c3e))
+
 ## [1.46.1](https://github.com/S0lidByte/CineFlow/compare/v1.46.0...v1.46.1) (2026-11-07)
 
 
