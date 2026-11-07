@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.46.1](https://github.com/S0lidByte/CineFlow/compare/v1.46.0...v1.46.1) (2026-11-07)
+
+
+### Performance Improvements
+
+* **calendar:** eliminate n+1 queries and lazyload heavy relations ([3a4c9f4](https://github.com/S0lidByte/CineFlow/commit/3a4c9f47fc149bb8792f44130f2b3828cdac00f6))
+
 ## [1.46.0](https://github.com/S0lidByte/CineFlow/compare/v1.45.4...v1.46.0) (2026-11-07)
 
 
