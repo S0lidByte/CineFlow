@@ -133,6 +133,18 @@ class FilesystemService(Runner[FilesystemModel]):
 
         return True
 
+    def wait_until_ready(self, timeout: float | None = None) -> bool:
+        """Wait for initial VFS synchronization to finish successfully."""
+        vfs = self.riven_vfs
+        if vfs is None:
+            return False
+
+        wait = getattr(vfs, "wait_until_ready", None)
+        if callable(wait):
+            return bool(wait(timeout=timeout))
+
+        return bool(getattr(vfs, "ready", False))
+
     def has_active_streams(self) -> bool:
         """True when VFS has open sequential playback streams.
 

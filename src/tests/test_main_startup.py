@@ -45,3 +45,26 @@ def test_successful_program_lifecycle_keeps_zero_exit_code():
 
     assert exit_code == 0
     program.join.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("initialized", "expected"),
+    [(False, "Riven is starting..."), (True, "Riven is running!")],
+)
+async def test_root_status_only_reports_running_after_program_initialization(
+    monkeypatch, initialized: bool, expected: str
+):
+    from types import SimpleNamespace
+
+    import routers
+    from program.program import Program
+
+    monkeypatch.setattr(
+        routers,
+        "di",
+        {Program: SimpleNamespace(initialized=initialized)},
+    )
+    response = await routers.root(MagicMock())
+
+    assert response.message == expected

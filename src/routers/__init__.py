@@ -1,5 +1,6 @@
 from fastapi import Depends, Request
 from fastapi.routing import APIRouter
+from kink import di
 
 from auth import (
     require_role,
@@ -7,6 +8,7 @@ from auth import (
     resolve_webhook_api_key,
     resolve_ws_api_key,
 )
+from program.program import Program
 from program.settings import settings_manager
 from routers.models.shared import RootResponse
 from routers.secure.database import router as database_router
@@ -29,8 +31,9 @@ app_router = APIRouter(prefix=f"/api/{API_VERSION}")
 
 @app_router.get("/", operation_id="root")
 async def root(_: Request) -> RootResponse:
+    message = "Riven is running!" if di[Program].initialized else "Riven is starting..."
     return RootResponse(
-        message="Riven is running!",
+        message=message,
         version=settings_manager.settings.version,
     )
 
