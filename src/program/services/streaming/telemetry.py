@@ -28,6 +28,7 @@ class PlexPlaybackIdentity:
     player_uuid: str | None
     rating_key: str | None
     media_path: str | None
+    last_seen: float = 0.0
 
 
 class StreamSessionTracker:
@@ -364,9 +365,22 @@ class PlaybackTelemetryCollector:
         self._cached_chunks_in_memory = 0
         self._cached_chunks_on_disk = 0
         self._active_pool_connections = 0
+        self.plex_playback_ttl_seconds = 1800.0
 
         self._initialized = True
         logger.info("PlaybackTelemetryCollector initialized")
+
+    def _prune_plex_playbacks_locked(self, now_mono: float | None = None) -> None:
+        if not self._plex_playbacks:
+            return
+        now = now_mono if now_mono is not None else time.monotonic()
+        expired = [
+            k
+            for k, v in self._plex_playbacks.items()
+            if (now - v.last_seen) > self.plex_playback_ttl_seconds
+        ]
+        for k in expired:
+            del self._plex_playbacks[k]
 
     @staticmethod
     def _normalize_media_path(path: str | None) -> str | None:
@@ -412,14 +426,17 @@ class PlaybackTelemetryCollector:
         if not server or not player or not rating:
             return
         key = (server, player, rating)
+        now_mono = time.monotonic()
         identity = PlexPlaybackIdentity(
             server_uuid=server,
             player_uuid=player,
             rating_key=rating,
             media_path=self._normalize_media_path(media_path),
+            last_seen=now_mono,
         )
         normalized_event = event.strip().lower()
         with self._lock:
+            self._prune_plex_playbacks_locked(now_mono)
             if normalized_event in {"media.play", "media.resume"}:
                 self._plex_playbacks[key] = identity
             elif normalized_event in {"media.pause", "media.stop", "media.scrobble"}:
@@ -430,6 +447,7 @@ class PlaybackTelemetryCollector:
         if normalized is None:
             return False
         with self._lock:
+            self._prune_plex_playbacks_locked()
             return any(
                 item.media_path == normalized for item in self._plex_playbacks.values()
             )
@@ -437,6 +455,7 @@ class PlaybackTelemetryCollector:
     @property
     def active_plex_playback_count(self) -> int:
         with self._lock:
+            self._prune_plex_playbacks_locked()
             return len(self._plex_playbacks)
 
     def register_stream_start(
@@ -548,48 +567,67 @@ class PlaybackTelemetryCollector:
             file_name = clean_file.split("/")[-1].split("\\")[-1] if clean_file else ""
             clean_title = (title or "").strip().lower()
 
-            for stream_id, tracker in self._sessions.items():
-                if not tracker.is_active and state != "stopped":
-                    continue
+            candidate_trackers = [
+                tracker
+                for tracker in self._sessions.values()
+                if tracker.is_active or state == "stopped"
+            ]
 
-                matched = False
+            strong_matches: list[StreamSessionTracker] = []
+            for tracker in candidate_trackers:
                 stream_title_lower = tracker.title.lower()
-                stream_id_lower = stream_id.lower()
+                stream_id_lower = tracker.stream_id.lower()
+                matches_path = bool(
+                    (
+                        file_name
+                        and (
+                            file_name in stream_title_lower
+                            or file_name in stream_id_lower
+                        )
+                    )
+                    or (
+                        clean_file
+                        and (
+                            clean_file in stream_title_lower
+                            or clean_file in stream_id_lower
+                        )
+                    )
+                    or (
+                        clean_title
+                        and (
+                            clean_title in stream_title_lower
+                            or stream_title_lower in clean_title
+                        )
+                    )
+                )
+                if matches_path:
+                    strong_matches.append(tracker)
 
-                # 1. Match by file path / file name in stream_id or title
-                if (
-                    file_name
-                    and (
-                        file_name in stream_title_lower or file_name in stream_id_lower
-                    )
-                    or clean_file
-                    and (
-                        clean_file in stream_title_lower
-                        or clean_file in stream_id_lower
-                    )
-                    or clean_title
-                    and (
-                        clean_title in stream_title_lower
-                        or stream_title_lower in clean_title
-                    )
-                    or client_ip
-                    and tracker.client_ip == client_ip
-                ):
-                    matched = True
+            targets: list[StreamSessionTracker] = []
+            if strong_matches:
+                if client_ip:
+                    ip_subset = [t for t in strong_matches if t.client_ip == client_ip]
+                    targets = ip_subset if ip_subset else strong_matches
+                else:
+                    targets = strong_matches
+            elif client_ip:
+                ip_matches = [t for t in candidate_trackers if t.client_ip == client_ip]
+                if len(ip_matches) == 1:
+                    targets = ip_matches
 
-                if matched:
-                    tracker.update_attribution(
-                        user_name=user_name,
-                        player_device=player_device,
-                        playback_state=state,
-                        decision=decision,
-                        video_decision=video_decision,
-                        audio_decision=audio_decision,
-                        quality_profile=quality_profile,
-                        media_resolution=media_resolution,
-                        media_bitrate_kbps=media_bitrate_kbps,
-                    )
-                    matched_count += 1
+            for tracker in targets:
+                tracker.update_attribution(
+                    user_name=user_name,
+                    player_device=player_device,
+                    playback_state=state,
+                    decision=decision,
+                    video_decision=video_decision,
+                    audio_decision=audio_decision,
+                    quality_profile=quality_profile,
+                    media_resolution=media_resolution,
+                    media_bitrate_kbps=media_bitrate_kbps,
+                )
+                matched_count += 1
 
             # Also log discrete telemetry event for visibility
             self._add_event_locked(
@@ -721,6 +759,7 @@ class PlaybackTelemetryCollector:
     def get_snapshot(self) -> PlaybackTelemetrySnapshot:
         """Generate a complete telemetry snapshot with active streams, metrics, and events."""
         with self._lock:
+            self._prune_plex_playbacks_locked()
             active_list: list[StreamSessionMetric] = []
             total_active_throughput = 0.0
 
