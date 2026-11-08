@@ -92,6 +92,10 @@ class ProgramScheduler:
         scheduled_functions[self._process_scheduled_tasks] = {"interval": 60}
         scheduled_functions[self._monitor_ongoing_schedules] = {"interval": 15 * 60}
 
+        # Add periodic Real-Debrid cloud transfers poll & ingestion
+        if settings_manager.settings.downloaders.real_debrid.enabled:
+            scheduled_functions[self._poll_realdebrid_transfers] = {"interval": 30}
+
         for func, config in scheduled_functions.items():
             self.scheduler.add_job(
                 func,
@@ -737,3 +741,14 @@ class ProgramScheduler:
             for i, name in enumerate(day_map)
             if getattr(series_airs_days, name) is True
         ]
+
+    def _poll_realdebrid_transfers(self) -> None:
+        """Periodic background poll and ingestion sweep for active Real-Debrid cloud transfers."""
+        try:
+            from program.services.downloaders.realdebrid_transfers import (
+                rd_transfers_service,
+            )
+
+            rd_transfers_service.poll_and_ingest_transfers()
+        except Exception as e:
+            logger.debug(f"Periodic Real-Debrid transfer poll error: {e}")

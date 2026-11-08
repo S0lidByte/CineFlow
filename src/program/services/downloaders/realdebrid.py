@@ -5,10 +5,10 @@ import time
 # Trigger release-please re-evaluation
 from datetime import datetime
 from enum import IntEnum
-from typing import Literal
+from typing import Any, Literal, cast
 
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from requests import exceptions
 
 from program.media.item import ProcessedItemType
@@ -32,6 +32,7 @@ from program.utils.request import CircuitBreakerOpen, SmartResponse, SmartSessio
 from .shared import (
     DebridInfringingError,
     DownloaderBase,
+    TorrentDeadOrCorruptError,
     premium_days_left,
 )
 
@@ -138,16 +139,21 @@ class RealDebridFile(BaseModel):
 
 
 class RealDebridTorrentInfo(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     id: str
     filename: str
-    original_filename: str
-    hash: str
-    bytes: int
-    progress: float
-    status: str
-    added: str
-    files: list[RealDebridFile]
-    links: list[str]
+    original_filename: str = ""
+    hash: str = ""
+    bytes: int = 0
+    progress: float = 0.0
+    status: str = ""
+    added: str = ""
+    ended: str | None = None
+    speed: int | None = None
+    seeders: int | None = None
+    files: list[RealDebridFile] = []
+    links: list[str] = []
 
 
 class RealDebridError(Exception):
@@ -355,7 +361,7 @@ class RealDebridDownloader(DownloaderBase):
                 "api.real-debrid.com",
                 retry_after_seconds=e.retry_after_seconds,
             ) from e
-        except DebridInfringingError:
+        except (DebridInfringingError, TorrentDeadOrCorruptError):
             if torrent_id:
                 try:
                     self.delete_torrent(torrent_id)
@@ -491,18 +497,22 @@ class RealDebridDownloader(DownloaderBase):
             # Return container WITH the TorrentInfo to avoid re-fetching in download phase
             return TorrentContainer(infohash=infohash, files=files), None, info
 
-        if info.status in ("downloading", "queued"):
+        if info.status in ("downloading", "queued", "compressing", "uploading"):
             return None, f"Not instantly available (status={info.status})", None
 
+        # Confirmed corrupted / dead torrent states:
         if info.status in (
             "magnet_error",
-            "error",
             "virus",
             "dead",
-            "compressing",
-            "uploading",
         ):
-            return None, f"Invalid on Real-Debrid (status={info.status})", None
+            raise TorrentDeadOrCorruptError(
+                f"Invalid on Real-Debrid (status={info.status})"
+            )
+
+        # Generic transfer / provider error is non-permanent:
+        if info.status == "error":
+            return None, f"Real-Debrid transfer error (status={info.status})", None
 
         return None, f"unsupported torrent status: {info.status}", None
 
@@ -515,15 +525,20 @@ class RealDebridDownloader(DownloaderBase):
 
         Raises:
             CircuitBreakerOpen: If the per-domain breaker is OPEN.
+            DebridInfringingError: If the content is blocked/infringing.
+            TorrentDeadOrCorruptError: If the torrent file or magnet is invalid.
             RealDebridError: If the API returns a failing status.
         """
 
         assert self.api
 
-        magnet = f"magnet:?xt=urn:btih:{infohash}"
-        response = self.api.session.post(
-            "torrents/addMagnet", data={"magnet": magnet.lower()}
-        )
+        if infohash.lower().startswith("magnet:"):
+            magnet = infohash
+        else:
+            clean_hash = infohash.strip().lower()
+            magnet = f"magnet:?xt=urn:btih:{clean_hash}"
+
+        response = self.api.session.post("torrents/addMagnet", data={"magnet": magnet})
         self._maybe_backoff(response)
 
         if not response.ok:
@@ -531,6 +546,10 @@ class RealDebridDownloader(DownloaderBase):
                 response, RealDebridErrorCode.INFRINGING_FILE
             ):
                 raise DebridInfringingError(self._handle_error(response))
+            if self._response_has_error_code(
+                response, RealDebridErrorCode.TORRENT_FILE_INVALID
+            ):
+                raise TorrentDeadOrCorruptError(self._handle_error(response))
             raise RealDebridError(self._handle_error(response))
 
         class RealDebridAddMagnetResponse(BaseModel):
@@ -559,6 +578,7 @@ class RealDebridDownloader(DownloaderBase):
             f"torrents/selectFiles/{torrent_id}",
             data={"files": selection},
         )
+        self._maybe_backoff(response)
 
         if not response.ok:
             raise RealDebridError(self._handle_error(response))
@@ -654,6 +674,58 @@ class RealDebridDownloader(DownloaderBase):
 
         if not response.ok:
             raise RealDebridError(self._handle_error(response))
+
+    def get_torrents(
+        self,
+        offset: int = 0,
+        page: int = 1,
+        limit: int = 100,
+        filter: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        List user torrents on Real-Debrid.
+
+        Returns:
+            List of raw torrent dictionaries from Real-Debrid.
+        """
+        assert self.api
+
+        params: dict[str, Any] = {"page": page, "limit": min(limit, 100)}
+        if offset > 0:
+            params["offset"] = offset
+        if filter:
+            params["filter"] = filter
+
+        response = self.api.session.get("torrents", params=params)
+        self._maybe_backoff(response)
+
+        if not response.ok:
+            raise RealDebridError(self._handle_error(response))
+
+        data = response.json()
+        if isinstance(data, list):
+            return cast(list[dict[str, Any]], data)
+        return []
+
+    def get_active_count(self) -> dict[str, int]:
+        """
+        Get active torrents count and active-slot limit from Real-Debrid.
+
+        Returns:
+            Dict containing 'nb' (active count) and 'limit' (total allowed slots).
+        """
+        assert self.api
+
+        response = self.api.session.get("torrents/activeCount")
+        self._maybe_backoff(response)
+
+        if not response.ok:
+            raise RealDebridError(self._handle_error(response))
+
+        data = response.json()
+        if isinstance(data, dict):
+            return cast(dict[str, int], data)
+        return {"nb": 0, "limit": 20}
 
     def _maybe_backoff(self, response: SmartResponse) -> None:
         """

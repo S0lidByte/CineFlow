@@ -28,6 +28,63 @@ from tests.test_d83_transport_recovery import no_delay
 setup_stream = stream_fixture
 
 
+@pytest.mark.parametrize("clock_start", [0.0, 100_000.0])
+@pytest.mark.parametrize(
+    "deadline_source", ["recovery", "expired", "explicit", "default"]
+)
+def test_refresh_deadline_converts_clock_domain(
+    setup_stream, monkeypatch, clock_start, deadline_source
+):
+    from types import SimpleNamespace
+
+    from program.services.filesystem.vfs import VFSDatabase
+    from program.services.streaming import media_stream as module
+
+    async def exercise():
+        async with trio.open_nursery() as nursery:
+            stream, _, _, _ = setup_stream(nursery)
+            # Deliberately separate provider monotonic time from Trio's clock.
+            monkeypatch.setattr(module, "monotonic", lambda: 1_000.0)
+            calls = []
+            initial_url = stream.target_url.value
+
+            def lookup(*, original_filename, force_resolve, operation_deadline):
+                calls.append((force_resolve, operation_deadline))
+                return SimpleNamespace(
+                    url="https://example.test/fresh" if force_resolve else initial_url
+                )
+
+            monkeypatch.setattr(
+                module,
+                "di",
+                {VFSDatabase: SimpleNamespace(get_entry_by_original_filename=lookup)},
+            )
+            if deadline_source != "default":
+                stream._set_recovery_state(
+                    StreamRecoveryPhase.URL_REFRESH, timeout_bound=20.0
+                )
+                await trio.sleep(5.0 if deadline_source != "expired" else 21.0)
+
+            kwargs = {"deadline": 1_007.0} if deadline_source == "explicit" else {}
+            refreshed = await stream._refresh_download_url(**kwargs)
+            if deadline_source == "expired":
+                assert not refreshed
+                assert calls == []
+            else:
+                assert refreshed
+                expected = {
+                    "recovery": 1_015.0,
+                    "explicit": 1_007.0,
+                    "default": 1_020.0,
+                }[deadline_source]
+                assert calls == [(False, expected), (True, expected)]
+            nursery.cancel_scope.cancel()
+
+    clock = MockClock(autojump_threshold=0)
+    clock.jump(clock_start)
+    trio.run(exercise, clock=clock)
+
+
 def test_d91_stream_http_timeout_custom_and_defaults():
     """Verify stream_http_timeout respects custom connect_timeout while preserving other bounds."""
     default_timeout = stream_http_timeout()

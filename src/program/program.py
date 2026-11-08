@@ -113,6 +113,9 @@ class Program(threading.Thread):
         self.outbox_dispatcher.register_handler(
             "retry_library_item", self._handle_retry_library_item
         )
+        self.outbox_dispatcher.register_handler(
+            "realdebrid.poll_transfer", self._handle_realdebrid_poll_transfer
+        )
 
         if self.enable_trace:
             import tracemalloc
@@ -375,11 +378,26 @@ class Program(threading.Thread):
             )
             return False
 
+    def _wait_for_initial_filesystem_sync(self) -> bool:
+        """Keep startup unready until the initial VFS tree is fully published."""
+        if not self.services:
+            logger.error("Cannot complete startup: filesystem services are unavailable")
+            return False
+
+        logger.info("Waiting for initial RivenVFS full sync to complete")
+        if self.services.filesystem.wait_until_ready(timeout=None):
+            return True
+
+        logger.error(
+            "Cannot complete startup: RivenVFS did not reach READY after initial sync"
+        )
+        return False
+
     def start(self):
         """
-        Start the Riven program: ensure configuration and database readiness, initialize APIs and services, schedule background jobs, and start the main thread and scheduler.
+        Start the Riven program: ensure configuration and database readiness, initialize APIs and services, wait for initial VFS synchronization, schedule background jobs, and start the main thread and scheduler.
 
-        This method prepares runtime state and external integrations by registering settings observers, creating the data directory and default settings if missing, initializing APIs and services after database migrations, computing and logging item counts (including filesystem-backed items), configuring executors and the background scheduler, scheduling periodic service and maintenance tasks, starting the thread and scheduler, and marking the program as initialized.
+        This method prepares runtime state and external integrations by registering settings observers, creating the data directory and default settings if missing, initializing APIs and services after database migrations, waiting until the initial VFS tree is fully published, computing and logging item counts (including filesystem-backed items), configuring executors and the background scheduler, scheduling periodic service and maintenance tasks, starting the thread and scheduler, and marking the program as initialized.
         """
 
         latest_version = get_version()
@@ -403,6 +421,9 @@ class Program(threading.Thread):
         run_migrations()
 
         self.initialize_services()
+
+        if not self._wait_for_initial_filesystem_sync():
+            return
 
         with db_session() as session:
             from sqlalchemy import exists
@@ -638,6 +659,19 @@ class Program(threading.Thread):
             logger.info(
                 f"RetryLibrary: EventManager skipped/deduped retry event for MediaItem ID {item_id}"
             )
+
+    def _handle_realdebrid_poll_transfer(
+        self, op: OperationLedger, payload: dict[str, Any]
+    ) -> None:
+        """
+        Durable outbox worker handler for 'realdebrid.poll_transfer' operations.
+        Polls active transfer and ingests into CineFlow once cloud download completes.
+        """
+        from program.services.downloaders.realdebrid_transfers import (
+            rd_transfers_service,
+        )
+
+        rd_transfers_service.poll_and_ingest_transfers()
 
     def stop(self):
         if not self.initialized:

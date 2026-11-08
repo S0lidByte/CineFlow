@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import inspect
+import textwrap
 import threading
+from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
 import trio
+from trio.testing import wait_all_tasks_blocked
 
 from program.services.streaming.cache import Cache, CacheConfig, CacheEntry
 
@@ -208,3 +214,244 @@ def test_failed_hot_demotion_falls_back_to_warm(tmp_path: Path) -> None:
         assert await cache.get("movie.mkv", 1000, 1099) == b"b" * 100
 
     trio.run(_run)
+
+
+@pytest.mark.parametrize("shielded", [True, False])
+def test_put_cancellation_releases_hot_capacity(tmp_path: Path, shielded: bool) -> None:
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "warm",
+            max_size_bytes=4096,
+            hot_dir=tmp_path / "hot",
+            hot_max_size_bytes=1024,
+            metrics_enabled=False,
+        )
+    )
+    if not shielded:
+        # Exercise precisely the pre-fix finally block without modifying source on disk.
+        source = textwrap.dedent(inspect.getsource(Cache._put))
+        assert "with trio.CancelScope(shield=True):" in source
+        source = source.replace(
+            "with trio.CancelScope(shield=True):", "with nullcontext():"
+        )
+        namespace = {**Cache._put.__globals__, "nullcontext": nullcontext}
+        exec(compile(source, "<unshielded-put>", "exec"), namespace)
+        cache._put = namespace["_put"].__get__(cache, Cache)
+
+    async def run() -> None:
+        started = trio.Event()
+        release = threading.Event()
+        real_write = cache._write_file_bytes
+        cancelled = False
+
+        def blocked_write(path: Path, data: bytes) -> None:
+            trio.from_thread.run_sync(started.set)
+            assert release.wait(5)
+            real_write(path, data)
+
+        cache._write_file_bytes = blocked_write
+
+        async def writer(*, task_status=trio.TASK_STATUS_IGNORED) -> None:
+            nonlocal cancelled
+            with trio.CancelScope() as scope:
+                task_status.started(scope)
+                try:
+                    await cache.put("movie", 0, b"x" * 200)
+                except trio.Cancelled:
+                    cancelled = True
+                    raise
+                else:
+                    pytest.fail("writer was not cancelled")
+
+        with trio.fail_after(5):
+            async with trio.open_nursery() as nursery:
+                scope = await nursery.start(writer)
+                try:
+                    await started.wait()
+                    assert cache._hot_reserved_bytes == 200
+                    scope.cancel()
+                finally:
+                    release.set()
+        assert cancelled
+        assert cache._hot_reserved_bytes == (0 if shielded else 200)
+        if shielded:
+            await cache.put("next", 0, b"y" * 200)
+            assert cache._hot_reserved_bytes == 0
+
+    trio.run(run)
+
+
+@pytest.mark.parametrize("policy", ["LRU", "TTL"])
+@pytest.mark.parametrize("window", ["unpublished", "post_check"])
+def test_delayed_eviction_preserves_replacement(tmp_path, monkeypatch, policy, window):
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path,
+            max_size_bytes=150,
+            eviction=policy,
+            ttl_seconds=60,
+            metrics_enabled=False,
+        )
+    )
+    key = cache._key("movie", 0)
+    payload_path = cache._file_for(key)
+    real_unlink_evicted = cache._unlink_evicted_files
+    real_write = cache._write_file_bytes
+    real_path_unlink = Path.unlink
+
+    async def run():
+        await cache.put("movie", 0, b"a" * 100)
+        if policy == "TTL":
+            cache._index[key] = replace(cache._index[key], mtime=0)
+        selected = trio.Event()
+        checked = trio.Event()
+        written = trio.Event()
+        deleted = trio.Event()
+        proceed = trio.Event()
+        release_delete = threading.Event()
+        release_write = threading.Event()
+
+        async def delayed_unlink(entries, tiers):
+            selected.set()
+            await proceed.wait()
+            try:
+                await real_unlink_evicted(entries, tiers)
+            finally:
+                deleted.set()
+
+        def paused_unlink(path, *args, **kwargs):
+            if path == payload_path and window == "post_check":
+                trio.from_thread.run_sync(checked.set)
+                assert release_delete.wait(5)
+            return real_path_unlink(path, *args, **kwargs)
+
+        def paused_write(path, data):
+            real_write(path, data)
+            if data == b"c" * 100:
+                trio.from_thread.run_sync(written.set)
+                if window == "unpublished":
+                    assert release_write.wait(5)
+
+        monkeypatch.setattr(cache, "_unlink_evicted_files", delayed_unlink)
+        monkeypatch.setattr(Path, "unlink", paused_unlink)
+        monkeypatch.setattr(cache, "_write_file_bytes", paused_write)
+
+        async def evict():
+            if policy == "LRU":
+                await cache._evict_lru(100)
+            else:
+                await cache._evict_ttl()
+
+        with trio.fail_after(5):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(evict)
+                try:
+                    await selected.wait()
+                    assert key not in cache._index
+                    if window == "post_check":
+                        proceed.set()
+                        await checked.wait()
+                        nursery.start_soon(cache.put, "movie", 0, b"c" * 100)
+                        await wait_all_tasks_blocked()
+                        assert not written.is_set(), "writer crossed the deletion guard"
+                        release_delete.set()
+                    else:
+                        nursery.start_soon(cache.put, "movie", 0, b"c" * 100)
+                        await written.wait()
+                        assert key not in cache._index
+                        proceed.set()
+                        await wait_all_tasks_blocked()
+                        release_write.set()
+                finally:
+                    proceed.set()
+                    release_delete.set()
+                    release_write.set()
+        assert deleted.is_set()
+        assert key in cache._index
+        assert payload_path.read_bytes() == b"c" * 100
+        assert cache._read_metadata(key) == ("movie", 0)
+        assert cache.has("movie", 0, 99)
+        assert await cache.get("movie", 0, 99) == b"c" * 100
+        assert cache._total_bytes == 100
+
+    trio.run(run)
+
+
+def test_hot_capacity_congestion_falls_back_to_warm_without_blocking(
+    tmp_path: Path,
+) -> None:
+    """When hot capacity is full, writers fall back to warm immediately without blocking."""
+    warm = tmp_path / "warm"
+    hot = tmp_path / "hot"
+    cache = Cache(
+        CacheConfig(
+            cache_dir=warm,
+            max_size_bytes=10 * 1024 * 1024,
+            hot_dir=hot,
+            hot_max_size_bytes=100,
+            metrics_enabled=False,
+        )
+    )
+
+    async def _run() -> None:
+        with trio.fail_after(2):
+            # Fill hot tier to capacity
+            await cache.put("movie1", 0, b"a" * 100)
+            assert cache._index[cache._key("movie1", 0)].tier == "hot"
+
+            # Demotion target is movie1, but if demotion fails or hot capacity is 0,
+            # second put falls back immediately to warm tier without waiting
+            await cache.put("movie2", 0, b"b" * 100)
+            key2 = cache._key("movie2", 0)
+            # Entry exists in cache and was written safely
+            assert key2 in cache._index
+            assert await cache.get("movie2", 0, 99) == b"b" * 100
+
+    trio.run(_run)
+
+
+def test_unlink_evicted_files_batches_per_title_shard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Evicted file unlinking groups entries by cache_key and submits batches to threadpool."""
+    warm = tmp_path / "warm"
+    hot = tmp_path / "hot"
+    cache = Cache(
+        CacheConfig(
+            cache_dir=warm,
+            max_size_bytes=10 * 1024 * 1024,
+            hot_dir=hot,
+            hot_max_size_bytes=10 * 1024 * 1024,
+            metrics_enabled=False,
+        )
+    )
+
+    unlinked_batches: list[list[str]] = []
+    real_unlink = cache._unlink_cache_files
+
+    def recording_unlink(keys: list[str], tiers: dict[str, str]) -> None:
+        unlinked_batches.append(list(keys))
+        real_unlink(keys, tiers=tiers)
+
+    monkeypatch.setattr(cache, "_unlink_cache_files", recording_unlink)
+
+    entries = [
+        ("movie1", 0),
+        ("movie1", 1000),
+        ("movie1", 2000),
+        ("movie2", 0),
+        ("movie2", 1000),
+    ]
+    tiers = {cache._key(ck, st): "hot" for ck, st in entries}
+
+    async def _run() -> None:
+        await cache._unlink_evicted_files(entries, tiers=tiers)
+
+    trio.run(_run)
+
+    # Must be batched by cache_key: exactly 2 worker calls (one for movie1, one for movie2)
+    assert len(unlinked_batches) == 2
+    movie1_keys = [cache._key("movie1", st) for st in (0, 1000, 2000)]
+    movie2_keys = [cache._key("movie2", st) for st in (0, 1000)]
+    assert unlinked_batches[0] == movie1_keys
+    assert unlinked_batches[1] == movie2_keys

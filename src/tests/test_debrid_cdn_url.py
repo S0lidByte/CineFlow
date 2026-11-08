@@ -163,6 +163,7 @@ def test_refresh_identical_url_schedules_rescrape():
     vfs_db.schedule_dead_link_rescrape.assert_called_once_with(
         entry=cdn.entry,
         session=session,
+        permanent=False,
     )
 
 
@@ -270,6 +271,7 @@ def test_persistent_validate_none_schedules_rescrape_after_threshold():
         vfs_db.schedule_dead_link_rescrape.assert_called_once_with(
             entry=cdn.entry,
             session=session,
+            permanent=False,
         )
 
 
@@ -356,6 +358,7 @@ def test_nxdomain_schedules_rescrape_and_raises_link_unavailable():
     vfs_db.schedule_dead_link_rescrape.assert_called_once_with(
         entry=cdn.entry,
         session=session,
+        permanent=False,
     )
 
 

@@ -202,3 +202,23 @@ def test_initialize_services_remounts_vfs_when_downloaders_change():
 
     previous_filesystem.close.assert_called_once_with()
     assert program.services.filesystem is filesystem
+
+
+def test_startup_waits_for_initial_filesystem_sync():
+    program = Program()
+    filesystem = MagicMock()
+    filesystem.wait_until_ready.return_value = True
+    program.services = MagicMock(filesystem=filesystem)
+
+    assert program._wait_for_initial_filesystem_sync() is True
+    filesystem.wait_until_ready.assert_called_once_with(timeout=None)
+
+
+def test_startup_rejects_filesystem_sync_failure():
+    program = Program()
+    filesystem = MagicMock()
+    filesystem.wait_until_ready.return_value = False
+    program.services = MagicMock(filesystem=filesystem)
+
+    assert program._wait_for_initial_filesystem_sync() is False
+    filesystem.wait_until_ready.assert_called_once_with(timeout=None)

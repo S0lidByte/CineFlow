@@ -373,3 +373,4 @@ class MediaMetadata(BaseModel):
 class ActiveStream(BaseModel):
     infohash: str
     id: int | str
+    is_external: bool = False

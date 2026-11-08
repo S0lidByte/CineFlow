@@ -131,8 +131,12 @@ class NotificationService(Runner[NotificationsModel, None, None]):
                 "tvdb_id": item.tvdb_id,
             }
             sse_manager.publish_event("item_update", json.dumps(state_change_data))
-            logger.debug(
-                f"State change notification: {item.log_string} {previous_state.name} -> {new_state.name}"
+            from program.utils.logging import format_state
+
+            logger.opt(colors=True).debug(
+                f"State change notification: {{}} "
+                f"{format_state(previous_state)} -> {format_state(new_state)}",
+                item.log_string,
             )
 
     def _notify_completion(self, item: MediaItem):
@@ -153,7 +157,13 @@ class NotificationService(Runner[NotificationsModel, None, None]):
 
         duration = round((datetime.now() - item.requested_at).total_seconds())
 
-        logger.success(f"{item.log_string} has been completed in {duration} seconds.")
+        from program.utils.logging import format_state
+
+        logger.opt(colors=True).success(
+            f"{{}} has been {format_state(States.Completed)} in {{}} seconds.",
+            item.log_string,
+            duration,
+        )
 
         # Publish SSE notification event for frontend
         notification_data = {

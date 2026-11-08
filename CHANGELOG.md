@@ -1,5 +1,69 @@
 # Changelog
 
+## [1.48.0](https://github.com/S0lidByte/CineFlow/compare/v1.47.0...v1.48.0) (2026-11-08)
+
+
+### Features
+
+* **realdebrid:** add transfer attachment to media items and streaming support ([134b2b8](https://github.com/S0lidByte/CineFlow/commit/134b2b8c0867a944ebf09c34d7b12cc16e753d6d))
+
+## [1.47.0](https://github.com/S0lidByte/CineFlow/compare/v1.46.1...v1.47.0) (2026-11-07)
+
+
+### Features
+
+* **realdebrid:** add cloud transfer management and durable monitoring ([fc697b0](https://github.com/S0lidByte/CineFlow/commit/fc697b08e87a32507b3f4f3c2afbdd97a4d50c3e))
+
+## [1.46.1](https://github.com/S0lidByte/CineFlow/compare/v1.46.0...v1.46.1) (2026-11-07)
+
+
+### Performance Improvements
+
+* **calendar:** eliminate n+1 queries and lazyload heavy relations ([3a4c9f4](https://github.com/S0lidByte/CineFlow/commit/3a4c9f47fc149bb8792f44130f2b3828cdac00f6))
+
+## [1.46.0](https://github.com/S0lidByte/CineFlow/compare/v1.45.4...v1.46.0) (2026-11-07)
+
+
+### Features
+
+* **plex:** secure webhook contract and harden playback session telemetry ([2f1ddc0](https://github.com/S0lidByte/CineFlow/commit/2f1ddc061f07e7f089d930f0b10fe196e610c462))
+* **settings:** redact sensitive credentials and preserve on save ([7445a11](https://github.com/S0lidByte/CineFlow/commit/7445a11ba16f3220cc0cfefcf045ef68c5d51ac7))
+
+
+### Bug Fixes
+
+* **core:** gate server readiness on initial vfs synchronization ([83616ab](https://github.com/S0lidByte/CineFlow/commit/83616abd5c62d634dc1af17b8adc7fe56ce92257))
+* **downloader:** correct movie pack matching and provider failover ([0f75235](https://github.com/S0lidByte/CineFlow/commit/0f75235bbf713bbfbaa7b7258ff701f2ace49260))
+
+## [1.45.4](https://github.com/S0lidByte/CineFlow/compare/v1.45.3...v1.45.4) (2026-11-06)
+
+
+### Bug Fixes
+
+* **ci:** add labeler configuration and checkout step ([be1789c](https://github.com/S0lidByte/CineFlow/commit/be1789c5a061022a64065fb2ff896b5c215ffa4b))
+* **downloaders:** harden Real-Debrid circuit breaker recovery ([#348](https://github.com/S0lidByte/CineFlow/issues/348)) ([5e015ab](https://github.com/S0lidByte/CineFlow/commit/5e015abe5410dd6e130b1d69a4d9a5a3a4bc43f0))
+
+## [1.45.3](https://github.com/S0lidByte/CineFlow/compare/v1.45.2...v1.45.3) (2026-10-24)
+
+
+### Performance Improvements
+
+* **cache:** reduce hot-tier admission stalls and batch eviction cleanup ([#338](https://github.com/S0lidByte/CineFlow/issues/338)) ([5e619e4](https://github.com/S0lidByte/CineFlow/commit/5e619e441f3bcb236237f9d29d6787ded4a69aa5))
+
+## [1.45.2](https://github.com/S0lidByte/CineFlow/compare/v1.45.1...v1.45.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **streaming:** harden VFS teardown and cache integrity (D60) ([#336](https://github.com/S0lidByte/CineFlow/issues/336)) ([5cc0daf](https://github.com/S0lidByte/CineFlow/commit/5cc0daf2629c96d8ad845fad16e763203a9ad0f3))
+
+## [1.45.1](https://github.com/S0lidByte/CineFlow/compare/v1.45.0...v1.45.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **vfs:** atomic full synchronization and existing maintenance hardening ([#334](https://github.com/S0lidByte/CineFlow/issues/334)) ([ec93967](https://github.com/S0lidByte/CineFlow/commit/ec93967e8cef4fabbc008214d5b65844cf340744))
+
 ## [1.45.0](https://github.com/S0lidByte/CineFlow/compare/v1.44.4...v1.45.0) (2026-10-12)
 
 

@@ -1,0 +1,22 @@
+# Pull Request Labeler configuration
+# https://github.com/actions/labeler
+
+dependencies:
+  - 'pyproject.toml'
+  - 'uv.lock'
+  - '.release-please-manifest.json'
+
+python:
+  - 'src/**/*.py'
+  - 'dev/**/*.py'
+  - 'scripts/**/*.py'
+  - 'e2e/**/*.py'
+
+python:uv:
+  - 'pyproject.toml'
+  - 'uv.lock'
+
+documentation:
+  - 'docs/**'
+  - '*.md'
+  - '**/*.md'

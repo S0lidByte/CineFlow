@@ -13,11 +13,12 @@ from program.services.streaming.cache_autotune import (
 )
 from program.settings import settings_manager
 from program.settings.models import AppModel
-from program.settings.mutation import (
-    API_KEY_SENTINEL,
-    apply_canonical_settings_mutation,
-)
+from program.settings.mutation import apply_canonical_settings_mutation
 from program.settings.ranking_descriptions import enrich_ranking_schema
+from program.settings.secrets import (
+    preserve_redacted_settings_secrets,
+    redact_settings_secrets,
+)
 from program.utils.connection_tests import (
     SUPPORTED_SERVICES,
     ConnectionService,
@@ -172,12 +173,12 @@ async def save_settings() -> MessageResponse:
     "/get/all",
     operation_id="get_all_settings",
     response_model=AppModel,
+    responses={200: {"headers": {"Cache-Control": {"schema": {"type": "string"}}}}},
 )
 async def get_all_settings() -> AppModel:
     masked = copy(settings_manager.settings)
-    if masked.api_key:
-        masked.api_key = API_KEY_SENTINEL
-    return masked
+    redacted = redact_settings_secrets(masked.model_dump(mode="json"))
+    return AppModel.model_validate(redacted)
 
 
 @router.get(
@@ -194,9 +195,7 @@ async def get_settings(
         ),
     ],
 ) -> dict[str, Any]:
-    current_settings = settings_manager.settings.model_dump()
-    if current_settings.get("api_key"):
-        current_settings["api_key"] = API_KEY_SENTINEL
+    current_settings = redact_settings_secrets(settings_manager.settings.model_dump())
 
     data = dict[str, Any]()
 
@@ -254,14 +253,6 @@ async def set_settings(
         Body(description="Dictionary mapping paths to their new values"),
     ],
 ) -> MessageResponse:
-    if "api_key" in values:
-        if values["api_key"] == API_KEY_SENTINEL:
-            values["api_key"] = settings_manager.settings.api_key
-        elif not isinstance(values["api_key"], str) or not values["api_key"].strip():
-            raise HTTPException(
-                status_code=400, detail="api_key cannot be empty or whitespace"
-            )
-
     current_settings = settings_manager.settings.model_dump()
     requested_paths = [p.strip() for p in paths.split(",") if p.strip()]
 
@@ -308,6 +299,8 @@ async def set_settings(
         for k in keys[:-1]:
             target_delta = target_delta.setdefault(k, {})
         target_delta[keys[-1]] = values[path]
+
+    preserve_redacted_settings_secrets(current_settings, mutation_delta)
 
     # Preserve active Trakt OAuth tokens if client payload submitted empty strings or omitted them
     trakt_oauth = mutation_delta.get("content", {}).get("trakt", {}).get("oauth")

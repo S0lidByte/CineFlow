@@ -5,6 +5,9 @@ from __future__ import annotations
 import errno
 import sys
 import types
+from datetime import datetime
+from threading import Event
+from threading import Thread as RealThread
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -60,6 +63,7 @@ def _ensure_pyfuse3() -> None:
 
     stub.Operations = object
     stub.InodeT = InodeT
+    stub.FileNameT = bytes
     stub.FileHandleT = FileHandleT
     stub.ModeT = ModeT
     stub.FileInfo = FileInfo
@@ -323,8 +327,134 @@ def test_sync_full_preserves_pinned_file_without_replacing_new_root(mock_vfs):
 
     assert mock_vfs._inode_to_node[pyfuse3.ROOT_INODE] is mock_vfs._root
     assert mock_vfs._root is not old_root
-    assert mock_vfs._inode_to_node[parent.inode] is parent
+    assert mock_vfs._inode_to_node[parent.inode] is mock_vfs._root.get_child("movies")
+    assert pinned_file.parent is parent
     assert mock_vfs._inode_to_node[pinned_file.inode] is pinned_file
+
+
+def test_sync_full_concurrent_readers_see_published_tree_until_atomic_swap(mock_vfs):
+    """During _sync_full(), active readers continue seeing the published tree without disruption."""
+
+    initial_root = mock_vfs._root
+    movies_dir = VFSDirectory(
+        name="movies", inode=pyfuse3.InodeT(101), parent=initial_root
+    )
+    initial_root.add_child(movies_dir)
+    existing_file = VFSFile(
+        name="existing_movie.mkv",
+        inode=pyfuse3.InodeT(102),
+        parent=movies_dir,
+        original_filename="existing_movie.mkv",
+        file_size=500,
+        created_at="2020-01-01T00:00:00",
+        updated_at="2020-01-01T00:00:00",
+        entry_type="media",
+    )
+    movies_dir.add_child(existing_file)
+    mock_vfs._inode_to_node = {
+        pyfuse3.ROOT_INODE: initial_root,
+        movies_dir.inode: movies_dir,
+        existing_file.inode: existing_file,
+    }
+
+    # Verify initial state via published tree lookup / node
+    dirents = mock_vfs._inode_to_node.get(movies_dir.inode)
+    assert dirents is not None
+    assert "existing_movie.mkv" in dirents.children
+
+    # Track reader view halfway through sync
+    reader_saw_file_during_sync = False
+    staging_was_active_during_sync = False
+
+    def mock_add(item):
+        nonlocal reader_saw_file_during_sync, staging_was_active_during_sync
+        # Check that staging is active
+        if mock_vfs._staging_tree is not None:
+            staging_was_active_during_sync = True
+        # Check that concurrent reader querying self._inode_to_node still sees existing_file
+        node_during = mock_vfs._inode_to_node.get(movies_dir.inode)
+        if node_during is not None and "existing_movie.mkv" in node_during.children:
+            reader_saw_file_during_sync = True
+        return True
+
+    item_mock = MagicMock()
+    item_mock.id = 999
+    entry_mock = MagicMock()
+    entry_mock.media_item = item_mock
+    entry_mock.library_profiles = []
+
+    def mock_query(model):
+        q = MagicMock()
+        if "MediaEntry" in str(model):
+            q.filter.return_value.all.return_value = [entry_mock]
+        else:
+            q.filter.return_value.all.return_value = [item_mock]
+        return q
+
+    session = MagicMock()
+    session.query.side_effect = mock_query
+
+    with (
+        patch("program.services.filesystem.vfs.rivenvfs.db_session") as mock_db_session,
+        patch.object(mock_vfs, "add", side_effect=mock_add),
+    ):
+        mock_db_session.return_value.__enter__.return_value = session
+        mock_vfs._sync_full()
+
+    assert staging_was_active_during_sync is True
+    assert reader_saw_file_during_sync is True
+    assert mock_vfs._staging_tree is None
+    # Swapped to new tree
+    assert mock_vfs._root is not initial_root
+
+
+def test_sync_full_error_preserves_published_tree_rollback(mock_vfs):
+    """When an unhandled exception occurs in _sync_full(), the published tree is untouched."""
+
+    initial_root = mock_vfs._root
+    movies_dir = VFSDirectory(
+        name="movies", inode=pyfuse3.InodeT(201), parent=initial_root
+    )
+    initial_root.add_child(movies_dir)
+    existing_file = VFSFile(
+        name="safe_movie.mkv",
+        inode=pyfuse3.InodeT(202),
+        parent=movies_dir,
+        original_filename="safe_movie.mkv",
+        file_size=1000,
+        created_at="2020-01-01T00:00:00",
+        updated_at="2020-01-01T00:00:00",
+        entry_type="media",
+    )
+    movies_dir.add_child(existing_file)
+    mock_vfs._inode_to_node = {
+        pyfuse3.ROOT_INODE: initial_root,
+        movies_dir.inode: movies_dir,
+        existing_file.inode: existing_file,
+    }
+
+    item_mock = MagicMock()
+    item_mock.id = 888
+    session = MagicMock()
+    session.query.side_effect = RuntimeError("Fatal DB failure")
+
+    with (
+        patch("program.services.filesystem.vfs.rivenvfs.db_session") as mock_db_session,
+    ):
+        mock_db_session.return_value.__enter__.return_value = session
+        with pytest.raises(RuntimeError, match="Fatal DB failure"):
+            mock_vfs._sync_full()
+
+    # Verify staging was cleanly cleaned up
+    assert mock_vfs._staging_tree is None
+    # Verify the published tree was NEVER replaced
+    assert mock_vfs._root is initial_root
+    assert mock_vfs._inode_to_node[existing_file.inode] is existing_file
+    dirents = mock_vfs._list_directory_cached("/movies")
+    assert dirents is not None
+    assert len(dirents) == 1
+    assert dirents[0]["name"] == "safe_movie.mkv"
+    assert dirents[0]["is_directory"] is False
 
 
 def test_remove_parent_recursively_removes_children_only(mock_vfs):
@@ -821,3 +951,171 @@ def test_read_successful_after_transient_failure_on_new_handle(mock_vfs):
             assert data == b"RECOVERED_MEDIA_DATA"
 
     trio.run(exercise)
+
+
+def _stage_item(item_id, paths):
+    from program.media.media_entry import MediaEntry
+
+    entry = MagicMock(spec=MediaEntry)
+    entry.get_all_vfs_paths.return_value = paths
+    entry.original_filename = f"source-{item_id}.mkv"
+    entry.file_size = 100
+    entry.created_at = entry.updated_at = datetime(2020, 1, 1)
+    entry.library_profiles = []
+    item = MagicMock(id=item_id, media_entry=entry, subtitles=[])
+    entry.media_item = item
+    return item
+
+
+def _stage_session(items):
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.side_effect = [
+        [item.media_entry for item in items],
+        items,
+    ]
+    return session
+
+
+def _register_test_path(vfs, path, original="source-1.mkv"):
+    vfs._register_clean_path(path, original, 100, "2020-01-01", "2020-01-01")
+    return vfs._get_node_by_path(path)
+
+
+def test_full_sync_registration_failure_rolls_back_partial_tree(mock_vfs):
+    old = _register_test_path(mock_vfs, "/movies/old.mkv")
+    root, inode_map = mock_vfs._root, mock_vfs._inode_to_node
+    pending = mock_vfs._pending_invalidations.copy()
+    old_hash = mock_vfs._last_profile_hash
+    item = _stage_item(1, ["/movies/partial.mkv", "/movies/fail.mkv"])
+    original = mock_vfs._get_or_create_node
+
+    def fail_second(*args, **kwargs):
+        if kwargs.get("path") == "/movies/fail.mkv":
+            raise RuntimeError("registration failed")
+        return original(*args, **kwargs)
+
+    with (
+        patch("program.services.filesystem.vfs.rivenvfs.db_session") as db,
+        patch.object(mock_vfs, "_get_or_create_node", side_effect=fail_second),
+    ):
+        db.return_value.__enter__.return_value = _stage_session([item])
+        with pytest.raises(RuntimeError, match="registration failed"):
+            mock_vfs._sync_full()
+    assert mock_vfs._root is root
+    assert mock_vfs._inode_to_node is inode_map
+    assert mock_vfs._get_node_by_path(old.path) is old
+    assert mock_vfs._get_node_by_path("/movies/partial.mkv") is None
+    assert mock_vfs._last_profile_hash == old_hash
+    assert mock_vfs._pending_invalidations == pending
+    assert mock_vfs._staging_tree is None
+
+
+def test_full_sync_live_handlers_stable_ids_and_serialized_writer(mock_vfs):
+    old = _register_test_path(mock_vfs, "/movies/stable.mkv")
+    removed = _register_test_path(mock_vfs, "/movies/removed.mkv", "removed")
+    movies = old.parent
+    mock_vfs._file_handles[pyfuse3.FileHandleT(99)] = {
+        "inode": old.inode,
+        "path": old.path,
+    }
+    item = _stage_item(1, ["/movies/stable.mkv", "/movies/new.mkv"])
+    entered, resume, writer_started, writer_done = Event(), Event(), Event(), Event()
+    errors = []
+    original = mock_vfs._register_clean_path
+
+    def paused(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if kwargs.get("clean_path") == "/movies/stable.mkv":
+            entered.set()
+            assert resume.wait(5)
+        return result
+
+    def rebuild():
+        try:
+            mock_vfs._sync_full()
+        except BaseException as exc:
+            errors.append(exc)
+
+    def writer():
+        writer_started.set()
+        _register_test_path(mock_vfs, "/movies/concurrent.mkv", "concurrent")
+        writer_done.set()
+
+    async def readers():
+        attrs = await mock_vfs.lookup(movies.inode, b"stable.mkv")
+        assert attrs.st_ino == old.inode
+        assert (await mock_vfs.getattr(old.inode)).st_size == 100
+        await mock_vfs.lookup(movies.inode, b"removed.mkv")
+        return await mock_vfs.opendir(movies.inode, None)
+
+    with (
+        patch("program.services.filesystem.vfs.rivenvfs.db_session") as db,
+        patch.object(mock_vfs, "_register_clean_path", side_effect=paused),
+    ):
+        db.return_value.__enter__.return_value = _stage_session([item])
+        worker = RealThread(target=rebuild)
+        worker.start()
+        concurrent = None
+        try:
+            assert entered.wait(5)
+            assert mock_vfs._staging_tree is None
+            assert mock_vfs._get_node_by_path(old.path) is old
+            handle = trio.run(readers)
+            names = []
+            with patch(
+                "pyfuse3.readdir_reply",
+                side_effect=lambda token, name, attrs, offset: (
+                    names.append(name) or True
+                ),
+            ):
+                trio.run(mock_vfs.readdir, handle, 0, None)
+            assert b"stable.mkv" in names and b"new.mkv" not in names
+            concurrent = RealThread(target=writer)
+            concurrent.start()
+            assert writer_started.wait(5)
+            assert not writer_done.wait(0.05)
+        finally:
+            resume.set()
+            worker.join(5)
+            if concurrent is not None:
+                concurrent.join(5)
+    assert not worker.is_alive() and not errors
+    assert writer_done.is_set()
+    assert mock_vfs._get_node_by_path(old.path).inode == old.inode
+    assert mock_vfs._file_handles[pyfuse3.FileHandleT(99)]["inode"] == old.inode
+    assert mock_vfs._get_node_by_path("/movies").inode == handle
+    assert mock_vfs._get_node_by_path("/movies/new.mkv") is not None
+    assert mock_vfs._get_node_by_path("/movies/concurrent.mkv") is not None
+    assert mock_vfs._get_node_by_path(removed.path) is None
+    assert (trio.run(mock_vfs.getattr, removed.inode)).st_size == 100
+    names = []
+    with patch(
+        "pyfuse3.readdir_reply",
+        side_effect=lambda token, name, attrs, offset: names.append(name) or True,
+    ):
+        trio.run(mock_vfs.readdir, handle, 0, None)
+    assert b"new.mkv" in names and b"removed.mkv" not in names
+    trio.run(mock_vfs.forget, [(removed.inode, 2)])
+    assert removed.inode not in mock_vfs._inode_to_node
+    trio.run(mock_vfs.releasedir, handle)
+
+
+def test_full_sync_removed_open_directory_survives_until_release(mock_vfs):
+    child = _register_test_path(mock_vfs, "/movies/deleted/child.mkv")
+    directory = child.parent
+    handle = trio.run(mock_vfs.opendir, directory.inode, None)
+    with patch("program.services.filesystem.vfs.rivenvfs.db_session") as db:
+        db.return_value.__enter__.return_value = _stage_session([])
+        mock_vfs._sync_full()
+    names = []
+    with patch(
+        "pyfuse3.readdir_reply",
+        side_effect=lambda token, name, attrs, offset: names.append(name) or True,
+    ):
+        trio.run(mock_vfs.readdir, handle, 0, None)
+    assert b"child.mkv" in names
+    trio.run(mock_vfs.forget, [(child.inode, 1)])
+    assert child.inode in mock_vfs._inode_to_node
+    trio.run(mock_vfs.releasedir, handle)
+    assert child.inode not in mock_vfs._inode_to_node
+    assert directory.inode not in mock_vfs._inode_to_node

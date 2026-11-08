@@ -20,7 +20,12 @@ from program.services.downloaders.models import (
 from program.settings import settings_manager
 from program.utils.request import CircuitBreakerOpen, SmartResponse, SmartSession
 
-from .shared import DownloaderBase, premium_days_left
+from .shared import (
+    DebridInfringingError,
+    DownloaderBase,
+    TorrentDeadOrCorruptError,
+    premium_days_left,
+)
 
 
 class DebridLinkErrorResponse(BaseModel):
@@ -284,6 +289,14 @@ class DebridLinkDownloader(DownloaderBase):
                     pass
 
             raise
+        except (TorrentDeadOrCorruptError, DebridInfringingError):
+            if torrent_id:
+                try:
+                    self.delete_torrent(torrent_id)
+                except Exception:
+                    pass
+
+            raise
         except DebridLinkError as e:
             logger.warning(f"Availability check failed [{infohash}]: {e}")
 
@@ -334,6 +347,17 @@ class DebridLinkDownloader(DownloaderBase):
 
         if not info:
             return None, "no torrent info returned by Debrid-Link", None
+
+        # Check for confirmed corrupt/dead states
+        status_lower = info.status.lower() if isinstance(info.status, str) else ""
+        if status_lower in ("dead", "bad_torrent"):
+            raise TorrentDeadOrCorruptError(
+                f"Invalid on Debrid-Link (status={info.status})"
+            )
+
+        # Generic transfer/provider error is non-permanent:
+        if status_lower == "error":
+            return None, f"Debrid-Link transfer error (status={info.status})", None
 
         if not info.files:
             return None, "no files present in the torrent", None

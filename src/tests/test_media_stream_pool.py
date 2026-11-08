@@ -256,3 +256,30 @@ def test_injected_pool_admission_timeout_heals_failed_generation():
             )
 
     trio.run(_run)
+
+
+def test_trio_streaming_http_pool_teardown_shielded_under_cancellation():
+    """Teardown clears _clients and closes httpx AsyncClients even when called inside a cancelled scope."""
+    from program.services.streaming.http_pool import TrioStreamingHttpPool
+
+    async def _run() -> None:
+        pool = TrioStreamingHttpPool()
+        assert len(pool._clients) > 0
+        clients = list(pool._clients.values())
+        for c in clients:
+            assert not c.is_closed
+
+        # Enter a cancelled cancel scope to simulate nursery unmount cancellation
+        with trio.CancelScope() as scope:
+            scope.cancel()
+            assert scope.cancel_called
+            await pool.teardown()
+
+        assert pool._closed is True
+        assert pool.active_leases == 0
+        assert not pool._retired_generations
+        assert not pool._clients
+        for c in clients:
+            assert c.is_closed
+
+    trio.run(_run)

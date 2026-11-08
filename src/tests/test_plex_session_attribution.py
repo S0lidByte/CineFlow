@@ -121,7 +121,9 @@ def test_plex_webhook_endpoint_session_attribution():
         )
 
         orig_mount = settings_manager.settings.filesystem.mount_path
+        orig_secret = settings_manager.settings.content.plex_webhook.webhook_secret
         settings_manager.settings.filesystem.mount_path = Path("/mnt/rivenfs")
+        settings_manager.settings.content.plex_webhook.webhook_secret = ""
 
         plex_payload = {
             "event": "media.play",
@@ -168,8 +170,8 @@ def test_plex_webhook_endpoint_session_attribution():
             "http_version": "1.1",
             "method": "POST",
             "scheme": "http",
-            "path": "/api/v1/webhooks/plex",
-            "raw_path": b"/api/v1/webhooks/plex",
+            "path": "/api/v1/webhook/plex",
+            "raw_path": b"/api/v1/webhook/plex",
             "query_string": b"",
             "headers": [
                 (
@@ -211,6 +213,7 @@ def test_plex_webhook_endpoint_session_attribution():
             )
         finally:
             settings_manager.settings.filesystem.mount_path = orig_mount
+            settings_manager.settings.content.plex_webhook.webhook_secret = orig_secret
             playback_telemetry_collector.register_stream_complete(
                 "stream-endpoint-1", title="Supergirl.mkv"
             )
@@ -469,3 +472,88 @@ def test_plex_vfs_path_contract_and_posix_case_sensitivity():
         )
     finally:
         settings_manager.settings.filesystem.mount_path = orig_mount
+
+
+def test_plex_playback_intent_expires_after_ttl(monkeypatch):
+    """Stale Plex playback intent expires so missing stop events cannot keep media foreground forever."""
+    import time
+
+    base_time = 1000.0
+    current_time = base_time
+    monkeypatch.setattr(time, "monotonic", lambda: current_time)
+
+    with playback_telemetry_collector._lock:
+        playback_telemetry_collector._plex_playbacks.clear()
+
+    playback_telemetry_collector.update_plex_playback(
+        event="media.play",
+        server_uuid="srv-ttl",
+        player_uuid="player-ttl",
+        rating_key="991",
+        media_path="/movies/Temporary.mkv",
+    )
+    assert playback_telemetry_collector.active_plex_playback_count == 1
+    assert playback_telemetry_collector.is_media_foreground("/movies/Temporary.mkv")
+
+    # Advance time within TTL
+    current_time = base_time + 600.0
+    assert playback_telemetry_collector.active_plex_playback_count == 1
+    assert playback_telemetry_collector.is_media_foreground("/movies/Temporary.mkv")
+
+    # Advance time past TTL (default 1800s)
+    current_time = base_time + 1801.0
+    assert playback_telemetry_collector.active_plex_playback_count == 0
+    assert not playback_telemetry_collector.is_media_foreground("/movies/Temporary.mkv")
+
+
+def test_shared_nat_ip_matching_does_not_corrupt_unrelated_streams():
+    """When multiple streams share an IP, path/title determines attribution and ambiguous events are ignored."""
+    with playback_telemetry_collector._lock:
+        playback_telemetry_collector._sessions.clear()
+
+    # Stream 1 and Stream 2 share the same NAT public address
+    tracker_living = playback_telemetry_collector.register_stream_start(
+        stream_id="stream-living-room",
+        title="Inception.2010.1080p.mkv",
+        client_ip="198.51.100.10",
+    )
+    tracker_bed = playback_telemetry_collector.register_stream_start(
+        stream_id="stream-bedroom",
+        title="Interstellar.2014.2160p.mkv",
+        client_ip="198.51.100.10",
+    )
+
+    # 1. Webhook for Inception from that shared IP must only attribute to the Inception stream
+    matched = playback_telemetry_collector.correlate_plex_session(
+        event="media.play",
+        user_name="Alice",
+        player_device="Living Room",
+        client_ip="198.51.100.10",
+        file_path="/movies/Inception.2010.1080p.mkv",
+        decision="directplay",
+    )
+    assert matched == 1
+    assert tracker_living.user_name == "Alice"
+    assert tracker_living.decision == "direct_play"
+    assert tracker_bed.user_name is None
+    assert tracker_bed.decision is None
+
+    # 2. Webhook with ambiguous IP and no matching path/title must NOT attribute to either
+    ambiguous_matched = playback_telemetry_collector.correlate_plex_session(
+        event="media.play",
+        user_name="Eve",
+        player_device="Unknown Player",
+        client_ip="198.51.100.10",
+        file_path="/movies/SomeOtherMovie.mkv",
+    )
+    assert ambiguous_matched == 0
+    assert tracker_bed.user_name is None
+    assert tracker_living.user_name == "Alice"
+
+    # Cleanup
+    playback_telemetry_collector.register_stream_complete(
+        "stream-living-room", title="Inception.2010.1080p.mkv"
+    )
+    playback_telemetry_collector.register_stream_complete(
+        "stream-bedroom", title="Interstellar.2014.2160p.mkv"
+    )

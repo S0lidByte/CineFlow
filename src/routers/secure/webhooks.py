@@ -30,6 +30,14 @@ router = APIRouter(
 
 WEBHOOK_SECRET_HEADER = "x-webhook-secret"
 PLEX_SCROBBLE_EVENT = "media.scrobble"
+PLEX_WEBHOOK_API_KEY_DESCRIPTION = (
+    "Legacy backend API key accepted in the api_key query parameter for URL-only "
+    "webhook clients. Header or bearer API authentication is also accepted."
+)
+PLEX_WEBHOOK_SHARED_SECRET_DESCRIPTION = (
+    "Optional additional secret configured under content.plex_webhook.webhook_secret. "
+    "When set, send X-Webhook-Secret or the webhook_secret query parameter."
+)
 
 # Dedup repeated Plex/Tautulli deliveries of the same scrobble (24h TTL).
 _HISTORY_IDEMPOTENCY: TTLCache[str, bool] = TTLCache[str, bool](maxsize=4096, ttl=86400)
@@ -273,6 +281,44 @@ async def overseerr(request: Request) -> OverseerrWebhookResponse:
 @router.post(
     "/plex",
     response_model=PlexWebhookResponse,
+    openapi_extra={
+        "parameters": [
+            {
+                "name": "webhook_secret",
+                "in": "query",
+                "required": False,
+                "description": PLEX_WEBHOOK_SHARED_SECRET_DESCRIPTION,
+                "schema": {"type": "string"},
+            },
+            {
+                "name": WEBHOOK_SECRET_HEADER,
+                "in": "header",
+                "required": False,
+                "description": PLEX_WEBHOOK_SHARED_SECRET_DESCRIPTION,
+                "schema": {"type": "string"},
+            },
+        ],
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {"schema": {"type": "object"}},
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {"payload": {"type": "string"}},
+                        "required": ["payload"],
+                    }
+                },
+                "application/x-www-form-urlencoded": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {"payload": {"type": "string"}},
+                        "required": ["payload"],
+                    }
+                },
+            },
+        },
+    },
 )
 async def plex_webhook(request: Request) -> PlexWebhookResponse:
     """Plex webhook: parse stream events (play/pause/stop/scrobble), attribute sessions & sync Trakt.

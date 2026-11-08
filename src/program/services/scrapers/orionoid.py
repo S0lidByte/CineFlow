@@ -281,7 +281,12 @@ class Orionoid(ScraperService[OrionoidConfig]):
             raw_params["debridlookup"] = "realdebrid"
 
         if isinstance(item, (Show, Season, Episode)):
-            raw_params["idtvdb"] = item.tvdb_id
+            tvdb_id = getattr(item, "tvdb_id", None)
+            if not tvdb_id and hasattr(item, "top_parent"):
+                top_parent = getattr(item, "top_parent", None)
+                if top_parent is not None:
+                    tvdb_id = getattr(top_parent, "tvdb_id", None)
+            raw_params["idtvdb"] = tvdb_id
         elif isinstance(item, Movie):
             raw_params["idtmdb"] = item.tmdb_id
 

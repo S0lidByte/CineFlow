@@ -253,8 +253,61 @@ async def test_active_stream_blacklisting_lifecycle_ordering(
     assert call_order.index("updater_refresh") < call_order.index("updater_empty_trash")
 
     program.em.add_event.assert_called_once()
+
+
+@patch("program.services.filesystem.vfs.db.di")
+@patch("program.services.filesystem.vfs.db.apply_item_mutation")
+def test_schedule_dead_link_rescrape_soft_does_not_blacklist(mock_apply, mock_di):
+    """Soft/transient CDN validate failure must re-scrape WITHOUT blacklisting active stream."""
+    from program.services.filesystem.vfs.db import VFSDatabase
+
+    episode = _episode_with_streams()
+    episode.prepare_for_automatic_rescrape = MagicMock()
+    entry = MagicMock()
+    entry.media_item = episode
+    session = MagicMock()
+    program = MagicMock()
+    mock_di.__getitem__.return_value = program
+
+    def _apply_side_effect(*, program, item, mutation_fn, session):
+        mutation_fn(item, session)
+        entry.media_item = None
+
+    mock_apply.side_effect = _apply_side_effect
+
+    vfs_db = VFSDatabase(downloader=MagicMock())
+
+    assert vfs_db.schedule_dead_link_rescrape(entry, session, permanent=False) is True
+    episode.prepare_for_automatic_rescrape.assert_called_once_with(blacklist=False)
+
+
+@patch("program.services.filesystem.vfs.db.di")
+@patch("program.services.filesystem.vfs.db.apply_item_mutation")
+def test_schedule_dead_link_rescrape_permanent_does_blacklist(mock_apply, mock_di):
+    """Permanent CDN dead-link must re-scrape WITH blacklisting."""
+    from program.services.filesystem.vfs.db import VFSDatabase
+
+    episode = _episode_with_streams()
+    episode.prepare_for_automatic_rescrape = MagicMock()
+    entry = MagicMock()
+    entry.media_item = episode
+    session = MagicMock()
+    program = MagicMock()
+    mock_di.__getitem__.return_value = program
+
+    def _apply_side_effect(*, program, item, mutation_fn, session):
+        mutation_fn(item, session)
+        entry.media_item = None
+
+    mock_apply.side_effect = _apply_side_effect
+
+    vfs_db = VFSDatabase(downloader=MagicMock())
+
+    assert vfs_db.schedule_dead_link_rescrape(entry, session, permanent=True) is True
+    episode.prepare_for_automatic_rescrape.assert_called_once_with(blacklist=True)
+
     event = program.em.add_event.call_args.args[0]
-    assert event.emitted_by == "RetryItem"
+    assert event.emitted_by == "VFS"
     assert event.item_id == 42
 
 

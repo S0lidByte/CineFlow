@@ -652,7 +652,11 @@ class PlexLibraryModel(Observable):
     enabled: bool = Field(default=False, description="Enable Plex library updates")
     token: str = Field(default="", description="Plex authentication token")
     url: EmptyOrUrl = Field(
-        default="http://localhost:32400", description="Plex server URL"
+        default="http://localhost:32400",
+        description=(
+            "Plex server URL reachable from the backend container/network. "
+            "Use the Plex service hostname (not container localhost) when on Compose."
+        ),
     )
 
 
@@ -767,9 +771,11 @@ class PlexWebhookModel(Observable):
     webhook_secret: str = Field(
         default="",
         description=(
-            "Optional shared secret for POST /webhook/plex. When set, requests must "
-            "include matching X-Webhook-Secret header or webhook_secret query param "
-            "(in addition to API auth). Put the secret in the Plex webhook URL."
+            "Optional user-generated shared secret for POST /api/v1/webhook/plex. "
+            "When configured, the sender must provide X-Webhook-Secret or the "
+            "webhook_secret query parameter, in addition to backend API auth. "
+            "The secret is not a Plex-issued token and is separate from the Plex "
+            "library updater token."
         ),
     )
     sync_to_trakt: bool = Field(

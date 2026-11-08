@@ -3,16 +3,19 @@
 from unittest.mock import Mock, patch
 
 import pytest
-from RTN import ParsedData
+from RTN import ParsedData, Torrent
 
 from program.media.item import Episode, Movie, Season, Show
+from program.media.stream import Stream
 from program.services.downloaders import Downloader
 from program.services.downloaders.models import (
     DebridFile,
     DownloadedTorrent,
     TorrentContainer,
+    TorrentContentMismatchException,
     TorrentInfo,
 )
+from program.services.downloaders.shared import parse_filename
 
 
 @pytest.fixture
@@ -95,6 +98,215 @@ def test_match_file_to_item_episode(downloader):
         )
 
     assert matched is True
+
+
+def test_update_item_attributes_rejects_wrong_movie_sequel_and_year(downloader):
+    item = Movie(
+        {
+            "imdb_id": "tt1119646",
+            "requested_by": "user",
+            "title": "The Hangover",
+            "year": 2009,
+        }
+    )
+    wrong_file, result = _download_result("The Hangover 3 (2013) 720p BluRay x265.mkv")
+    result.container.files = [wrong_file]
+
+    with pytest.raises(TorrentContentMismatchException):
+        downloader.update_item_attributes(item, result)
+    assert item.filesystem_entries == []
+
+
+def test_update_item_attributes_accepts_matching_movie_file(downloader):
+    item = Movie(
+        {
+            "imdb_id": "tt1119646",
+            "requested_by": "user",
+            "title": "The Hangover",
+            "year": 2009,
+        }
+    )
+    matching_file, result = _download_result(
+        "The Hangover (2009) EXTENDED 720p BluRay x265.mkv"
+    )
+    result.container.files = [matching_file]
+
+    with patch.object(downloader, "_update_attributes") as update:
+        assert downloader.update_item_attributes(item, result) is True
+
+    update.assert_called_once()
+
+
+def test_update_item_attributes_accepts_matching_movie_without_leading_article(
+    downloader,
+):
+    item = Movie(
+        {
+            "imdb_id": "tt1119646",
+            "requested_by": "user",
+            "title": "The Hangover",
+            "year": 2009,
+            "aliases": {"xx": ["Una notte da leoni"]},
+        }
+    )
+    matching_file, result = _download_result("Hangover 2009 1080p BluRay.mkv")
+    result.container.files = [matching_file]
+
+    with patch.object(downloader, "_update_attributes") as update:
+        assert downloader.update_item_attributes(item, result) is True
+
+    update.assert_called_once()
+
+
+def test_update_item_attributes_accepts_movie_title_alias(downloader):
+    item = Movie(
+        {
+            "imdb_id": "tt1119646",
+            "requested_by": "user",
+            "title": "The Hangover",
+            "year": 2009,
+            "aliases": {"xx": ["Una notte da leoni"]},
+        }
+    )
+    alias_file, result = _download_result("Una notte da leoni (2009) 720p.mkv")
+    result.container.files = [alias_file]
+
+    with patch.object(downloader, "_update_attributes") as update:
+        assert downloader.update_item_attributes(item, result) is True
+
+    update.assert_called_once()
+
+
+def test_update_item_attributes_accepts_release_year_within_one_year(downloader):
+    item = Movie(
+        {
+            "imdb_id": "tt1119646",
+            "requested_by": "user",
+            "title": "The Hangover",
+            "year": 2009,
+        }
+    )
+    file, result = _download_result("The Hangover (2008) 720p BluRay.mkv")
+    result.container.files = [file]
+
+    with patch.object(downloader, "_update_attributes") as update:
+        assert downloader.update_item_attributes(item, result) is True
+
+    update.assert_called_once()
+
+
+def test_yearless_movie_file_is_not_misclassified_as_wrong_content(downloader):
+    item = Movie(
+        {
+            "imdb_id": "tt1119646",
+            "requested_by": "user",
+            "title": "The Hangover",
+            "year": 2009,
+        }
+    )
+    yearless_file, result = _download_result("The Hangover 720p BluRay.mkv")
+    wrong_year_file, _ = _download_result("The Hangover (2013) 720p BluRay.mkv")
+    result.container.files = [yearless_file, wrong_year_file]
+
+    with patch.object(downloader, "_update_attributes") as update:
+        assert downloader.update_item_attributes(item, result) is True
+
+    update.assert_called_once()
+    assert update.call_args.args[1] is yearless_file
+
+
+def test_update_item_attributes_rejects_different_movie_title(downloader):
+    item = Movie(
+        {
+            "imdb_id": "tt1119646",
+            "requested_by": "user",
+            "title": "The Hangover",
+            "year": 2009,
+        }
+    )
+    file, result = _download_result("The Terminal (2004) 720p BluRay.mkv")
+    result.container.files = [file]
+
+    with pytest.raises(TorrentContentMismatchException):
+        downloader.update_item_attributes(item, result)
+
+
+def test_manual_download_returns_false_for_wrong_movie_content(downloader):
+    item = Movie(
+        {
+            "imdb_id": "tt1119646",
+            "requested_by": "user",
+            "title": "The Hangover",
+            "year": 2009,
+        }
+    )
+    stream = Stream(
+        Torrent(
+            raw_title="The Terminal (2004) 720p BluRay",
+            infohash="a" * 40,
+            data=parse_filename("The Terminal (2004) 720p BluRay.mkv"),
+            rank=0,
+            lev_ratio=1.0,
+        )
+    )
+    wrong_file, _ = _download_result("The Terminal (2004) 720p BluRay.mkv")
+    container = TorrentContainer(infohash=stream.infohash, files=[wrong_file])
+    download = DownloadedTorrent(
+        id=1,
+        info=TorrentInfo(id=1, name="The Terminal (2004)"),
+        infohash=stream.infohash,
+        container=container,
+    )
+    downloader.validate_stream_on_service = Mock(return_value=container)
+    downloader.download_cached_stream_on_service = Mock(return_value=download)
+    downloader.update_item_attributes = Mock(
+        side_effect=TorrentContentMismatchException("wrong movie")
+    )
+    item.store_state = Mock()
+
+    assert downloader.start_manual_download(item, stream, downloader.service) is False
+    item.store_state.assert_not_called()
+
+
+def test_movie_pack_prefers_exact_year_when_matching_requested_title(downloader):
+    item = Movie(
+        {
+            "imdb_id": "tt1119646",
+            "requested_by": "user",
+            "title": "King Kong",
+            "year": 2005,
+        }
+    )
+    remaster, result = _download_result("King Kong (2006) 1080p BluRay.mkv")
+    theatrical, _ = _download_result("King Kong (2005) 1080p BluRay.mkv")
+    result.container.files = [remaster, theatrical]
+
+    with patch.object(downloader, "_update_attributes") as update:
+        assert downloader.update_item_attributes(item, result) is True
+
+    update.assert_called_once()
+    assert update.call_args.args[1] is theatrical
+
+
+def test_update_item_attributes_keeps_requested_movie_from_trilogy_pack(downloader):
+    item = Movie(
+        {
+            "imdb_id": "tt1119646",
+            "requested_by": "user",
+            "title": "The Hangover",
+            "year": 2009,
+        }
+    )
+    matching_file, result = _download_result("The Hangover (2009) 720p BluRay.mkv")
+    sequel_file, _ = _download_result("The Hangover 2 (2011) 720p BluRay.mkv")
+    third_film_file, _ = _download_result("The Hangover 3 (2013) 720p BluRay.mkv")
+    result.container.files = [matching_file, sequel_file, third_film_file]
+
+    with patch.object(downloader, "_update_attributes") as update:
+        assert downloader.update_item_attributes(item, result) is True
+
+    update.assert_called_once()
+    assert update.call_args.args[1] is matching_file
 
 
 def test_match_file_to_item_season_matches_all_files(downloader):

@@ -15,6 +15,7 @@ from program.utils.plex_webhook import (
     plex_media_kind,
     sanitize_plex_guids,
 )
+from routers import app_router
 from routers.secure import webhooks as webhooks_mod
 from routers.secure.webhooks import verify_plex_webhook_secret
 
@@ -205,6 +206,87 @@ def test_sync_skips_when_oauth_disconnected():
             di[TraktAPI] = previous
         else:
             del di[TraktAPI]
+
+
+def test_mounted_plex_webhook_requires_api_auth_and_configured_secret(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(
+        "auth.api_key_matches", lambda value: value == "legacy-test-key"
+    )
+    monkeypatch.setattr(
+        "routers.secure.webhooks.settings_manager",
+        MagicMock(
+            settings=MagicMock(
+                content=MagicMock(
+                    plex_webhook=MagicMock(
+                        webhook_secret="shared-test-secret", sync_to_trakt=False
+                    )
+                )
+            )
+        ),
+    )
+    app = FastAPI()
+    app.include_router(app_router)
+    client = TestClient(app)
+    body = {"event": "media.play", "Metadata": {"type": "movie", "title": "Dune"}}
+    route = "/api/v1/webhook/plex"
+
+    assert client.post(route, json=body).status_code == 401
+    assert (
+        client.post(route, json=body, params={"api_key": "legacy-test-key"}).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            route,
+            json=body,
+            params={"api_key": "legacy-test-key", "webhook_secret": "wrong"},
+        ).status_code
+        == 401
+    )
+    response = client.post(
+        route,
+        json=body,
+        params={"api_key": "legacy-test-key"},
+        headers={"x-webhook-secret": "shared-test-secret"},
+    )
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+
+def test_mounted_plex_webhook_accepts_url_auth_and_form_payload_without_secret(
+    monkeypatch,
+):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(
+        "auth.api_key_matches", lambda value: value == "legacy-test-key"
+    )
+    monkeypatch.setattr(
+        "routers.secure.webhooks.settings_manager",
+        MagicMock(
+            settings=MagicMock(
+                content=MagicMock(
+                    plex_webhook=MagicMock(webhook_secret="", sync_to_trakt=False)
+                )
+            )
+        ),
+    )
+    app = FastAPI()
+    app.include_router(app_router)
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/webhook/plex",
+        params={"api_key": "legacy-test-key"},
+        data={
+            "payload": '{"event":"media.scrobble","Metadata":{"type":"movie","guid":"imdb://tt1"}}'
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["message"] == "dry-run (no Trakt write)"
 
 
 def test_add_items_to_watched_history_posts_json(monkeypatch):

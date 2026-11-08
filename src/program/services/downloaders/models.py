@@ -61,6 +61,10 @@ class NoMatchingFilesException(Exception):
     """Exception raised for torrents that do not match the expected files"""
 
 
+class TorrentContentMismatchException(NoMatchingFilesException):
+    """Torrent files are valid but belong to different media than the requested item."""
+
+
 class InvalidDebridFileException(Exception):
     """Exception raised for errors creating a DebridFile"""
 

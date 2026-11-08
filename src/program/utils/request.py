@@ -68,6 +68,16 @@ class TokenBucket:
 
             return False
 
+    def refund(self, tokens: int = 1) -> None:
+        """Refund previously acquired tokens, capped at bucket capacity."""
+        amount = max(0.0, float(tokens))
+        if amount == 0:
+            return
+
+        with self._lock:
+            self._refill()
+            self.tokens = min(self.capacity, self.tokens + amount)
+
     def wait(
         self,
         tokens: int = 1,
@@ -148,16 +158,7 @@ class CircuitBreakerOpen(RuntimeError):
 
 
 class CircuitBreaker:
-    """
-    Circuit breaker for per-domain failure handling.
-
-    Attributes:
-        failure_threshold (int): Number of failures before tripping.
-        recovery_time (int): Seconds to wait before attempting recovery.
-        failures (int): Current failure count.
-        last_failure_time (float): Timestamp of last failure.
-        state (str): Current state: 'CLOSED', 'OPEN', 'HALF_OPEN'.
-    """
+    """Thread-safe per-domain circuit breaker with a single half-open probe."""
 
     def __init__(
         self,
@@ -165,58 +166,139 @@ class CircuitBreaker:
         recovery_time: int = 30,
         name: str = "unknown",
     ):
-        """Initialize the circuit breaker."""
         self.failure_threshold = failure_threshold
         self.recovery_time = recovery_time
         self.failures = 0
         self.last_failure_time: float | None = None
         self.state = "CLOSED"
         self.name = name
+        self._lock = threading.Lock()
+        self._generation = 0
+        self._probe_active = False
 
-    def before_request(self):
-        """
-        Check circuit breaker before making a request.
+    def check_available(self) -> None:
+        """Fail fast for unavailable states without reserving a probe permit."""
+        blocked = False
+        retry_after: float | None = None
+        with self._lock:
+            if self.state == "OPEN":
+                elapsed = (
+                    time.monotonic() - self.last_failure_time
+                    if self.last_failure_time is not None
+                    else self.recovery_time + 1
+                )
+                if elapsed <= self.recovery_time:
+                    blocked = True
+                    retry_after = max(0.0, self.recovery_time - elapsed)
+            elif self.state == "HALF_OPEN" and self._probe_active:
+                blocked = True
 
-        Raises:
-            RuntimeError: If the breaker is OPEN and recovery time not passed.
-        """
-        if self.state == "OPEN" and self.last_failure_time:
-            elapsed = time.monotonic() - self.last_failure_time
+        if blocked:
+            logger.debug(f"Breaker for {self.name} OPEN (fail-fast)")
+            raise CircuitBreakerOpen(self.name, retry_after_seconds=retry_after)
 
-            if elapsed > self.recovery_time:
-                self.state = "HALF_OPEN"
-                logger.debug(f"Breaker for {self.name} HALF_OPEN (probe)")
+    def before_request(self) -> tuple[int, bool]:
+        """Atomically return a generation permit, or fail fast while OPEN/probing."""
+        log_message: str | None = None
+        blocked = False
+        retry_after: float | None = None
+        permit: tuple[int, bool] | None = None
+        with self._lock:
+            if self.state == "OPEN":
+                elapsed = (
+                    time.monotonic() - self.last_failure_time
+                    if self.last_failure_time is not None
+                    else self.recovery_time + 1
+                )
+                if elapsed <= self.recovery_time:
+                    blocked = True
+                    retry_after = max(0.0, self.recovery_time - elapsed)
+                else:
+                    self.state = "HALF_OPEN"
+                    self._generation += 1
+                    self._probe_active = True
+                    log_message = "probe"
+                    permit = (self._generation, True)
+            elif self.state == "HALF_OPEN":
+                if self._probe_active:
+                    # Keep the existing no-retry-after contract; callers use their
+                    # established fallback cooldown when another probe is in flight.
+                    blocked = True
+                else:
+                    self._probe_active = True
+                    permit = (self._generation, True)
             else:
-                retry_after = max(0.0, self.recovery_time - elapsed)
-                logger.debug(f"Breaker for {self.name} OPEN (fail-fast)")
-                raise CircuitBreakerOpen(self.name, retry_after_seconds=retry_after)
+                permit = (self._generation, False)
 
-    def after_request(self, success: bool):
-        """
-        Update circuit breaker state after a request.
+        if log_message == "probe":
+            logger.debug(f"Breaker for {self.name} HALF_OPEN (probe)")
+        if blocked:
+            logger.debug(f"Breaker for {self.name} OPEN (fail-fast)")
+            raise CircuitBreakerOpen(self.name, retry_after_seconds=retry_after)
+        assert permit is not None
+        return permit
 
-        Args:
-            success (bool): True if the request succeeded, False otherwise.
-        """
+    def after_request(
+        self, success: bool, permit: tuple[int, bool] | None = None
+    ) -> None:
+        """Record a terminal outcome, ignoring results from stale generations."""
+        opened = False
+        reset = False
+        with self._lock:
+            if permit is not None:
+                generation, is_probe = permit
+                if generation != self._generation:
+                    return
+                if is_probe:
+                    if not self._probe_active or self.state != "HALF_OPEN":
+                        return
+                    self._probe_active = False
+                    if success:
+                        self._reset_locked()
+                        reset = True
+                    else:
+                        self.failures = max(self.failure_threshold, self.failures + 1)
+                        self.last_failure_time = time.monotonic()
+                        self.state = "OPEN"
+                        self._generation += 1
+                        opened = True
+                elif self.state != "CLOSED":
+                    return
+                elif not success:
+                    self.failures += 1
+                    self.last_failure_time = time.monotonic()
+                    if self.failures >= self.failure_threshold:
+                        self.state = "OPEN"
+                        self._generation += 1
+                        opened = True
+                else:
+                    # Preserve the prior CLOSED-state behavior: a success does not
+                    # erase failures recorded by other concurrent requests.
+                    return
+            elif success:
+                # Preserve legacy direct-call behavior for callers without permits.
+                if self.state in ("HALF_OPEN", "OPEN"):
+                    self._reset_locked()
+                    reset = True
+            else:
+                self.failures += 1
+                self.last_failure_time = time.monotonic()
+                if self.failures >= self.failure_threshold:
+                    self.state = "OPEN"
+                    self._generation += 1
+                    opened = True
 
-        if success:
-            if self.state in ("HALF_OPEN", "OPEN"):
-                self._reset()
-        else:
-            self.failures += 1
-            self.last_failure_time = time.monotonic()
+        if opened:
+            logger.warning(f"Circuit breaker tripped to OPEN for {self.name}")
+        elif reset:
+            logger.info(f"Circuit breaker reset to CLOSED for {self.name}")
 
-            if self.failures >= self.failure_threshold:
-                self.state = "OPEN"
-                logger.warning(f"Circuit breaker tripped to OPEN for {self.name}")
-
-    def _reset(self):
-        """Reset the circuit breaker to CLOSED state."""
-
+    def _reset_locked(self) -> None:
         self.failures = 0
         self.state = "CLOSED"
         self.last_failure_time = None
-        logger.info(f"Circuit breaker reset to CLOSED for {self.name}")
+        self._probe_active = False
+        self._generation += 1
 
 
 class SmartResponse(requests.Response):
@@ -483,21 +565,21 @@ class SmartSession:
         domain = parsed.hostname.lower() if parsed.hostname else ""
 
         breaker = self.breakers.get(domain)
-
         if breaker:
-            breaker.before_request()
-
+            breaker.check_available()
         limiter = self.limiters.get(domain)
+        limiter_token_acquired = False
 
         if limiter:
             if operation_deadline is not None:
-                acquired = limiter.wait(deadline=operation_deadline)
-                if not acquired:
+                limiter_token_acquired = limiter.wait(deadline=operation_deadline)
+                if not limiter_token_acquired:
                     raise OperationDeadlineExceeded(
                         f"Operation deadline exceeded waiting for rate limiter token for {domain}"
                     )
             else:
                 limiter.wait()
+                limiter_token_acquired = True
 
         base_headers = dict(self.headers)
         req_headers = kwargs.pop("headers", {})
@@ -588,8 +670,24 @@ class SmartSession:
                 client = tmp_client
 
         # Helper to run the request attempt loop with a given client
+        permit: tuple[int, bool] | None = None
+        permit_recorded = False
+
+        def finish(success: bool) -> None:
+            nonlocal permit_recorded
+            if breaker and not permit_recorded and permit is not None:
+                breaker.after_request(success, permit)
+                permit_recorded = True
+
         def _run_with_client(active_client: httpx.Client) -> SmartResponse:
-            nonlocal tmp_client
+            nonlocal permit, tmp_client, limiter_token_acquired
+            try:
+                permit = breaker.before_request() if breaker else None
+            except CircuitBreakerOpen:
+                if limiter and limiter_token_acquired:
+                    limiter.refund()
+                    limiter_token_acquired = False
+                raise
             attempt = 0
 
             while True:
@@ -598,8 +696,7 @@ class SmartSession:
                 if operation_deadline is not None:
                     remaining_time = operation_deadline - time.monotonic()
                     if remaining_time <= 0:
-                        if breaker:
-                            breaker.after_request(False)
+                        finish(False)
                         raise OperationDeadlineExceeded(
                             "Operation deadline exceeded during retry loop"
                         )
@@ -665,22 +762,25 @@ class SmartSession:
                         delay = self._compute_retry_delay(hx_resp, attempt)
 
                         if attempt <= self.retries:
-                            if operation_deadline is not None:
-                                remaining_sleep = operation_deadline - time.monotonic()
-                                if remaining_sleep <= 0:
-                                    if breaker:
-                                        breaker.after_request(False)
-                                    raise OperationDeadlineExceeded(
-                                        f"Operation deadline exceeded before status retry sleep (delay={delay:.2f}s)"
+                            try:
+                                if operation_deadline is not None:
+                                    remaining_sleep = (
+                                        operation_deadline - time.monotonic()
                                     )
-                                if delay > remaining_sleep:
-                                    time.sleep(remaining_sleep)
-                                    if breaker:
-                                        breaker.after_request(False)
-                                    raise OperationDeadlineExceeded(
-                                        f"Operation deadline exceeded during status retry sleep (needed={delay:.2f}s, remaining={remaining_sleep:.2f}s)"
-                                    )
-                            time.sleep(delay)
+                                    if remaining_sleep <= 0:
+                                        finish(False)
+                                        raise OperationDeadlineExceeded(
+                                            f"Operation deadline exceeded before status retry sleep (delay={delay:.2f}s)"
+                                        )
+                                    if delay > remaining_sleep:
+                                        time.sleep(remaining_sleep)
+                                        finish(False)
+                                        raise OperationDeadlineExceeded(
+                                            f"Operation deadline exceeded during status retry sleep (needed={delay:.2f}s, remaining={remaining_sleep:.2f}s)"
+                                        )
+                                time.sleep(delay)
+                            finally:
+                                hx_resp.close()
                             continue
 
                     response = self._to_smart_response(hx_resp, url, stream=stream)
@@ -689,14 +789,14 @@ class SmartSession:
                     if tmp_client is not None:
                         if stream:
                             orig_close = hx_resp.close
+                            owned_client = tmp_client
 
                             def _close():
                                 try:
                                     orig_close()
                                 finally:
                                     try:
-                                        if tmp_client:
-                                            tmp_client.close()
+                                        owned_client.close()
                                     except Exception:
                                         pass
 
@@ -711,10 +811,7 @@ class SmartSession:
                     success_for_breaker = not (
                         response.status_code == 429 or 500 <= response.status_code < 600
                     )
-
-                    if breaker:
-                        breaker.after_request(success_for_breaker)
-
+                    finish(success_for_breaker)
                     return response
 
                 except httpx.TimeoutException as e:
@@ -722,8 +819,7 @@ class SmartSession:
                         operation_deadline is not None
                         and time.monotonic() >= operation_deadline
                     ):
-                        if breaker:
-                            breaker.after_request(False)
+                        finish(False)
                         raise OperationDeadlineExceeded(
                             "Operation deadline exceeded on timeout"
                         ) from e
@@ -733,32 +829,27 @@ class SmartSession:
                         if operation_deadline is not None:
                             rem = operation_deadline - time.monotonic()
                             if rem <= 0:
-                                if breaker:
-                                    breaker.after_request(False)
+                                finish(False)
                                 raise OperationDeadlineExceeded(
                                     "Operation deadline exceeded before backoff sleep"
                                 ) from e
                             if backoff > rem:
                                 time.sleep(rem)
-                                if breaker:
-                                    breaker.after_request(False)
+                                finish(False)
                                 raise OperationDeadlineExceeded(
                                     "Operation deadline exceeded during backoff sleep"
                                 ) from e
                         time.sleep(backoff)
                         continue
 
-                    if breaker:
-                        breaker.after_request(False)
-
+                    finish(False)
                     self._raise_requests_timeout(e)
                 except httpx.RequestError as e:
                     if (
                         operation_deadline is not None
                         and time.monotonic() >= operation_deadline
                     ):
-                        if breaker:
-                            breaker.after_request(False)
+                        finish(False)
                         raise OperationDeadlineExceeded(
                             "Operation deadline exceeded on request error"
                         ) from e
@@ -768,46 +859,44 @@ class SmartSession:
                         if operation_deadline is not None:
                             rem = operation_deadline - time.monotonic()
                             if rem <= 0:
-                                if breaker:
-                                    breaker.after_request(False)
+                                finish(False)
                                 raise OperationDeadlineExceeded(
                                     "Operation deadline exceeded before backoff sleep"
                                 ) from e
                             if backoff > rem:
                                 time.sleep(rem)
-                                if breaker:
-                                    breaker.after_request(False)
+                                finish(False)
                                 raise OperationDeadlineExceeded(
                                     "Operation deadline exceeded during backoff sleep"
                                 ) from e
                         time.sleep(backoff)
                         continue
 
-                    if breaker:
-                        breaker.after_request(False)
-
+                    finish(False)
                     self._raise_requests_connection(e)
                 except Exception:
-                    if breaker:
-                        breaker.after_request(False)
-
+                    finish(False)
                     raise
 
-        if per_request_client_factory is not None:
-            # Use context manager so the client is always closed
-            with closing(per_request_client_factory()) as pr_client:
-                return _run_with_client(pr_client)
-        elif tmp_client is not None:
-            try:
-                return _run_with_client(tmp_client)
-            finally:
-                # Close tmp_client if still owned here (not handed off for streaming)
+        try:
+            if per_request_client_factory is not None:
+                # Use context manager so the client is always closed
+                with closing(per_request_client_factory()) as pr_client:
+                    return _run_with_client(pr_client)
+            elif tmp_client is not None:
                 try:
-                    tmp_client.close()
-                except Exception:
-                    pass
-        else:
-            return _run_with_client(client)
+                    return _run_with_client(tmp_client)
+                finally:
+                    # Close tmp_client if still owned here (not handed off for streaming)
+                    try:
+                        tmp_client.close()
+                    except Exception:
+                        pass
+            else:
+                return _run_with_client(client)
+        except BaseException:
+            finish(False)
+            raise
 
     def get(
         self, url: str, operation_deadline: float | None = None, **kwargs: Any
@@ -981,9 +1070,11 @@ class SmartSession:
                 delay = max(0.0, float(int(ra)))
             except Exception:
                 try:
-                    parsed_retry_at = cast(datetime, parsedate_to_datetime(ra))
-                    retry_ts = parsed_retry_at.timestamp()
-                    delay = max(0.0, float(int(round(retry_ts - time.time()))))
+                    parsed_retry_at: datetime = cast(
+                        datetime, parsedate_to_datetime(ra)
+                    )
+                    retry_ts: float = float(parsed_retry_at.timestamp())
+                    delay = max(0.0, float(int(round(float(retry_ts - time.time())))))
                 except Exception:
                     delay = None
 

@@ -421,6 +421,11 @@ def _should_retry_with_title_alias(
     if "does not match the correct title" not in str(error):
         return None
 
+    is_movie = isinstance(item, Movie) or getattr(item, "type", None) == "movie"
+    is_anime = bool(getattr(item, "is_anime", False))
+    if is_movie and not is_anime:
+        return None
+
     try:
         parsed_title = parse(raw_title).parsed_title
     except Exception:
