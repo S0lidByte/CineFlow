@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.engine import CursorResult
 
@@ -315,6 +315,31 @@ async def retry_realdebrid_transfer(
 ) -> TransferActionResponse:
     """Retry a failed CineFlow-managed transfer and re-queue corresponding operation."""
     return rd_transfers_service.retry_transfer(transfer_id)
+
+
+class AttachTransferRequest(BaseModel):
+    media_item_id: int = Field(
+        description="The MediaItem ID to attach this transfer to"
+    )
+
+
+@router.post(
+    "/realdebrid/transfers/{transfer_id}/attach",
+    operation_id="attach_realdebrid_transfer",
+    response_model=TransferActionResponse,
+    dependencies=[Depends(require_role("platform:admin"))],
+)
+async def attach_realdebrid_transfer(
+    transfer_id: Annotated[
+        str, Path(description="The Real-Debrid torrent ID to attach")
+    ],
+    request: AttachTransferRequest,
+) -> TransferActionResponse:
+    """Attach an existing Real-Debrid transfer to a MediaItem and trigger ingestion or monitoring."""
+    return rd_transfers_service.attach_transfer(
+        transfer_id=transfer_id,
+        media_item_id=request.media_item_id,
+    )
 
 
 class SubmitTransferRequest(BaseModel):

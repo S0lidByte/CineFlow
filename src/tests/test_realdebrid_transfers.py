@@ -18,7 +18,7 @@ from sqlalchemy.pool import StaticPool
 
 from program.contracts.operation_ledger import OperationLedger, enqueue_operation
 from program.db.base_model import get_base_metadata
-from program.media.item import Movie
+from program.media.item import Episode, MediaEntry, MediaItem, Movie
 from program.media.models import ActiveStream
 from program.media.state import States
 from program.media.stream import Stream
@@ -1087,3 +1087,543 @@ def test_poll_and_ingest_completed_transfers(api_client, monkeypatch):
             .first()
         )
         assert completed_op.status == "completed"
+
+
+def test_poll_and_ingest_transfers_unseen_direct_lookup(api_client, monkeypatch):
+    """Transfers older than the top 100 account results must be polled directly by their exact persisted ID."""
+    client, session_factory = api_client
+    test_hash = "9999999999999999999999999999999999999999"
+    with session_factory() as session:
+        movie = Movie(
+            {
+                "title": "Old Transfer Film",
+                "year": 2012,
+                "tmdb_id": 99999,
+            }
+        )
+        movie.id = 702
+        movie.last_state = States.Scraped
+        movie.active_stream = ActiveStream(
+            infohash=test_hash, id="rd-old-transfer-101", is_external=True
+        )
+        session.add(movie)
+        session.commit()
+
+        enqueue_operation(
+            session=session,
+            operation_type="realdebrid.poll_transfer",
+            media_item_id=702,
+            payload={"torrent_id": "rd-old-transfer-101", "infohash": test_hash},
+        )
+        session.commit()
+
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    # Return 100 unrelated torrents so the old transfer is NOT in the top 100 list
+    mock_rd.get_torrents.return_value = [
+        {
+            "id": f"unrelated-{i}",
+            "filename": f"Unrelated.Torrent.{i}.mkv",
+            "hash": f"{i:040d}",
+            "bytes": 1000000000,
+            "progress": 100.0,
+            "status": "downloaded",
+            "added": "2026-11-08T00:00:00.000Z",
+        }
+        for i in range(100)
+    ]
+
+    # Direct lookup by exact persisted ID returns the completed torrent info
+    info = TorrentInfo(
+        id="rd-old-transfer-101",
+        name="Old.Transfer.Film.2012.1080p.BluRay.x264.mkv",
+        status="downloaded",
+        bytes=3000000000,
+        progress=100.0,
+        infohash=test_hash,
+        files={},
+        links=["https://real-debrid.com/d/old101"],
+    )
+    mock_rd.get_torrent_info.return_value = info
+    mock_rd._process_torrent.return_value = (None, "fallback", info)
+
+    mock_downloader = MagicMock()
+    mock_downloader.start_manual_download.return_value = True
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    from kink import di
+
+    from program.program import Program
+
+    mock_program = MagicMock()
+    mock_program.services.downloader = mock_downloader
+    monkeypatch.setitem(di._services, Program, mock_program)
+
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.post(
+        "/api/v1/operations/realdebrid/transfers/poll",
+        headers=_signed_bff_headers("platform:admin"),
+    )
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json["ingested"] == 1
+
+    # Verify get_torrent_info was called directly for the unseen transfer ID
+    mock_rd.get_torrent_info.assert_called_with("rd-old-transfer-101")
+    assert mock_downloader.start_manual_download.called
+
+
+def test_attach_completed_transfer_triggers_immediate_ingestion(
+    api_client, monkeypatch
+):
+    """Attaching a completed external transfer must validate compatibility, reuse transfer ID, and ingest."""
+    client, session_factory = api_client
+    test_hash = "1111111111111111111111111111111111111111"
+    with session_factory() as session:
+        movie = Movie(
+            {
+                "title": "Interstellar",
+                "year": 2014,
+                "tmdb_id": 157336,
+            }
+        )
+        movie.id = 801
+        movie.last_state = States.Indexed
+        session.add(movie)
+        session.commit()
+
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    info = TorrentInfo(
+        id="rd-ext-comp-1",
+        name="Interstellar.2014.1080p.BluRay.x264.mkv",
+        status="downloaded",
+        bytes=5000000000,
+        progress=100.0,
+        infohash=test_hash,
+        files={},
+        links=["https://real-debrid.com/d/ext1"],
+    )
+    mock_rd.get_torrent_info.return_value = info
+
+    mock_downloader = MagicMock()
+    mock_downloader.start_manual_download.return_value = True
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    from kink import di
+
+    from program.program import Program
+
+    mock_program = MagicMock()
+    mock_program.services.downloader = mock_downloader
+    monkeypatch.setitem(di._services, Program, mock_program)
+
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.post(
+        "/api/v1/operations/realdebrid/transfers/rd-ext-comp-1/attach",
+        json={"media_item_id": 801},
+        headers=_signed_bff_headers("platform:admin"),
+    )
+    assert response.status_code == 200
+    res = response.json()
+    assert res["success"] is True
+    assert res["transfer_id"] == "rd-ext-comp-1"
+    assert "attached and ingested" in res["message"]
+
+    # Verify active_stream is external
+    with session_factory() as session:
+        item = session.get(MediaItem, 801)
+        assert item.active_stream is not None
+        assert item.active_stream.id == "rd-ext-comp-1"
+        assert item.active_stream.is_external is True
+
+    # Verify summary correlates as attached, not managed for deletion
+    mock_rd.get_torrents.return_value = [
+        {
+            "id": "rd-ext-comp-1",
+            "filename": "Interstellar.2014.1080p.BluRay.x264.mkv",
+            "hash": test_hash,
+            "bytes": 5000000000,
+            "progress": 100.0,
+            "status": "downloaded",
+            "added": "2026-11-07T12:00:00.000Z",
+        }
+    ]
+    summary_resp = client.get(
+        "/api/v1/operations/realdebrid/transfers",
+        headers=_signed_bff_headers("platform:admin"),
+    )
+    assert summary_resp.status_code == 200
+    t_item = next(
+        t for t in summary_resp.json()["transfers"] if t["id"] == "rd-ext-comp-1"
+    )
+    assert t_item["is_attached"] is True
+    assert t_item["is_cineflow_managed"] is False
+    assert t_item["can_cancel"] is False
+
+
+def test_attach_active_transfer_enqueues_outbox_polling(api_client, monkeypatch):
+    """Attaching an active external transfer must persist active_stream and enqueue outbox polling."""
+    client, session_factory = api_client
+    test_hash = "2222222222222222222222222222222222222222"
+    with session_factory() as session:
+        movie = Movie(
+            {
+                "title": "Inception",
+                "year": 2010,
+                "tmdb_id": 27205,
+            }
+        )
+        movie.id = 802
+        movie.last_state = States.Indexed
+        session.add(movie)
+        session.commit()
+
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    info = TorrentInfo(
+        id="rd-ext-active-2",
+        name="Inception.2010.1080p.BluRay.x264.mkv",
+        status="downloading",
+        bytes=4000000000,
+        progress=45.0,
+        infohash=test_hash,
+        files={},
+        links=[],
+    )
+    mock_rd.get_torrent_info.return_value = info
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.post(
+        "/api/v1/operations/realdebrid/transfers/rd-ext-active-2/attach",
+        json={"media_item_id": 802},
+        headers=_signed_bff_headers("platform:admin"),
+    )
+    assert response.status_code == 200
+    res = response.json()
+    assert res["success"] is True
+    assert res["transfer_id"] == "rd-ext-active-2"
+    assert "scheduled for monitoring" in res["message"]
+
+    # Verify outbox operation was enqueued
+    with session_factory() as session:
+        op = (
+            session.query(OperationLedger)
+            .filter(
+                OperationLedger.media_item_id == 802,
+                OperationLedger.operation_type == "realdebrid.poll_transfer",
+            )
+            .first()
+        )
+        assert op is not None
+        assert op.payload["torrent_id"] == "rd-ext-active-2"
+
+        # Verify active_stream
+        item = session.get(MediaItem, 802)
+        assert item.active_stream.id == "rd-ext-active-2"
+        assert item.active_stream.is_external is True
+
+
+def test_attach_transfer_idempotent(api_client, monkeypatch):
+    """Re-attaching the same transfer to the same media item must return idempotent success."""
+    client, session_factory = api_client
+    test_hash = "3333333333333333333333333333333333333333"
+    with session_factory() as session:
+        movie = Movie(
+            {
+                "title": "Avatar",
+                "year": 2009,
+                "tmdb_id": 19995,
+            }
+        )
+        movie.id = 803
+        movie.last_state = States.Scraped
+        movie.active_stream = ActiveStream(
+            infohash=test_hash, id="rd-ext-idem-3", is_external=True
+        )
+        session.add(movie)
+        session.commit()
+
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    info = TorrentInfo(
+        id="rd-ext-idem-3",
+        name="Avatar.2009.1080p.BluRay.x264.mkv",
+        status="downloading",
+        bytes=6000000000,
+        progress=20.0,
+        infohash=test_hash,
+        files={},
+        links=[],
+    )
+    mock_rd.get_torrent_info.return_value = info
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.post(
+        "/api/v1/operations/realdebrid/transfers/rd-ext-idem-3/attach",
+        json={"media_item_id": 803},
+        headers=_signed_bff_headers("platform:admin"),
+    )
+    assert response.status_code == 200
+    res = response.json()
+    assert res["success"] is True
+    assert "already attached" in res["message"]
+
+
+def test_attach_transfer_incompatible_movie_year_rejected(api_client, monkeypatch):
+    """Mismatched movie release year (> 1 year) must be rejected with 400 Bad Request."""
+    client, session_factory = api_client
+    test_hash = "4444444444444444444444444444444444444444"
+    with session_factory() as session:
+        movie = Movie(
+            {
+                "title": "Gladiator",
+                "year": 2000,
+                "tmdb_id": 98,
+            }
+        )
+        movie.id = 804
+        movie.last_state = States.Indexed
+        session.add(movie)
+        session.commit()
+
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    # Torrent indicates 2024 sequel, but target media is 2000 film
+    info = TorrentInfo(
+        id="rd-ext-year-4",
+        name="Gladiator.II.2024.1080p.WEB-DL.mkv",
+        status="downloaded",
+        bytes=3000000000,
+        progress=100.0,
+        infohash=test_hash,
+        files={},
+        links=[],
+    )
+    mock_rd.get_torrent_info.return_value = info
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.post(
+        "/api/v1/operations/realdebrid/transfers/rd-ext-year-4/attach",
+        json={"media_item_id": 804},
+        headers=_signed_bff_headers("platform:admin"),
+    )
+    assert response.status_code == 400
+    assert "year" in response.json()["detail"].lower()
+
+
+def test_attach_transfer_tv_torrent_to_movie_rejected(api_client, monkeypatch):
+    """TV show/episode torrents cannot be attached to a Movie item."""
+    client, session_factory = api_client
+    test_hash = "5555555555555555555555555555555555555555"
+    with session_factory() as session:
+        movie = Movie(
+            {
+                "title": "Breaking Bad",
+                "year": 2008,
+                "tmdb_id": 1396,
+            }
+        )
+        movie.id = 805
+        movie.last_state = States.Indexed
+        session.add(movie)
+        session.commit()
+
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    info = TorrentInfo(
+        id="rd-ext-tv-5",
+        name="Breaking.Bad.S01E01.720p.HDTV.mkv",
+        status="downloaded",
+        bytes=1000000000,
+        progress=100.0,
+        infohash=test_hash,
+        files={},
+        links=[],
+    )
+    mock_rd.get_torrent_info.return_value = info
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.post(
+        "/api/v1/operations/realdebrid/transfers/rd-ext-tv-5/attach",
+        json={"media_item_id": 805},
+        headers=_signed_bff_headers("platform:admin"),
+    )
+    assert response.status_code == 400
+    assert "tv series or episode" in response.json()["detail"].lower()
+
+
+def test_attach_transfer_conflict_when_active_stream_exists(api_client, monkeypatch):
+    """Attaching to a media item that already has a different active stream must return 409 Conflict."""
+    client, session_factory = api_client
+    test_hash = "6666666666666666666666666666666666666666"
+    with session_factory() as session:
+        movie = Movie(
+            {
+                "title": "Dune",
+                "year": 2021,
+                "tmdb_id": 438631,
+            }
+        )
+        movie.id = 806
+        movie.last_state = States.Scraped
+        movie.active_stream = ActiveStream(
+            infohash="0000000000000000000000000000000000000000", id="rd-other-stream"
+        )
+        session.add(movie)
+        session.commit()
+
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    info = TorrentInfo(
+        id="rd-ext-conflict-6",
+        name="Dune.2021.1080p.BluRay.x264.mkv",
+        status="downloaded",
+        bytes=4000000000,
+        progress=100.0,
+        infohash=test_hash,
+        files={},
+        links=[],
+    )
+    mock_rd.get_torrent_info.return_value = info
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.post(
+        "/api/v1/operations/realdebrid/transfers/rd-ext-conflict-6/attach",
+        json={"media_item_id": 806},
+        headers=_signed_bff_headers("platform:admin"),
+    )
+    assert response.status_code == 409
+    assert "already has an active stream" in response.json()["detail"].lower()
+
+
+def test_attached_external_transfer_cannot_be_cancelled(api_client, monkeypatch):
+    """External transfers attached to CineFlow media must NOT be cancellable (403 Forbidden)."""
+    client, session_factory = api_client
+    test_hash = "7777777777777777777777777777777777777777"
+    with session_factory() as session:
+        movie = Movie(
+            {
+                "title": "Alien",
+                "year": 1979,
+                "tmdb_id": 348,
+            }
+        )
+        movie.id = 807
+        movie.last_state = States.Scraped
+        movie.active_stream = ActiveStream(
+            infohash=test_hash, id="rd-ext-protected-7", is_external=True
+        )
+        session.add(movie)
+        session.commit()
+
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    info = TorrentInfo(
+        id="rd-ext-protected-7",
+        name="Alien.1979.1080p.BluRay.x264.mkv",
+        status="downloading",
+        bytes=5000000000,
+        progress=50.0,
+        infohash=test_hash,
+        files={},
+        links=[],
+    )
+    mock_rd.get_torrent_info.return_value = info
+    mock_rd.get_torrents.return_value = [
+        {
+            "id": "rd-ext-protected-7",
+            "filename": "Alien.1979.1080p.BluRay.x264.mkv",
+            "hash": test_hash,
+            "bytes": 5000000000,
+            "progress": 50.0,
+            "status": "downloading",
+            "added": "2026-11-07T12:00:00.000Z",
+        }
+    ]
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    cancel_resp = client.post(
+        "/api/v1/operations/realdebrid/transfers/rd-ext-protected-7/cancel",
+        headers=_signed_bff_headers("platform:admin"),
+    )
+    assert cancel_resp.status_code == 403
+    assert "cannot cancel unmanaged or external" in cancel_resp.json()["detail"].lower()

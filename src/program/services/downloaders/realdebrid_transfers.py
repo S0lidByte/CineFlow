@@ -25,10 +25,11 @@ from program.contracts.dispatcher import (
 )
 from program.contracts.operation_ledger import OperationLedger, enqueue_operation
 from program.db.db import db_session
-from program.media.item import MediaItem
+from program.media.item import MediaItem, ProcessedItemType
 from program.media.models import ActiveStream
 from program.media.state import States
 from program.media.stream import Stream
+from program.services.downloaders.models import DownloadedTorrent
 from program.services.downloaders.realdebrid import (
     RealDebridDownloader,
     RealDebridError,
@@ -66,10 +67,12 @@ class RealDebridTransferItem(BaseModel):
 
     # CineFlow correlation fields
     is_cineflow_managed: bool = False
+    is_attached: bool = False
     media_item_id: int | None = None
     media_title: str | None = None
     media_type: str | None = None
     media_state: str | None = None
+    media_external_id: str | None = None
     ready_in_cineflow: bool = False
     operation_id: str | None = None
     can_cancel: bool = False
@@ -396,12 +399,20 @@ class RealDebridTransfersService:
                 seeders = t.get("seeders")
 
                 matched_item = item_map_by_tid.get(tid) or item_map_by_hash.get(thash)
-                is_managed = matched_item is not None
+                is_external = False
+                if matched_item and matched_item.active_stream:
+                    is_external = bool(
+                        getattr(matched_item.active_stream, "is_external", False)
+                    )
+
+                is_managed = matched_item is not None and not is_external
+                is_attached = matched_item is not None and is_external
                 media_id = matched_item.id if matched_item else None
 
                 title = None
                 m_type = None
                 m_state = None
+                media_ext_id = None
                 ready_in_cf = False
 
                 if matched_item:
@@ -412,6 +423,19 @@ class RealDebridTransfersService:
                         or f"Media #{matched_item.id}"
                     )
                     m_type = getattr(matched_item, "type", None)
+                    if m_type == "movie":
+                        media_ext_id = getattr(matched_item, "tmdb_id", None)
+                    elif m_type in ("show", "season", "episode"):
+                        media_ext_id = getattr(matched_item, "tvdb_id", None)
+                        if not media_ext_id and hasattr(matched_item, "parent"):
+                            parent = getattr(matched_item, "parent", None)
+                            if parent:
+                                media_ext_id = getattr(parent, "tvdb_id", None) or (
+                                    getattr(parent.parent, "tvdb_id", None)
+                                    if hasattr(parent, "parent") and parent.parent
+                                    else None
+                                )
+
                     raw_state = getattr(matched_item, "state", None)
                     m_state = None
                     if raw_state is not None:
@@ -441,18 +465,27 @@ class RealDebridTransfersService:
                 op_id = linked_op.id if linked_op else None
 
                 # Safe controls:
-                # 1. Cancellation: active CineFlow-managed transfers only, NOT completed/downloaded
-                can_cancel = is_managed and status not in (
-                    "downloaded",
-                    "error",
-                    "magnet_error",
-                    "virus",
-                    "dead",
+                # 1. Cancellation: active CineFlow-managed transfers only, NOT external, attached, or downloaded
+                can_cancel = (
+                    is_managed
+                    and not is_attached
+                    and status
+                    not in (
+                        "downloaded",
+                        "error",
+                        "magnet_error",
+                        "virus",
+                        "dead",
+                    )
                 )
                 # 2. Retry: failed CineFlow-managed transfers or failed operation outbox
-                can_retry = is_managed and (
-                    status in ("error", "magnet_error", "virus", "dead")
-                    or (linked_op is not None and linked_op.status == "failed")
+                can_retry = (
+                    is_managed
+                    and not is_attached
+                    and (
+                        status in ("error", "magnet_error", "virus", "dead")
+                        or (linked_op is not None and linked_op.status == "failed")
+                    )
                 )
 
                 item_dto = RealDebridTransferItem(
@@ -468,10 +501,12 @@ class RealDebridTransfersService:
                     seeders=seeders,
                     links=list(t.get("links", []) or []),
                     is_cineflow_managed=is_managed,
+                    is_attached=is_attached,
                     media_item_id=media_id,
                     media_title=title,
                     media_type=m_type,
                     media_state=m_state,
+                    media_external_id=media_ext_id,
                     ready_in_cineflow=ready_in_cf,
                     operation_id=op_id,
                     can_cancel=can_cancel,
@@ -560,10 +595,12 @@ class RealDebridTransfersService:
             links=list(info.links or []),
             files=files,
             is_cineflow_managed=item_match.is_cineflow_managed if item_match else False,
+            is_attached=item_match.is_attached if item_match else False,
             media_item_id=item_match.media_item_id if item_match else None,
             media_title=item_match.media_title if item_match else None,
             media_type=item_match.media_type if item_match else None,
             media_state=item_match.media_state if item_match else None,
+            media_external_id=item_match.media_external_id if item_match else None,
             ready_in_cineflow=item_match.ready_in_cineflow if item_match else False,
             operation_id=item_match.operation_id if item_match else None,
             can_cancel=item_match.can_cancel if item_match else False,
@@ -580,8 +617,8 @@ class RealDebridTransfersService:
         # 1. Fetch current status & correlation
         detail = self.get_transfer_detail(transfer_id)
 
-        # 2. Safety: only CineFlow-managed transfers may be cancelled
-        if not detail.is_cineflow_managed:
+        # 2. Safety: only CineFlow-managed transfers may be cancelled (not external or attached)
+        if detail.is_attached or not detail.is_cineflow_managed:
             raise HTTPException(
                 status_code=403,
                 detail="Cannot cancel unmanaged or external Real-Debrid transfer.",
@@ -680,7 +717,7 @@ class RealDebridTransfersService:
         """
         detail = self.get_transfer_detail(transfer_id)
 
-        if not detail.is_cineflow_managed:
+        if detail.is_attached or not detail.is_cineflow_managed:
             raise HTTPException(
                 status_code=403,
                 detail="Cannot retry unmanaged or external Real-Debrid transfer.",
@@ -877,6 +914,225 @@ class RealDebridTransfersService:
             transfer_id=tid,
         )
 
+    def attach_transfer(
+        self,
+        transfer_id: str,
+        media_item_id: int,
+    ) -> TransferActionResponse:
+        """
+        Attach an existing Real-Debrid transfer to a MediaItem without resubmitting or duplicating.
+        Validates media compatibility and triggers immediate ingestion (if completed) or durable
+        outbox polling (if active). Preserves external ownership (is_external=True).
+        """
+        rd = _get_rd_downloader()
+        if not rd:
+            raise HTTPException(
+                status_code=503,
+                detail="Real-Debrid downloader is not configured or unavailable.",
+            )
+
+        try:
+            info = rd.get_torrent_info(transfer_id)
+        except RealDebridError as e:
+            raise HTTPException(
+                status_code=404, detail=f"Transfer not found on Real-Debrid: {e}"
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to fetch transfer info from Real-Debrid: {e}",
+            )
+
+        clean_hash = str(info.infohash or "").lower()
+        if not clean_hash:
+            raise HTTPException(
+                status_code=400,
+                detail="Transfer does not contain a valid infohash.",
+            )
+
+        with db_session() as session:
+            item = session.get(MediaItem, media_item_id)
+            if not item:
+                raise HTTPException(
+                    status_code=404, detail=f"MediaItem #{media_item_id} not found."
+                )
+
+            # Idempotency check: if this media item is already attached to this transfer
+            if item.active_stream and (
+                str(item.active_stream.id) == str(transfer_id)
+                or str(item.active_stream.infohash).lower() == clean_hash
+            ):
+                return TransferActionResponse(
+                    success=True,
+                    message=f"Transfer {transfer_id} is already attached to '{item.title}'.",
+                    transfer_id=transfer_id,
+                )
+
+            # Prevent accidental replacement of active media
+            if item.active_stream is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"MediaItem #{media_item_id} ('{item.title}') already has an active stream ({item.active_stream.id}). Reset or remove it first.",
+                )
+
+            # Prevent replacement of completed media with existing filesystem entries
+            state_val = getattr(item.state, "value", str(item.state))
+            if (
+                state_val
+                in (
+                    States.Downloaded.value,
+                    States.Completed.value,
+                    States.Symlinked.value,
+                )
+                and len(getattr(item, "filesystem_entries", [])) > 0
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"MediaItem #{media_item_id} ('{item.title}') is already completed in CineFlow.",
+                )
+
+            # Validate media compatibility
+            parsed = parse(info.name)
+            item_type = getattr(item, "type", "movie")
+
+            if item_type == "movie":
+                if parsed.seasons or parsed.episodes:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Cannot attach a TV series or episode torrent to a Movie.",
+                    )
+                # Year compatibility validation (allow +/- 1 year tolerance)
+                item_year = getattr(item, "year", None)
+                parsed_year = getattr(parsed, "year", None)
+                if item_year is not None and parsed_year is not None:
+                    try:
+                        i_year = int(item_year)
+                        p_year = int(parsed_year)
+                        if abs(i_year - p_year) > 1:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Torrent year ({p_year}) does not match movie year ({i_year}).",
+                            )
+                    except ValueError:
+                        pass
+            elif item_type in ("show", "season", "episode"):
+                if getattr(parsed, "type", "") == "movie" and not (
+                    parsed.seasons or parsed.episodes
+                ):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Cannot attach a Movie torrent to a TV series or episode.",
+                    )
+                if item_type == "episode":
+                    ep_num = getattr(item, "episode_number", None)
+                    season_num = getattr(item, "season_number", None)
+                    if (
+                        parsed.episodes
+                        and ep_num is not None
+                        and ep_num not in parsed.episodes
+                    ):
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Torrent episodes ({parsed.episodes}) do not match episode #{ep_num}.",
+                        )
+                    if (
+                        parsed.seasons
+                        and season_num is not None
+                        and season_num not in parsed.seasons
+                    ):
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Torrent seasons ({parsed.seasons}) do not match season #{season_num}.",
+                        )
+                elif item_type == "season":
+                    season_num = getattr(item, "season_number", None)
+                    if (
+                        parsed.seasons
+                        and season_num is not None
+                        and season_num not in parsed.seasons
+                    ):
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Torrent seasons ({parsed.seasons}) do not match season #{season_num}.",
+                        )
+
+            # Ensure Stream record exists
+            stream = (
+                session.execute(
+                    select(Stream).filter(func.lower(Stream.infohash) == clean_hash)
+                )
+                .scalars()
+                .first()
+            )
+            if not stream:
+                stream = Stream(
+                    Torrent(
+                        raw_title=info.name,
+                        infohash=clean_hash,
+                        data=parsed,
+                        rank=0,
+                        lev_ratio=1.0,
+                    )
+                )
+                session.add(stream)
+                session.flush()
+
+            if stream not in item.streams:
+                item.streams.append(stream)
+
+            # Mark active stream with is_external=True to preserve external ownership
+            item.active_stream = ActiveStream(
+                infohash=clean_hash,
+                id=transfer_id,
+                is_external=True,
+            )
+
+            if item.last_state in (
+                States.Unknown,
+                States.Requested,
+                States.Indexed,
+            ):
+                item.last_state = States.Scraped
+
+            item_title = str(item.title or f"Media #{item.id}")
+            session.commit()
+
+        # If already downloaded on Real-Debrid, immediately trigger ingestion
+        if info.status == "downloaded":
+            self.poll_and_ingest_transfers(rd)
+            self.invalidate_cache()
+            return TransferActionResponse(
+                success=True,
+                message=f"Transfer {transfer_id} attached and ingested into CineFlow for '{item_title}'.",
+                transfer_id=transfer_id,
+            )
+        else:
+            # Active transfer: enqueue durable outbox polling
+            with db_session() as session:
+                enqueue_operation(
+                    session=session,
+                    operation_type="realdebrid.poll_transfer",
+                    media_item_id=media_item_id,
+                    payload={"torrent_id": transfer_id, "infohash": clean_hash},
+                    idempotency_key=f"rd_poll_{transfer_id}",
+                )
+                session.commit()
+                notify_outbox_dispatcher()
+                publish_outbox_lifecycle_event(
+                    "transfer_attached",
+                    {
+                        "transfer_id": transfer_id,
+                        "media_item_id": media_item_id,
+                        "status": "monitoring",
+                    },
+                )
+            self.invalidate_cache()
+            return TransferActionResponse(
+                success=True,
+                message=f"Transfer {transfer_id} attached to '{item_title}' and scheduled for monitoring.",
+                transfer_id=transfer_id,
+            )
+
     def poll_and_ingest_transfers(
         self, rd: RealDebridDownloader | None = None
     ) -> dict[str, int]:
@@ -984,11 +1240,38 @@ class RealDebridTransfersService:
 
                         if downloader:
                             try:
-                                ok = downloader.start_manual_download(
-                                    item=matched_item,
-                                    stream=stream,
-                                    service=rd,
-                                )
+                                container = None
+                                c_info = None
+                                try:
+                                    item_type: ProcessedItemType = (
+                                        matched_item.type
+                                        if matched_item.type != "mediaitem"
+                                        else "movie"
+                                    )
+                                    container, _, c_info = (
+                                        rd._process_torrent(  # pyright: ignore[reportPrivateUsage]
+                                            tid, thash, item_type
+                                        )
+                                    )
+                                except Exception:
+                                    container = None
+
+                                if container and container.files:
+                                    download_result = DownloadedTorrent(
+                                        id=tid,
+                                        info=c_info or rd.get_torrent_info(tid),
+                                        infohash=thash,
+                                        container=container,
+                                    )
+                                    ok = downloader.update_item_attributes(
+                                        matched_item, download_result, rd
+                                    )
+                                else:
+                                    ok = downloader.start_manual_download(
+                                        item=matched_item,
+                                        stream=stream,
+                                        service=rd,
+                                    )
                                 if ok:
                                     ingested_count += 1
                                     logger.success(
@@ -1040,6 +1323,168 @@ class RealDebridTransfersService:
                         )
                     )
                     session.commit()
+
+            # Direct lookup for any active items whose transfer was not in the first 100 batch
+            polled_tids = {str(t.get("id", "")) for t in raw_torrents}
+            polled_hashes = {str(t.get("hash", "")).lower() for t in raw_torrents}
+            unseen_items = [
+                item
+                for item in active_items
+                if item.active_stream
+                and str(getattr(item.active_stream, "id", "")) not in polled_tids
+                and str(getattr(item.active_stream, "infohash", "")).lower()
+                not in polled_hashes
+            ]
+            for unseen_item in unseen_items:
+                as_id = str(getattr(unseen_item.active_stream, "id", ""))
+                if not as_id:
+                    continue
+                try:
+                    info = rd.get_torrent_info(as_id)
+                    polled_count += 1
+                    t_status = str(info.status or "").lower()
+                    t_hash = str(info.infohash or "").lower()
+                    if t_status == "downloaded":
+                        state_val = getattr(
+                            unseen_item.state, "value", str(unseen_item.state)
+                        )
+                        has_files = (
+                            len(getattr(unseen_item, "filesystem_entries", [])) > 0
+                        )
+                        if (
+                            state_val
+                            not in (
+                                States.Downloaded.value,
+                                States.Completed.value,
+                                States.Symlinked.value,
+                            )
+                            and not has_files
+                        ):
+                            stream = (
+                                session.execute(
+                                    select(Stream).filter(
+                                        func.lower(Stream.infohash) == t_hash
+                                    )
+                                )
+                                .scalars()
+                                .first()
+                            )
+                            if not stream:
+                                raw_name = str(info.name or "Media")
+                                parsed_data = parse(raw_name)
+                                stream = Stream(
+                                    Torrent(
+                                        raw_title=raw_name,
+                                        infohash=t_hash,
+                                        data=parsed_data,
+                                        rank=0,
+                                        lev_ratio=1.0,
+                                    )
+                                )
+                                session.add(stream)
+                                session.flush()
+                            if stream not in unseen_item.streams:
+                                unseen_item.streams.append(stream)
+
+                            downloader = None
+                            try:
+                                from kink import di
+
+                                from program.program import Program
+
+                                if Program in di:
+                                    prog = di[Program]
+                                    if prog and prog.services is not None:
+                                        downloader = prog.services.downloader
+                            except Exception:
+                                pass
+
+                            if downloader:
+                                try:
+                                    u_container = None
+                                    u_c_info = None
+                                    try:
+                                        u_type: ProcessedItemType = (
+                                            unseen_item.type
+                                            if unseen_item.type != "mediaitem"
+                                            else "movie"
+                                        )
+                                        u_container, _, u_c_info = (
+                                            rd._process_torrent(  # pyright: ignore[reportPrivateUsage]
+                                                as_id, t_hash, u_type
+                                            )
+                                        )
+                                    except Exception:
+                                        u_container = None
+
+                                    if u_container and u_container.files:
+                                        u_download_result = DownloadedTorrent(
+                                            id=as_id,
+                                            info=u_c_info or info,
+                                            infohash=t_hash,
+                                            container=u_container,
+                                        )
+                                        ok = downloader.update_item_attributes(
+                                            unseen_item, u_download_result, rd
+                                        )
+                                    else:
+                                        ok = downloader.start_manual_download(
+                                            item=unseen_item,
+                                            stream=stream,
+                                            service=rd,
+                                        )
+                                    if ok:
+                                        ingested_count += 1
+                                        logger.success(
+                                            f"Successfully ingested completed direct-polled Real-Debrid transfer {as_id} for {unseen_item.log_string}"
+                                        )
+                                        now = datetime.now(UTC)
+                                        session.execute(
+                                            update(OperationLedger)
+                                            .where(
+                                                OperationLedger.media_item_id
+                                                == unseen_item.id,
+                                                OperationLedger.status.in_(
+                                                    ["pending", "processing"]
+                                                ),
+                                            )
+                                            .values(
+                                                status="completed",
+                                                completed_at=now,
+                                                updated_at=now,
+                                            )
+                                        )
+                                        session.commit()
+                                        publish_outbox_lifecycle_event(
+                                            "operation_completed",
+                                            {
+                                                "transfer_id": as_id,
+                                                "media_item_id": unseen_item.id,
+                                            },
+                                        )
+                                except Exception as err:
+                                    logger.warning(
+                                        f"Direct ingestion failed for transfer {as_id} and item {unseen_item.id}: {err}"
+                                    )
+                    elif t_status in ("error", "magnet_error", "virus", "dead"):
+                        now = datetime.now(UTC)
+                        session.execute(
+                            update(OperationLedger)
+                            .where(
+                                OperationLedger.media_item_id == unseen_item.id,
+                                OperationLedger.status.in_(["pending", "processing"]),
+                            )
+                            .values(
+                                status="failed",
+                                error_classification="TorrentFailed",
+                                error_message=f"Real-Debrid torrent {as_id} failed with status: {t_status}",
+                                completed_at=now,
+                                updated_at=now,
+                            )
+                        )
+                        session.commit()
+                except Exception as e:
+                    logger.debug(f"Direct polling for transfer {as_id} failed: {e}")
 
         if ingested_count > 0:
             self.invalidate_cache()

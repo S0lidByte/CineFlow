@@ -829,9 +829,15 @@ class Downloader(Runner[None, DownloaderBase]):
                     found = True
 
         if found and isinstance(item, (Show, Season)):
+            existing_ext = (
+                bool(getattr(item.active_stream, "is_external", False))
+                if item.active_stream
+                else False
+            )
             item.active_stream = ActiveStream(
                 infohash=download_result.infohash,
                 id=download_result.info.id,
+                is_external=existing_ext,
             )
 
         return found
@@ -908,9 +914,15 @@ class Downloader(Runner[None, DownloaderBase]):
             service = self.service
 
         if file_data:
+            existing_ext = (
+                bool(getattr(item.active_stream, "is_external", False))
+                if item.active_stream
+                else False
+            )
             item.active_stream = ActiveStream(
                 infohash=download_result.infohash,
                 id=download_result.info.id,
+                is_external=existing_ext,
             )
 
         # Create MediaEntry for virtual file if download URL is available

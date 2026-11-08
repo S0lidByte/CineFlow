@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from program.db.db import db_session
 from program.managers.sse_manager import sse_manager
 from program.media.item import MediaItem
+from program.program import Program
 from program.services.streaming.streaming_constants import PROXY_REQUIRED_PROVIDERS
 from program.settings import settings_manager
 from program.utils.async_client import AsyncClient
@@ -119,7 +120,39 @@ def _get_media_info(item_id: int) -> tuple[str, str, str, int]:
         if not item.media_entry:
             raise HTTPException(status_code=404, detail="Item has no media file")
 
-        url = item.media_entry.url
+        url = item.media_entry.unrestricted_url
+        if not url and item.media_entry.download_url:
+            provider = item.media_entry.provider or ""
+            try:
+                if Program in di:
+                    prog = di[Program]
+                    if prog and prog.services is not None:
+                        downloader = prog.services.downloader
+                        service = next(
+                            (
+                                svc
+                                for svc in downloader.services.values()
+                                if svc.key == provider
+                            ),
+                            None,
+                        )
+                        if service and hasattr(service, "unrestrict_link"):
+                            unrestricted = service.unrestrict_link(
+                                item.media_entry.download_url
+                            )
+                            if unrestricted:
+                                item.media_entry.unrestricted_url = (
+                                    unrestricted.download
+                                )
+                                session.commit()
+                                url = unrestricted.download
+            except Exception as e:
+                logger.debug(
+                    f"Failed to unrestrict download_url for item {item_id}: {e}"
+                )
+
+        if not url:
+            url = item.media_entry.url
 
         if not url:
             raise HTTPException(status_code=404, detail="Item has no valid stream URL")
