@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.48.0](https://github.com/S0lidByte/CineFlow/compare/v1.47.0...v1.48.0) (2026-11-08)
+
+
+### Features
+
+* **realdebrid:** add transfer attachment to media items and streaming support ([134b2b8](https://github.com/S0lidByte/CineFlow/commit/134b2b8c0867a944ebf09c34d7b12cc16e753d6d))
+
 ## [1.47.0](https://github.com/S0lidByte/CineFlow/compare/v1.46.1...v1.47.0) (2026-11-07)
 
 
