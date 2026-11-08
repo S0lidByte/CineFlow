@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.48.1](https://github.com/S0lidByte/CineFlow/compare/v1.48.0...v1.48.1) (2026-11-08)
+
+
+### Bug Fixes
+
+* **realdebid:** correct uncached submission provider selection and circuit-breaker handling ([610bafd](https://github.com/S0lidByte/CineFlow/commit/610bafdf15164cb608eb542a02e467881f044e5e))
+* resolve pyright unknown variable types ([baff063](https://github.com/S0lidByte/CineFlow/commit/baff063c4e80a046df37613a8f08736143237e2b))
+
 ## [1.48.0](https://github.com/S0lidByte/CineFlow/compare/v1.47.0...v1.48.0) (2026-11-08)
 
 
