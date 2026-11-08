@@ -8,6 +8,7 @@ and retry for CineFlow-managed operations.
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from datetime import UTC, datetime
@@ -111,6 +112,7 @@ class TransferActionResponse(BaseModel):
     success: bool
     message: str
     transfer_id: str
+    torrent_info: Any | None = None
 
 
 def _get_rd_downloader() -> RealDebridDownloader | None:
@@ -147,6 +149,9 @@ def _get_rd_downloader() -> RealDebridDownloader | None:
         logger.debug(f"Fallback RealDebridDownloader creation failed: {e}")
 
     return None
+
+
+get_rd_downloader = _get_rd_downloader
 
 
 class RealDebridTransfersService:
@@ -332,7 +337,7 @@ class RealDebridTransfersService:
 
         item_map_by_hash: dict[str, MediaItem] = {}
         item_map_by_tid: dict[str, MediaItem] = {}
-        op_map: dict[int, OperationLedger] = {}
+        op_map: dict[int, tuple[str, str]] = {}
 
         with db_session() as session:
             # Query Stream records matching these torrent infohashes
@@ -381,14 +386,21 @@ class RealDebridTransfersService:
             }
             if media_item_ids:
                 ops_stmt = (
-                    select(OperationLedger)
-                    .filter(OperationLedger.media_item_id.in_(media_item_ids))
+                    select(
+                        OperationLedger.id,
+                        OperationLedger.media_item_id,
+                        OperationLedger.status,
+                    )
+                    .filter(
+                        OperationLedger.operation_type == "realdebrid.poll_transfer",
+                        OperationLedger.media_item_id.in_(media_item_ids),
+                    )
                     .order_by(OperationLedger.created_at.desc())
                 )
-                ops = session.execute(ops_stmt).scalars().all()
-                for op in ops:
-                    if op.media_item_id is not None and op.media_item_id not in op_map:
-                        op_map[op.media_item_id] = op
+                ops_rows = session.execute(ops_stmt).all()
+                for op_id_row, op_media_id, op_status in ops_rows:
+                    if op_media_id is not None and op_media_id not in op_map:
+                        op_map[op_media_id] = (str(op_id_row), str(op_status))
 
             items: list[RealDebridTransferItem] = []
             for t in raw_torrents:
@@ -462,7 +474,8 @@ class RealDebridTransfersService:
                                 ready_in_cf = True
 
                 linked_op = op_map.get(media_id) if media_id else None
-                op_id = linked_op.id if linked_op else None
+                op_id = linked_op[0] if linked_op else None
+                op_status = linked_op[1] if linked_op else None
 
                 # Safe controls:
                 # 1. Cancellation: active CineFlow-managed transfers only, NOT external, attached, or downloaded
@@ -484,7 +497,7 @@ class RealDebridTransfersService:
                     and not is_attached
                     and (
                         status in ("error", "magnet_error", "virus", "dead")
-                        or (linked_op is not None and linked_op.status == "failed")
+                        or (op_status == "failed")
                     )
                 )
 
@@ -786,12 +799,14 @@ class RealDebridTransfersService:
         self,
         magnet_or_infohash: str,
         media_item_id: int | None = None,
+        rd: RealDebridDownloader | None = None,
     ) -> TransferActionResponse:
         """
         Submit a magnet or infohash to Real-Debrid for cloud caching, and associate with CineFlow.
         """
-        rd = _get_rd_downloader()
-        if not rd:
+        if rd is None:
+            rd = _get_rd_downloader()
+        if not rd or not getattr(rd, "initialized", False):
             raise HTTPException(
                 status_code=503,
                 detail="Real-Debrid downloader is not configured or unavailable.",
@@ -811,26 +826,53 @@ class RealDebridTransfersService:
 
         target_magnet = (
             magnet_or_infohash.strip()
-            if magnet_or_infohash.strip().startswith("magnet:")
+            if magnet_or_infohash.strip().lower().startswith("magnet:")
             else clean_hash
         )
 
+        api_obj: Any = getattr(rd, "api", None)
+        session_obj: Any = getattr(api_obj, "session", None)
+        breakers: Any = getattr(session_obj, "breakers", None)
+        if isinstance(breakers, dict):
+            for breaker in cast(dict[str, Any], breakers).values():
+                check_fn = getattr(breaker, "check_available", None)
+                if callable(check_fn):
+                    try:
+                        check_fn()
+                    except CircuitBreakerOpen as e:
+                        headers: dict[str, str] = {}
+                        ra: Any = getattr(e, "retry_after_seconds", None)
+                        if isinstance(ra, (int, float)):
+                            headers["Retry-After"] = str(int(math.ceil(float(ra))))
+                        raise HTTPException(
+                            status_code=503,
+                            detail=f"Real-Debrid circuit breaker is OPEN: {e}",
+                            headers=headers,
+                        ) from e
+
+        fair_fn = getattr(rd, "_fair_usage_remaining", None)
+        if callable(fair_fn):
+            rem = fair_fn()
+            if isinstance(rem, (int, float)) and rem > 0:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Real-Debrid rate limit (fair usage) active",
+                    headers={"Retry-After": str(int(math.ceil(rem)))},
+                )
+
+        created_tid: str | None = None
         try:
-            tid = rd.add_torrent(target_magnet)
+            created_tid = rd.add_torrent(target_magnet)
+            tid = created_tid
             info = rd.get_torrent_info(tid)
             if info.status == "waiting_files_selection":
+                from program.services.downloaders.models import VALID_VIDEO_EXTENSIONS
+
+                video_exts = tuple(ext.lower() for ext in VALID_VIDEO_EXTENSIONS)
                 video_ids = [
                     file_id
                     for file_id, metadata in info.files.items()
-                    if metadata.filename.lower().endswith(
-                        tuple(
-                            ext.lower()
-                            for ext in __import__(
-                                "program.services.downloaders.models",
-                                fromlist=["VALID_VIDEO_EXTENSIONS"],
-                            ).VALID_VIDEO_EXTENSIONS
-                        )
-                    )
+                    if metadata.filename.lower().endswith(video_exts)
                 ]
                 if not video_ids:
                     raise HTTPException(
@@ -839,69 +881,127 @@ class RealDebridTransfersService:
                     )
                 rd.select_files(tid, video_ids)
                 info = rd.get_torrent_info(tid)
+        except CircuitBreakerOpen as e:
+            if created_tid:
+                try:
+                    rd.delete_torrent(created_tid)
+                except Exception:
+                    pass
+            headers: dict[str, str] = {}
+            ra_cb: Any = getattr(e, "retry_after_seconds", None)
+            if isinstance(ra_cb, (int, float)):
+                headers["Retry-After"] = str(int(math.ceil(float(ra_cb))))
+            raise HTTPException(
+                status_code=503,
+                detail=f"Real-Debrid service is currently unavailable: {e}",
+                headers=headers,
+            ) from e
+        except RealDebridTransientError as e:
+            if created_tid:
+                try:
+                    rd.delete_torrent(created_tid)
+                except Exception:
+                    pass
+            headers: dict[str, str] = {}
+            ra_tr: Any = getattr(e, "retry_after_seconds", None)
+            if isinstance(ra_tr, (int, float)):
+                headers["Retry-After"] = str(int(math.ceil(float(ra_tr))))
+            raise HTTPException(
+                status_code=e.status_code if e.status_code in (429, 503) else 503,
+                detail=f"Real-Debrid temporary error: {e}",
+                headers=headers,
+            ) from e
+        except HTTPException:
+            if created_tid:
+                try:
+                    rd.delete_torrent(created_tid)
+                except Exception:
+                    pass
+            raise
         except RealDebridError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            if created_tid:
+                try:
+                    rd.delete_torrent(created_tid)
+                except Exception:
+                    pass
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:
+            if created_tid:
+                try:
+                    rd.delete_torrent(created_tid)
+                except Exception:
+                    pass
             raise HTTPException(
                 status_code=500, detail=f"Failed to submit transfer to Real-Debrid: {e}"
-            )
+            ) from e
 
         if media_item_id:
-            with db_session() as session:
-                item = session.get(MediaItem, media_item_id)
-                if item:
-                    item.active_stream = ActiveStream(infohash=clean_hash, id=tid)
-                    if item.last_state in (
-                        States.Unknown,
-                        States.Requested,
-                        States.Indexed,
-                    ):
-                        item.last_state = States.Scraped
+            try:
+                with db_session() as session:
+                    item = session.get(MediaItem, media_item_id)
+                    if item:
+                        item.active_stream = ActiveStream(infohash=clean_hash, id=tid)
+                        if item.last_state in (
+                            States.Unknown,
+                            States.Requested,
+                            States.Indexed,
+                        ):
+                            item.last_state = States.Scraped
 
-                    # Ensure Stream record exists
-                    stream = (
-                        session.execute(
-                            select(Stream).filter(
-                                func.lower(Stream.infohash) == clean_hash.lower()
+                        # Ensure Stream record exists
+                        stream = (
+                            session.execute(
+                                select(Stream).filter(
+                                    func.lower(Stream.infohash) == clean_hash.lower()
+                                )
                             )
+                            .scalars()
+                            .first()
                         )
-                        .scalars()
-                        .first()
-                    )
-                    if not stream:
-                        parsed_data = parse(info.name)
-                        stream = Stream(
-                            Torrent(
-                                raw_title=info.name,
-                                infohash=clean_hash,
-                                data=parsed_data,
-                                rank=0,
-                                lev_ratio=1.0,
+                        if not stream:
+                            parsed_data = parse(info.name)
+                            stream = Stream(
+                                Torrent(
+                                    raw_title=info.name,
+                                    infohash=clean_hash,
+                                    data=parsed_data,
+                                    rank=0,
+                                    lev_ratio=1.0,
+                                )
                             )
+                            session.add(stream)
+                            session.flush()
+
+                        if stream not in item.streams:
+                            item.streams.append(stream)
+
+                        enqueue_operation(
+                            session=session,
+                            operation_type="realdebrid.poll_transfer",
+                            media_item_id=media_item_id,
+                            payload={"torrent_id": tid, "infohash": clean_hash},
+                            idempotency_key=f"rd_poll_{tid}",
                         )
-                        session.add(stream)
-                        session.flush()
-
-                    if stream not in item.streams:
-                        item.streams.append(stream)
-
-                    enqueue_operation(
-                        session=session,
-                        operation_type="realdebrid.poll_transfer",
-                        media_item_id=media_item_id,
-                        payload={"torrent_id": tid, "infohash": clean_hash},
-                        idempotency_key=f"rd_poll_{tid}",
-                    )
-                    session.commit()
-                    notify_outbox_dispatcher()
-                    publish_outbox_lifecycle_event(
-                        "operation_enqueued",
-                        {
-                            "transfer_id": tid,
-                            "media_item_id": media_item_id,
-                            "infohash": clean_hash,
-                        },
-                    )
+                        session.commit()
+                        notify_outbox_dispatcher()
+                        publish_outbox_lifecycle_event(
+                            "operation_enqueued",
+                            {
+                                "transfer_id": tid,
+                                "media_item_id": media_item_id,
+                                "infohash": clean_hash,
+                            },
+                        )
+            except Exception as e:
+                if created_tid:
+                    try:
+                        rd.delete_torrent(created_tid)
+                    except Exception:
+                        pass
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to associate transfer {tid} with media item: {e}",
+                ) from e
 
         # If already downloaded on Real-Debrid, immediately trigger ingestion
         if info.status == "downloaded" and media_item_id:
@@ -912,6 +1012,7 @@ class RealDebridTransfersService:
             success=True,
             message=f"Transfer {tid} successfully submitted to Real-Debrid (status: {info.status}).",
             transfer_id=tid,
+            torrent_info=info,
         )
 
     def attach_transfer(

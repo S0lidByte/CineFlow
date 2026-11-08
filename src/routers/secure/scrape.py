@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal, TypeAlias, cast
 from uuid import uuid4
@@ -981,17 +982,178 @@ async def start_manual_session(
             ) from e
 
         if not container or not container.cached:
-            if allow_uncached and used_service and hasattr(used_service, "add_torrent"):
+            # Check for transient provider failures / circuit breaker across services
+            is_breaker = error is not None and (
+                "circuit breaker mode" in error.lower()
+                or "circuit breaker open" in error.lower()
+            )
+            is_429 = error is not None and (
+                "429" in error
+                or "rate limit" in error.lower()
+                or "too many requests" in error.lower()
+            )
+            is_503 = error is not None and (
+                "503" in error or "service unavailable" in error.lower()
+            )
+
+            if is_breaker or is_429 or is_503:
+                status_code = 429 if is_429 else 503
+                headers: dict[str, str] = {}
+                if error:
+                    import re
+
+                    match = re.search(
+                        r"retry after (?:approximately )?([0-9]+(?:\.[0-9]+)?)s?",
+                        error,
+                        re.IGNORECASE,
+                    )
+                    if match:
+                        headers["Retry-After"] = str(
+                            int(math.ceil(float(match.group(1))))
+                        )
+                raise HTTPException(
+                    status_code=status_code,
+                    detail=error,
+                    headers=headers,
+                )
+
+            if allow_uncached:
+                from program.services.downloaders.realdebrid import (
+                    RealDebridDownloader,
+                    RealDebridTransientError,
+                )
                 from program.services.downloaders.realdebrid_transfers import (
+                    get_rd_downloader,
                     rd_transfers_service,
                 )
 
+                # Requirement 1, 2, 3: Select an initialized Real-Debrid downloader specifically
+                rd_service: RealDebridDownloader | None = None
+                if (
+                    hasattr(downloader, "services")
+                    and RealDebridDownloader in downloader.services
+                ):
+                    candidate = downloader.services[RealDebridDownloader]
+                    if (
+                        isinstance(candidate, RealDebridDownloader)
+                        and candidate.initialized
+                    ):
+                        rd_service = candidate
+
+                if not rd_service:
+                    for s in getattr(downloader, "initialized_services", []):
+                        if getattr(s, "key", None) == "realdebrid" and getattr(
+                            s, "initialized", False
+                        ):
+                            rd_service = cast(RealDebridDownloader, s)
+                            break
+
+                if not rd_service:
+                    rd_service = get_rd_downloader()
+
+                if not rd_service or not rd_service.initialized:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Real-Debrid downloader is not configured or unavailable for uncached submission.",
+                    )
+
+                # Requirement 5: Prevent submission when Real-Debrid service is in cooldown or circuit breaker
+                cooldowns: Any = getattr(
+                    downloader, "_service_cooldowns", None
+                )  # pyright: ignore[reportPrivateUsage]
+                if isinstance(cooldowns, dict):
+                    cd: datetime | None = cooldowns.get(
+                        rd_service.key
+                    )  # pyright: ignore[reportUnknownVariableType]
+                    if cd and cd > datetime.now():
+                        retry_seconds: float = (
+                            cd - datetime.now()
+                        ).total_seconds()  # pyright: ignore[reportUnknownVariableType]
+                        retry_int = int(
+                            math.ceil(retry_seconds)
+                        )  # pyright: ignore[reportUnknownArgumentType]
+                        headers: dict[str, str] = {"Retry-After": str(retry_int)}
+                        raise HTTPException(
+                            status_code=503,
+                            detail=f"Real-Debrid service is in cooldown (retry after {retry_int}s)",
+                            headers=headers,
+                        )
+
+                api_inst: Any = getattr(rd_service, "api", None)
+                sess_inst: Any = getattr(api_inst, "session", None)
+                breakers: Any = getattr(sess_inst, "breakers", None)
+                if isinstance(breakers, dict):
+                    for breaker in cast(dict[str, Any], breakers).values():
+                        chk_fn = getattr(breaker, "check_available", None)
+                        if callable(chk_fn):
+                            try:
+                                chk_fn()
+                            except CircuitBreakerOpen as exc:
+                                headers: dict[str, str] = {}
+                                ra_exc: Any = getattr(exc, "retry_after_seconds", None)
+                                if isinstance(ra_exc, (int, float)):
+                                    headers["Retry-After"] = str(
+                                        int(math.ceil(float(ra_exc)))
+                                    )
+                                raise HTTPException(
+                                    status_code=503,
+                                    detail=f"Real-Debrid circuit breaker is OPEN: {exc}",
+                                    headers=headers,
+                                ) from exc
+
+                fair_fn = getattr(rd_service, "_fair_usage_remaining", None)
+                if callable(fair_fn):
+                    rem = fair_fn()
+                    if isinstance(rem, (int, float)) and rem > 0:
+                        raise HTTPException(
+                            status_code=429,
+                            detail="Real-Debrid rate limit (fair usage) active",
+                            headers={"Retry-After": str(int(math.ceil(rem)))},
+                        )
+
+                # Submit uncached transfer to Real-Debrid
                 submit_res = rd_transfers_service.submit_transfer(
                     magnet_or_infohash=magnet,
                     media_item_id=item.id,
+                    rd=rd_service,
                 )
                 tid = submit_res.transfer_id
-                info = used_service.get_torrent_info(tid)
+
+                # Requirement 3: Ensure metadata retrieval refers to the same Real-Debrid transfer and provider
+                info = getattr(submit_res, "torrent_info", None)
+                if not info:
+                    try:
+                        info = rd_service.get_torrent_info(tid)
+                    except CircuitBreakerOpen as exc:
+                        headers: dict[str, str] = {}
+                        ra_cb: Any = getattr(exc, "retry_after_seconds", None)
+                        if isinstance(ra_cb, (int, float)):
+                            headers["Retry-After"] = str(int(math.ceil(float(ra_cb))))
+                        raise HTTPException(
+                            status_code=503,
+                            detail=f"Real-Debrid circuit breaker open retrieving torrent info: {exc}",
+                            headers=headers,
+                        ) from exc
+                    except RealDebridTransientError as exc:
+                        headers: dict[str, str] = {}
+                        ra_tr: Any = getattr(exc, "retry_after_seconds", None)
+                        if isinstance(ra_tr, (int, float)):
+                            headers["Retry-After"] = str(int(math.ceil(float(ra_tr))))
+                        raise HTTPException(
+                            status_code=(
+                                exc.status_code
+                                if exc.status_code in (429, 503)
+                                else 503
+                            ),
+                            detail=f"Real-Debrid transient error retrieving torrent info: {exc}",
+                            headers=headers,
+                        ) from exc
+                    except Exception as exc:
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Failed to retrieve torrent info from Real-Debrid for transfer {tid}: {exc}",
+                        ) from exc
+
                 session_obj = scraping_session_manager.create_session(
                     item.id,
                     info_hash,
@@ -999,7 +1161,7 @@ async def start_manual_session(
                     imdb_id=imdb_id,
                     tmdb_id=tmdb_id,
                     tvdb_id=tvdb_id,
-                    downloader_service=used_service.key,
+                    downloader_service=rd_service.key,
                 )
                 scraping_session_manager.update_session(
                     session_id=session_obj.id,
