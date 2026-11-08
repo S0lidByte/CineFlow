@@ -1062,9 +1062,7 @@ async def start_manual_session(
                     downloader, "_service_cooldowns", None
                 )  # pyright: ignore[reportPrivateUsage]
                 if isinstance(cooldowns, dict):
-                    cd: datetime | None = cooldowns.get(
-                        rd_service.key
-                    )  # pyright: ignore[reportUnknownVariableType]
+                    cd = cast(datetime | None, cooldowns.get(rd_service.key))
                     if cd and cd > datetime.now():
                         retry_seconds: float = (
                             cd - datetime.now()
