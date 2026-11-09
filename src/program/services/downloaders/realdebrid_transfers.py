@@ -1401,11 +1401,10 @@ class RealDebridTransfersService:
                                         if matched_item.type != "mediaitem"
                                         else "movie"
                                     )
-                                    container, _, c_info = (
-                                        rd._process_torrent(  # pyright: ignore[reportPrivateUsage]
-                                            tid, thash, item_type
-                                        )
+                                    torrent_result = rd._process_torrent(  # pyright: ignore[reportPrivateUsage]
+                                        tid, thash, item_type
                                     )
+                                    container, _, c_info = torrent_result
                                 except Exception:
                                     container = None
 
@@ -1562,11 +1561,10 @@ class RealDebridTransfersService:
                                             if unseen_item.type != "mediaitem"
                                             else "movie"
                                         )
-                                        u_container, _, u_c_info = (
-                                            rd._process_torrent(  # pyright: ignore[reportPrivateUsage]
-                                                as_id, t_hash, u_type
-                                            )
+                                        u_torrent_result = rd._process_torrent(  # pyright: ignore[reportPrivateUsage]
+                                            as_id, t_hash, u_type
                                         )
+                                        u_container, _, u_c_info = u_torrent_result
                                     except Exception:
                                         u_container = None
 
