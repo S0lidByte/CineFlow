@@ -39,6 +39,7 @@ from program.services.downloaders.realdebrid import (
 from program.settings import settings_manager
 from program.types import Event
 from program.utils.request import CircuitBreakerOpen
+from program.utils.title_normalizer import normalize_title
 from program.utils.torrent import extract_infohash
 
 
@@ -133,6 +134,25 @@ def _parse_transfer_metadata(filename: str) -> tuple[str | None, int | None]:
         year = None
 
     return clean_title or None, year
+
+
+def _parse_transfer_metadata_with_fallback(
+    filename: str, original_filename: str | None
+) -> tuple[str | None, int | None]:
+    """Recover a missing year from a same-title Real-Debrid original filename."""
+    parsed_title, transfer_year = _parse_transfer_metadata(filename)
+    if transfer_year is not None or not parsed_title or not original_filename:
+        return parsed_title, transfer_year
+
+    original_title, original_year = _parse_transfer_metadata(original_filename)
+    if (
+        original_year is None
+        or not original_title
+        or normalize_title(parsed_title) != normalize_title(original_title)
+    ):
+        return parsed_title, transfer_year
+
+    return parsed_title, original_year
 
 
 def _get_rd_downloader() -> RealDebridDownloader | None:
@@ -618,14 +638,17 @@ class RealDebridTransfersService:
         summary = self.get_transfers()
         item_match = next((t for t in summary.transfers if t.id == transfer_id), None)
         filename = str(info.name or "Unknown")
-        parsed_title, transfer_year = _parse_transfer_metadata(filename)
+        original_filename = str(info.alternative_filename or "")
+        parsed_title, transfer_year = _parse_transfer_metadata_with_fallback(
+            filename, original_filename
+        )
 
         return RealDebridTransferDetail(
             id=str(info.id),
             filename=filename,
             parsed_title=parsed_title,
             year=transfer_year,
-            original_filename=str(info.alternative_filename or ""),
+            original_filename=original_filename,
             hash=str(info.infohash or ""),
             bytes=int(info.bytes or 0),
             progress=float(info.progress or 0.0),
