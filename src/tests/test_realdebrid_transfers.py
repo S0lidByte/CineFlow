@@ -259,6 +259,367 @@ def test_list_realdebrid_transfers_with_correlation_and_stats(api_client, monkey
     assert external_item["ready_in_cineflow"] is False
 
 
+def test_transfer_response_parses_clean_title_and_year(api_client, monkeypatch):
+    client, _ = api_client
+    filename = "The.Odyssey.2026.2160p.UHD.BluRay.Remux.HDR.LATINO.DTS-HD.MA.H265-BTM"
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    mock_rd.get_torrents.return_value = [
+        {
+            "id": "rd-odyssey",
+            "filename": filename,
+            "hash": "odyssey-hash",
+            "bytes": 1000,
+            "progress": 0.0,
+            "status": "queued",
+            "added": "2026-11-09T12:00:00Z",
+            "links": [],
+        }
+    ]
+    mock_rd.get_active_count.return_value = {"nb": 0, "limit": 20}
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.get(
+        "/api/v1/operations/realdebrid/transfers",
+        headers=_signed_bff_headers("library:read"),
+    )
+
+    assert response.status_code == 200
+    transfer = response.json()["transfers"][0]
+    assert transfer["filename"] == filename
+    assert transfer["parsed_title"] == "The Odyssey"
+    assert transfer["year"] == 2026
+
+
+def test_transfer_search_matches_parsed_title(api_client, monkeypatch):
+    client, _ = api_client
+    filename = "The.Odyssey.2026.2160p.UHD.BluRay.Remux.HDR.LATINO.DTS-HD.MA.H265-BTM"
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    mock_rd.get_torrents.return_value = [
+        {
+            "id": "rd-odyssey-search",
+            "filename": filename,
+            "hash": "odyssey-search-hash",
+            "bytes": 1000,
+            "progress": 0.0,
+            "status": "queued",
+            "added": "2026-11-09T12:00:00Z",
+            "links": [],
+        }
+    ]
+    mock_rd.get_active_count.return_value = {"nb": 0, "limit": 20}
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.get(
+        "/api/v1/operations/realdebrid/transfers?search=The%20Odyssey",
+        headers=_signed_bff_headers("library:read"),
+    )
+
+    assert response.status_code == 200
+    transfers = response.json()["transfers"]
+    assert len(transfers) == 1
+    assert transfers[0]["parsed_title"] == "The Odyssey"
+    assert transfers[0]["filename"] == filename
+
+
+def test_transfer_detail_includes_parsed_title_and_year(api_client, monkeypatch):
+    client, _ = api_client
+    filename = "The.Odyssey.2026.2160p.UHD.BluRay.Remux.HDR.LATINO.DTS-HD.MA.H265-BTM"
+    torrent = TorrentInfo(
+        id="rd-odyssey-detail",
+        name=filename,
+        infohash="odyssey-hash",
+        bytes=1000,
+        progress=0.0,
+        status="queued",
+        links=[],
+        files={},
+    )
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    mock_rd.get_torrent_info.return_value = torrent
+    mock_rd.get_torrents.return_value = [
+        {
+            "id": "rd-odyssey-detail",
+            "filename": filename,
+            "hash": "odyssey-hash",
+            "bytes": 1000,
+            "progress": 0.0,
+            "status": "queued",
+            "added": "2026-11-09T12:00:00Z",
+            "links": [],
+        }
+    ]
+    mock_rd.get_active_count.return_value = {"nb": 0, "limit": 20}
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.get(
+        "/api/v1/operations/realdebrid/transfers/rd-odyssey-detail",
+        headers=_signed_bff_headers("library:read"),
+    )
+
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["parsed_title"] == "The Odyssey"
+    assert detail["year"] == 2026
+
+
+def test_transfer_detail_parses_title_when_transfer_is_not_in_summary(
+    api_client, monkeypatch
+):
+    client, _ = api_client
+    filename = "The.Odyssey.2026.2160p.UHD.BluRay.Remux.HDR.LATINO.DTS-HD.MA.H265-BTM"
+    torrent = TorrentInfo(
+        id="rd-odyssey-detail-only",
+        name=filename,
+        infohash="odyssey-hash",
+        bytes=1000,
+        progress=0.0,
+        status="queued",
+        links=[],
+        files={},
+    )
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    mock_rd.get_torrent_info.return_value = torrent
+    mock_rd.get_torrents.return_value = []
+    mock_rd.get_active_count.return_value = {"nb": 0, "limit": 20}
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.get(
+        "/api/v1/operations/realdebrid/transfers/rd-odyssey-detail-only",
+        headers=_signed_bff_headers("library:read"),
+    )
+
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["parsed_title"] == "The Odyssey"
+    assert detail["year"] == 2026
+
+
+def test_transfer_detail_recovers_year_from_matching_original_filename(
+    api_client, monkeypatch
+):
+    client, _ = api_client
+    filename = "The.Odyssey.2160p.UHD.BluRay.Remux.HDR.mkv"
+    original_filename = "The.Odyssey.2026.2160p.UHD.BluRay.Remux.HDR.mkv"
+    torrent = TorrentInfo(
+        id="rd-odyssey-original-year",
+        name=filename,
+        alternative_filename=original_filename,
+        infohash="odyssey-original-year-hash",
+        bytes=1000,
+        progress=0.0,
+        status="queued",
+        links=[],
+        files={},
+    )
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    mock_rd.get_torrent_info.return_value = torrent
+    mock_rd.get_torrents.return_value = []
+    mock_rd.get_active_count.return_value = {"nb": 0, "limit": 20}
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.get(
+        "/api/v1/operations/realdebrid/transfers/rd-odyssey-original-year",
+        headers=_signed_bff_headers("library:read"),
+    )
+
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["parsed_title"] == "The Odyssey"
+    assert detail["year"] == 2026
+    assert detail["original_filename"] == original_filename
+
+
+def test_transfer_detail_recovers_year_from_matching_original_season(
+    api_client, monkeypatch
+):
+    client, _ = api_client
+    filename = "The.Odyssey.S01.2160p.UHD.BluRay.Remux.HDR.mkv"
+    original_filename = "The.Odyssey.S01.2026.2160p.UHD.BluRay.Remux.HDR.mkv"
+    torrent = TorrentInfo(
+        id="rd-odyssey-season-year",
+        name=filename,
+        alternative_filename=original_filename,
+        infohash="odyssey-season-year-hash",
+        bytes=1000,
+        progress=0.0,
+        status="queued",
+        links=[],
+        files={},
+    )
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    mock_rd.get_torrent_info.return_value = torrent
+    mock_rd.get_torrents.return_value = []
+    mock_rd.get_active_count.return_value = {"nb": 0, "limit": 20}
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.get(
+        "/api/v1/operations/realdebrid/transfers/rd-odyssey-season-year",
+        headers=_signed_bff_headers("library:read"),
+    )
+
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["parsed_title"] == "The Odyssey"
+    assert detail["year"] == 2026
+
+
+def test_transfer_detail_does_not_use_year_from_conflicting_original_season(
+    api_client, monkeypatch
+):
+    client, _ = api_client
+    filename = "The.Odyssey.S01.2160p.UHD.BluRay.Remux.HDR.mkv"
+    original_filename = "The.Odyssey.S02.2026.2160p.UHD.BluRay.Remux.HDR.mkv"
+    torrent = TorrentInfo(
+        id="rd-odyssey-conflicting-season",
+        name=filename,
+        alternative_filename=original_filename,
+        infohash="odyssey-conflicting-season-hash",
+        bytes=1000,
+        progress=0.0,
+        status="queued",
+        links=[],
+        files={},
+    )
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    mock_rd.get_torrent_info.return_value = torrent
+    mock_rd.get_torrents.return_value = []
+    mock_rd.get_active_count.return_value = {"nb": 0, "limit": 20}
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.get(
+        "/api/v1/operations/realdebrid/transfers/rd-odyssey-conflicting-season",
+        headers=_signed_bff_headers("library:read"),
+    )
+
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["parsed_title"] == "The Odyssey"
+    assert detail["year"] is None
+
+
+def test_transfer_detail_does_not_use_year_from_unrelated_original_filename(
+    api_client, monkeypatch
+):
+    client, _ = api_client
+    filename = "The.Odyssey.2160p.UHD.BluRay.Remux.HDR.mkv"
+    original_filename = "Unrelated.Movie.2026.2160p.BluRay.mkv"
+    torrent = TorrentInfo(
+        id="rd-odyssey-unrelated-year",
+        name=filename,
+        alternative_filename=original_filename,
+        infohash="odyssey-unrelated-year-hash",
+        bytes=1000,
+        progress=0.0,
+        status="queued",
+        links=[],
+        files={},
+    )
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    mock_rd.get_torrent_info.return_value = torrent
+    mock_rd.get_torrents.return_value = []
+    mock_rd.get_active_count.return_value = {"nb": 0, "limit": 20}
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.get(
+        "/api/v1/operations/realdebrid/transfers/rd-odyssey-unrelated-year",
+        headers=_signed_bff_headers("library:read"),
+    )
+
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["parsed_title"] == "The Odyssey"
+    assert detail["year"] is None
+    assert detail["original_filename"] == original_filename
+
+
 def test_distinguish_rd_downloaded_from_ready_in_cineflow(api_client, monkeypatch):
     """
     Test distinction between:
