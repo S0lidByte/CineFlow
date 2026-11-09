@@ -34,7 +34,7 @@ if sys.platform != "linux" or not Path("/dev/fuse").exists():
         allow_module_level=True,
     )
 
-pyfuse3 = pytest.importorskip("pyfuse3")
+pyfuse3 = pytest.importorskip("pyfuse3", exc_type=ImportError)
 
 from program.services.filesystem.vfs.rivenvfs import RivenVFS
 from program.services.filesystem.vfs.vfs_node import VFSDirectory, VFSFile
