@@ -353,6 +353,49 @@ def test_transfer_detail_includes_parsed_title_and_year(api_client, monkeypatch)
     assert detail["year"] == 2026
 
 
+def test_transfer_detail_parses_title_when_transfer_is_not_in_summary(
+    api_client, monkeypatch
+):
+    client, _ = api_client
+    filename = "The.Odyssey.2026.2160p.UHD.BluRay.Remux.HDR.LATINO.DTS-HD.MA.H265-BTM"
+    torrent = TorrentInfo(
+        id="rd-odyssey-detail-only",
+        name=filename,
+        infohash="odyssey-hash",
+        bytes=1000,
+        progress=0.0,
+        status="queued",
+        links=[],
+        files={},
+    )
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    mock_rd.get_torrent_info.return_value = torrent
+    mock_rd.get_torrents.return_value = []
+    mock_rd.get_active_count.return_value = {"nb": 0, "limit": 20}
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.get(
+        "/api/v1/operations/realdebrid/transfers/rd-odyssey-detail-only",
+        headers=_signed_bff_headers("library:read"),
+    )
+
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["parsed_title"] == "The Odyssey"
+    assert detail["year"] == 2026
+
+
 def test_distinguish_rd_downloaded_from_ready_in_cineflow(api_client, monkeypatch):
     """
     Test distinction between:

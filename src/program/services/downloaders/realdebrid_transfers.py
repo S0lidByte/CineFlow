@@ -616,12 +616,14 @@ class RealDebridTransfersService:
         # Use transfers list correlation
         summary = self.get_transfers()
         item_match = next((t for t in summary.transfers if t.id == transfer_id), None)
+        filename = str(info.name or "Unknown")
+        parsed_title, transfer_year = _parse_transfer_metadata(filename)
 
         return RealDebridTransferDetail(
             id=str(info.id),
-            filename=str(info.name or "Unknown"),
-            parsed_title=item_match.parsed_title if item_match else None,
-            year=item_match.year if item_match else None,
+            filename=filename,
+            parsed_title=parsed_title,
+            year=transfer_year,
             original_filename=str(info.alternative_filename or ""),
             hash=str(info.infohash or ""),
             bytes=int(info.bytes or 0),
