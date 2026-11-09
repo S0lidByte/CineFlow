@@ -118,12 +118,14 @@ class TransferActionResponse(BaseModel):
     torrent_info: Any | None = None
 
 
-def _parse_transfer_metadata(filename: str) -> tuple[str | None, int | None]:
+def _parse_transfer_metadata(
+    filename: str,
+) -> tuple[str | None, int | None, tuple[int, ...] | None]:
     """Extract a clean display title and release year from a transfer filename."""
     try:
         parsed = parse(filename)
     except Exception:
-        return None, None
+        return None, None, None
 
     title = getattr(parsed, "parsed_title", None)
     clean_title = title.strip() if isinstance(title, str) else ""
@@ -133,22 +135,33 @@ def _parse_transfer_metadata(filename: str) -> tuple[str | None, int | None]:
     except (TypeError, ValueError):
         year = None
 
-    return clean_title or None, year
+    raw_seasons = cast(list[Any], getattr(parsed, "seasons", []))
+    try:
+        seasons = tuple(sorted({int(season) for season in raw_seasons}))
+    except (TypeError, ValueError):
+        seasons = None
+
+    return clean_title or None, year, seasons
 
 
 def _parse_transfer_metadata_with_fallback(
     filename: str, original_filename: str | None
 ) -> tuple[str | None, int | None]:
     """Recover a missing year from a same-title Real-Debrid original filename."""
-    parsed_title, transfer_year = _parse_transfer_metadata(filename)
+    parsed_title, transfer_year, seasons = _parse_transfer_metadata(filename)
     if transfer_year is not None or not parsed_title or not original_filename:
         return parsed_title, transfer_year
 
-    original_title, original_year = _parse_transfer_metadata(original_filename)
+    original_title, original_year, original_seasons = _parse_transfer_metadata(
+        original_filename
+    )
     if (
         original_year is None
         or not original_title
         or normalize_title(parsed_title) != normalize_title(original_title)
+        or seasons is None
+        or original_seasons is None
+        or seasons != original_seasons
     ):
         return parsed_title, transfer_year
 
@@ -543,7 +556,7 @@ class RealDebridTransfersService:
                 )
 
                 filename = str(t.get("filename", "") or "Unknown")
-                parsed_title, transfer_year = _parse_transfer_metadata(filename)
+                parsed_title, transfer_year, _ = _parse_transfer_metadata(filename)
                 item_dto = RealDebridTransferItem(
                     id=tid,
                     filename=filename,
