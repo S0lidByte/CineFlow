@@ -333,6 +333,7 @@ class RealDebridTransfersService:
                 i
                 for i in filtered
                 if (q in i.filename.lower())
+                or (i.parsed_title and q in i.parsed_title.lower())
                 or (i.hash and q in i.hash.lower())
                 or (i.media_title and q in i.media_title.lower())
                 or (q in i.id.lower())
