@@ -5,6 +5,7 @@ import threading
 import time
 from collections.abc import Generator, Mapping
 from contextlib import closing
+from datetime import datetime
 from email.utils import parsedate_to_datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -1069,7 +1070,7 @@ class SmartSession:
                 delay = max(0.0, float(int(ra)))
             except Exception:
                 try:
-                    parsed_retry_at = parsedate_to_datetime(ra)
+                    parsed_retry_at: datetime = parsedate_to_datetime(ra)
                     retry_ts: float = float(parsed_retry_at.timestamp())
                     delay = max(0.0, float(int(round(float(retry_ts - time.time())))))
                 except Exception:
