@@ -7,7 +7,7 @@ import re
 import subprocess
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
@@ -346,7 +346,11 @@ def _extract_response_headers(
     for key in ["content-type", "content-length", "content-range", "accept-ranges"]:
         if key in upstream_response.headers:
             headers[key] = upstream_response.headers[key]
-    headers["content-disposition"] = f'inline; filename="{filename}"'
+    safe_filename = (
+        sanitize_header_value(filename).replace('"', "").replace("\\", "").strip()
+        or "stream"
+    )
+    headers["content-disposition"] = f'inline; filename="{safe_filename}"'
 
     # Enforce RFC 9110 §14.4: For 206 Partial Content, Content-Length must be the size of the range
     if upstream_response.status_code == 206 and "content-range" in headers:
@@ -387,7 +391,7 @@ async def stream_file(
     Returns:
         A StreamingResponse for the file content, or Response on 416 range error.
     """
-    media_info = _get_media_info(item_id)
+    media_info = await asyncio.to_thread(_get_media_info, item_id)
     url = media_info[0]
     provider = media_info[1]
     filename = media_info[2]
@@ -567,9 +571,9 @@ async def get_hls_playlist(
         level=level,
         resolution=resolution,
     )
-    media_info = _get_media_info(item_id)
+    media_info = await asyncio.to_thread(_get_media_info, item_id)
     url = media_info[0]
-    duration = _get_video_duration(url, request.headers)
+    duration = await asyncio.to_thread(_get_video_duration, url, request.headers)
 
     segment_duration = 12
     if duration == 0:
@@ -594,7 +598,7 @@ async def get_hls_playlist(
     m3u8_lines = [
         "#EXTM3U",
         "#EXT-X-VERSION:3",
-        "#EXT-X-TARGETDURATION:7",
+        f"#EXT-X-TARGETDURATION:{segment_duration}",
         "#EXT-X-MEDIA-SEQUENCE:0",
         "#EXT-X-PLAYLIST-TYPE:VOD",
     ]
@@ -616,7 +620,7 @@ async def get_hls_playlist(
 @router.get("/hls/{item_id}/segment/{seq}.ts")
 async def get_hls_segment(
     item_id: int,
-    seq: int,
+    seq: Annotated[int, Path(ge=0)],
     request: Request,
     pix_fmt: str | None = None,
     video_profile: str | None = Query(None, alias="profile"),
@@ -629,7 +633,7 @@ async def get_hls_segment(
         level=level,
         resolution=resolution,
     )
-    media_info = _get_media_info(item_id)
+    media_info = await asyncio.to_thread(_get_media_info, item_id)
     url = media_info[0]
 
     segment_duration = 12
@@ -671,20 +675,55 @@ async def get_hls_segment(
         stderr=asyncio.subprocess.PIPE,
     )
 
+    async def _drain_stderr(stderr: Any, chunks: list[bytes]) -> None:
+        max_bytes = 64 * 1024
+        total = 0
+        if isinstance(stderr, asyncio.StreamReader):
+            while True:
+                data = await stderr.read(8192)
+                if not data:
+                    break
+                if total < max_bytes:
+                    remaining = max_bytes - total
+                    chunks.append(data[:remaining])
+                    total += min(len(data), remaining)
+        else:
+            data = await stderr.read()
+            if data:
+                chunks.append(bytes(data)[:max_bytes])
+
     async def stream_output():
+        stderr_chunks: list[bytes] = []
+        stderr_task: asyncio.Task[None] | None = None
+        completed_cleanly = False
         try:
             if not process.stdout or not process.stderr:
                 return
+            stderr_task = asyncio.create_task(
+                _drain_stderr(process.stderr, stderr_chunks)
+            )
             while True:
                 chunk = await process.stdout.read(32 * 1024)
                 if not chunk:
-                    # If no data, check for errors
-                    if process.returncode and process.returncode != 0:
-                        err = await process.stderr.read()
-                        logger.error(f"FFmpeg Error: {err.decode()}")
                     break
                 yield chunk
+            await stderr_task
+            completed_cleanly = True
         finally:
+            if stderr_task is not None and not stderr_task.done():
+                stderr_task.cancel()
+                try:
+                    await stderr_task
+                except asyncio.CancelledError:
+                    pass
             await _cleanup_ffmpeg_process(process)
+            if (
+                completed_cleanly
+                and process.returncode
+                and process.returncode != 0
+                and stderr_chunks
+            ):
+                err_text = b"".join(stderr_chunks).decode("utf-8", errors="replace")
+                logger.error(f"FFmpeg Error (code={process.returncode}): {err_text}")
 
     return StreamingResponse(stream_output(), media_type="video/mp2t")

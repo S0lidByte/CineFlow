@@ -3,20 +3,20 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
+from loguru import logger
 
 
 class ConnectionManager:
-    def __init__(self):
-        # Store active connections by topic
+    """Manage per-topic WebSocket subscribers and bounded broadcast queues."""
+
+    def __init__(self) -> None:
         self.active_connections = dict[str, list[WebSocket]]()
-
-        # Message queue for each topic
         self.message_queues = dict[str, asyncio.Queue[Any]]()
-
-        # Background tasks
         self.background_tasks = list[asyncio.Task[Any]]()
+        self._loop: asyncio.AbstractEventLoop | None = None
 
-    async def connect(self, websocket: WebSocket, topic: str):
+    async def connect(self, websocket: WebSocket, topic: str) -> None:
+        self._loop = asyncio.get_running_loop()
         await websocket.accept()
 
         if topic not in self.active_connections:
@@ -25,77 +25,95 @@ class ConnectionManager:
         self.active_connections[topic].append(websocket)
 
         if topic not in self.message_queues:
-            self.message_queues[topic] = asyncio.Queue()
-
-            # Start broadcast task for this topic
-            task = asyncio.create_task(self._broadcast_messages(topic))
-
+            self.message_queues[topic] = asyncio.Queue(maxsize=500)
+            task = asyncio.create_task(
+                self._broadcast_messages(topic),
+                name=f"broadcast_{topic}",
+            )
             self.background_tasks.append(task)
 
-    async def disconnect(self, websocket: WebSocket, topic: str):
-        if topic in self.active_connections:
-            if websocket in self.active_connections[topic]:
-                self.active_connections[topic].remove(websocket)
-
-            # Clean up if no more connections for this topic
-            if not self.active_connections[topic]:
-                del self.active_connections[topic]
-
-                # Cancel broadcast task for this topic
-                for task in self.background_tasks:
-                    if task.get_name() == f"broadcast_{topic}":
-                        task.cancel()
-                        self.background_tasks.remove(task)
-
-                        break
-
-    def publish(self, topic: str, message: Any):
-        """Publish a message to a specific topic"""
-
-        if topic not in self.message_queues:
-            # There are no connections for this topic
+    async def disconnect(self, websocket: WebSocket, topic: str) -> None:
+        if topic not in self.active_connections:
             return
 
-        # Format the message with timestamp
+        if websocket in self.active_connections[topic]:
+            self.active_connections[topic].remove(websocket)
+
+        if not self.active_connections[topic]:
+            del self.active_connections[topic]
+            self.message_queues.pop(topic, None)
+
+            target_name = f"broadcast_{topic}"
+            for task in list(self.background_tasks):
+                if task.get_name() == target_name:
+                    task.cancel()
+                    self.background_tasks.remove(task)
+                    break
+
+    def _enqueue_on_loop(self, topic: str, formatted_message: dict[str, Any]) -> None:
+        queue = self.message_queues.get(topic)
+        if queue is None:
+            return
+        try:
+            queue.put_nowait(formatted_message)
+        except asyncio.QueueFull:
+            logger.warning(f"WebSocket message queue full for topic {topic}")
+
+    def publish(self, topic: str, message: Any) -> None:
+        """Publish a message to a specific topic safely from any thread."""
+        if topic not in self.message_queues:
+            return
+
         formatted_message = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "data": message,
         }
 
-        try:
-            self.message_queues[topic].put_nowait(formatted_message)
-        except asyncio.QueueFull:
-            print(f"Message queue full for topic {topic}")
+        loop = self._loop
+        if loop is not None:
+            try:
+                if asyncio.get_running_loop() == loop:
+                    self._enqueue_on_loop(topic, formatted_message)
+                    return
+            except RuntimeError:
+                pass
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(
+                    self._enqueue_on_loop, topic, formatted_message
+                )
+                return
 
-    async def _broadcast_messages(self, topic: str):
-        """Background task to broadcast messages for a specific topic"""
+        self._enqueue_on_loop(topic, formatted_message)
 
+    async def _broadcast_messages(self, topic: str) -> None:
+        """Background task to broadcast messages for a specific topic."""
         try:
             while True:
-                if topic in self.message_queues:
-                    message = await self.message_queues[topic].get()
+                queue = self.message_queues.get(topic)
+                if queue is None:
+                    break
+                message = await queue.get()
 
-                    if topic in self.active_connections:
-                        dead_connections = list[WebSocket]()
+                connections = list(self.active_connections.get(topic, ()))
+                if not connections:
+                    continue
 
-                        for connection in self.active_connections[topic]:
-                            try:
-                                await connection.send_json(message)
-                            except WebSocketDisconnect:
-                                dead_connections.append(connection)
-                            except Exception as e:
-                                print(f"Error sending message: {e}")
-                                dead_connections.append(connection)
+                dead_connections = list[WebSocket]()
+                for connection in connections:
+                    try:
+                        await connection.send_json(message)
+                    except WebSocketDisconnect:
+                        dead_connections.append(connection)
+                    except Exception as e:
+                        logger.debug(f"Error sending WebSocket message on {topic}: {e}")
+                        dead_connections.append(connection)
 
-                        # Clean up dead connections
-                        for dead in dead_connections:
-                            await self.disconnect(dead, topic)
+                for dead in dead_connections:
+                    await self.disconnect(dead, topic)
         except asyncio.CancelledError:
-            # Handle task cancellation
             pass
         except Exception as e:
-            print(f"Broadcast task error for topic {topic}: {e}")
+            logger.error(f"Broadcast task error for topic {topic}: {e}")
 
 
-# Create a global instance
 manager = ConnectionManager()

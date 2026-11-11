@@ -5,6 +5,10 @@ class MessageResponse(BaseModel):
     message: str
 
 
+class ApiKeyRegenerateResponse(MessageResponse):
+    key: str
+
+
 class RootResponse(MessageResponse):
     version: str
 

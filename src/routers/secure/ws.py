@@ -49,7 +49,7 @@ async def websocket_endpoint(
             except json.JSONDecodeError:
                 logger.error(f"Invalid JSON data received: {data}")
                 continue
-
     except WebSocketDisconnect:
         logger.info(f"Client disconnected from topic: {topic}")
+    finally:
         await manager.disconnect(websocket, topic)

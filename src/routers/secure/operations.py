@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
@@ -268,7 +269,8 @@ async def list_realdebrid_transfers(
     ] = False,
 ) -> RealDebridTransfersResponse:
     """List Real-Debrid transfers with CineFlow correlation and summary statistics."""
-    return rd_transfers_service.get_transfers(
+    return await asyncio.to_thread(
+        rd_transfers_service.get_transfers,
         force_refresh=force_refresh,
         status=status,
         search=search,
@@ -284,7 +286,9 @@ async def get_realdebrid_transfer_detail(
     transfer_id: Annotated[str, Path(description="The Real-Debrid torrent ID")],
 ) -> RealDebridTransferDetail:
     """Get detailed information and file breakdown for a specific Real-Debrid transfer."""
-    return rd_transfers_service.get_transfer_detail(transfer_id)
+    return await asyncio.to_thread(
+        rd_transfers_service.get_transfer_detail, transfer_id
+    )
 
 
 @router.post(
@@ -299,7 +303,7 @@ async def cancel_realdebrid_transfer(
     ],
 ) -> TransferActionResponse:
     """Safely cancel an active CineFlow-managed Real-Debrid transfer and update outbox ledger."""
-    return rd_transfers_service.cancel_transfer(transfer_id)
+    return await asyncio.to_thread(rd_transfers_service.cancel_transfer, transfer_id)
 
 
 @router.post(
@@ -314,7 +318,7 @@ async def retry_realdebrid_transfer(
     ],
 ) -> TransferActionResponse:
     """Retry a failed CineFlow-managed transfer and re-queue corresponding operation."""
-    return rd_transfers_service.retry_transfer(transfer_id)
+    return await asyncio.to_thread(rd_transfers_service.retry_transfer, transfer_id)
 
 
 class AttachTransferRequest(BaseModel):
@@ -336,7 +340,8 @@ async def attach_realdebrid_transfer(
     request: AttachTransferRequest,
 ) -> TransferActionResponse:
     """Attach an existing Real-Debrid transfer to a MediaItem and trigger ingestion or monitoring."""
-    return rd_transfers_service.attach_transfer(
+    return await asyncio.to_thread(
+        rd_transfers_service.attach_transfer,
         transfer_id=transfer_id,
         media_item_id=request.media_item_id,
     )
@@ -362,7 +367,8 @@ async def submit_realdebrid_transfer(
     request: SubmitTransferRequest,
 ) -> TransferActionResponse:
     """Submit a magnet or infohash to Real-Debrid and track it in CineFlow."""
-    return rd_transfers_service.submit_transfer(
+    return await asyncio.to_thread(
+        rd_transfers_service.submit_transfer,
         magnet_or_infohash=request.magnet,
         media_item_id=request.media_item_id,
     )
@@ -376,7 +382,7 @@ async def submit_realdebrid_transfer(
 )
 async def poll_realdebrid_transfers() -> PollTransfersResponse:
     """Trigger an immediate poll and completion ingestion sweep for active transfers."""
-    result = rd_transfers_service.poll_and_ingest_transfers()
+    result = await asyncio.to_thread(rd_transfers_service.poll_and_ingest_transfers)
     return PollTransfersResponse(
         polled=result.get("polled", 0),
         ingested=result.get("ingested", 0),

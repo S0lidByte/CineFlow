@@ -1429,7 +1429,8 @@ async def session_action(
             assert scraping_session.magnet
             torrent = Torrent(
                 raw_title=scraping_session.torrent_info.name,
-                infohash=scraping_session.magnet,
+                infohash=extract_infohash(scraping_session.magnet)
+                or scraping_session.magnet,
                 data=parsed_data,
                 rank=0,
                 lev_ratio=1.0,
@@ -1481,6 +1482,7 @@ async def session_action(
                             States.Paused,
                             States.Failed,
                             States.Completed,
+                            States.Unreleased,
                         ):
                             save_state_before_pause(season)
                         # Ensure episodes are also paused
@@ -1489,6 +1491,7 @@ async def session_action(
                                 States.Paused,
                                 States.Failed,
                                 States.Completed,
+                                States.Unreleased,
                             ):
                                 save_state_before_pause(episode)
 

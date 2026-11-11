@@ -16,6 +16,7 @@ from typing import Any, cast
 
 from fastapi import HTTPException
 from loguru import logger
+from PTT import parse_title  # pyright: ignore[reportUnknownVariableType]
 from pydantic import BaseModel, ConfigDict, Field
 from RTN import Torrent, parse
 from sqlalchemy import func, select, update
@@ -41,6 +42,26 @@ from program.types import Event
 from program.utils.request import CircuitBreakerOpen
 from program.utils.title_normalizer import normalize_title
 from program.utils.torrent import extract_infohash
+
+
+def _parse_transfer_title_and_year(raw_name: str) -> tuple[str | None, int | None]:
+    """Extract normalized display title and release year from a transfer filename."""
+    if not raw_name or raw_name == "Unknown":
+        return None, None
+    try:
+        parsed = cast(dict[str, Any], parse_title(raw_name))
+        raw_title = parsed.get("title")
+        parsed_title = str(raw_title).strip() if raw_title else None
+        raw_year = parsed.get("year")
+        year = (
+            int(raw_year)
+            if isinstance(raw_year, int)
+            or (isinstance(raw_year, str) and raw_year.isdigit())
+            else None
+        )
+        return (parsed_title or None), year
+    except Exception:
+        return None, None
 
 
 class RealDebridTransferFile(BaseModel):
@@ -1438,6 +1459,17 @@ class RealDebridTransfersService:
                                         service=rd,
                                     )
                                 if ok:
+                                    matched_item.store_state(States.Downloaded)
+                                    parent = getattr(matched_item, "parent", None)
+                                    if parent is not None and hasattr(
+                                        parent, "store_state"
+                                    ):
+                                        if getattr(parent, "state", None) in (
+                                            States.Requested,
+                                            States.Indexed,
+                                            States.Scraped,
+                                        ):
+                                            parent.store_state(States.Downloaded)
                                     ingested_count += 1
                                     logger.success(
                                         f"Successfully ingested completed Real-Debrid transfer {tid} for {matched_item.log_string}"
@@ -1459,6 +1491,19 @@ class RealDebridTransfersService:
                                         )
                                     )
                                     session.commit()
+                                    try:
+                                        from kink import di
+
+                                        from program.program import Program
+
+                                        if Program in di and matched_item.id:
+                                            di[Program].em.add_event(
+                                                Event("Downloader", matched_item.id)
+                                            )
+                                    except Exception as e:
+                                        logger.debug(
+                                            f"Failed to emit Downloader event for #{matched_item.id}: {e}"
+                                        )
                                     publish_outbox_lifecycle_event(
                                         "operation_completed",
                                         {
@@ -1598,6 +1643,17 @@ class RealDebridTransfersService:
                                             service=rd,
                                         )
                                     if ok:
+                                        unseen_item.store_state(States.Downloaded)
+                                        parent = getattr(unseen_item, "parent", None)
+                                        if parent is not None and hasattr(
+                                            parent, "store_state"
+                                        ):
+                                            if getattr(parent, "state", None) in (
+                                                States.Requested,
+                                                States.Indexed,
+                                                States.Scraped,
+                                            ):
+                                                parent.store_state(States.Downloaded)
                                         ingested_count += 1
                                         logger.success(
                                             f"Successfully ingested completed direct-polled Real-Debrid transfer {as_id} for {unseen_item.log_string}"
@@ -1619,6 +1675,19 @@ class RealDebridTransfersService:
                                             )
                                         )
                                         session.commit()
+                                        try:
+                                            from kink import di
+
+                                            from program.program import Program
+
+                                            if Program in di and unseen_item.id:
+                                                di[Program].em.add_event(
+                                                    Event("Downloader", unseen_item.id)
+                                                )
+                                        except Exception as e:
+                                            logger.debug(
+                                                f"Failed to emit Downloader event for #{unseen_item.id}: {e}"
+                                            )
                                         publish_outbox_lifecycle_event(
                                             "operation_completed",
                                             {

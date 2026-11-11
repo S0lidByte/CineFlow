@@ -24,7 +24,7 @@ from program.services.streaming.cache import Cache
 from program.settings import settings_manager
 from program.utils import generate_api_key
 
-from ..models.shared import MessageResponse
+from ..models.shared import ApiKeyRegenerateResponse, MessageResponse
 
 router = APIRouter(
     responses={404: {"description": "Not found"}},
@@ -190,14 +190,17 @@ async def download_user_info() -> DownloaderUserInfoResponse:
 @router.post(
     "/generateapikey",
     operation_id="generate_apikey",
-    response_model=MessageResponse,
+    response_model=ApiKeyRegenerateResponse,
 )
-async def generate_apikey() -> MessageResponse:
+async def generate_apikey() -> ApiKeyRegenerateResponse:
     new_key = generate_api_key()
     settings_manager.settings.api_key = new_key
     settings_manager.save()
 
-    return MessageResponse(message="API key regenerated successfully.")
+    return ApiKeyRegenerateResponse(
+        message="API key regenerated successfully.",
+        key=new_key,
+    )
 
 
 @router.get("/services", operation_id="services")
@@ -599,7 +602,12 @@ async def get_mount_files() -> MountResponse:
                 elif entry.is_dir():
                     scan_dir(entry.path)
 
-    scan_dir(mount_dir)
+    def _scan_mount() -> None:
+        if not os.path.isdir(mount_dir):
+            return
+        scan_dir(mount_dir)
+
+    await asyncio.to_thread(_scan_mount)
 
     return MountResponse(files=file_map)
 

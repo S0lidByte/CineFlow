@@ -266,7 +266,7 @@ async def overseerr(request: Request) -> OverseerrWebhookResponse:
 
         di[Program].em.add_item(
             new_item,
-            service=Overseerr.__class__.__name__,
+            service=Overseerr.__name__,
         )
 
         return OverseerrWebhookResponse(success=True)
