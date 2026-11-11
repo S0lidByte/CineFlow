@@ -12,6 +12,7 @@ import trio
 from program.services.streaming.cache import (
     Cache,
     CacheConfig,
+    CacheEntry,
     CacheIndexInconsistencyError,
 )
 
@@ -144,10 +145,44 @@ def test_cache_has_reports_coverage(tmp_path: Path) -> None:
     async def _run() -> None:
         await cache.put("movie.mkv", 0, b"0123456789")
         assert cache.has("movie.mkv", 0, 9) is True
+        assert cache.has("movie.mkv", 2, 7) is True
         assert cache.has("movie.mkv", 0, 10) is False
         assert cache.has("other.mkv", 0, 9) is False
 
     trio.run(_run)
+
+
+def test_cache_has_subrange_and_boundaries(tmp_path: Path) -> None:
+    cache = _make_cache(tmp_path)
+    k = cache._key("movie.mkv", 0)
+    cache._index[k] = CacheEntry(
+        key=k, cache_key="movie.mkv", start=0, size=100, mtime=0, tier="warm"
+    )
+    cache._by_path["movie.mkv"] = [0]
+    fp = cache._file_for(k, tier="warm")
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    fp.write_bytes(b"x" * 100)
+
+    # 1. Exact chunk boundary
+    assert cache.has("movie.mkv", 0, 99) is True
+
+    # 2. Fully contained interior sub-ranges
+    assert cache.has("movie.mkv", 10, 50) is True
+    assert cache.has("movie.mkv", 0, 10) is True
+    assert cache.has("movie.mkv", 50, 99) is True
+    assert cache.has("movie.mkv", 99, 99) is True
+
+    # 3. Requests extending beyond cached data return False
+    assert cache.has("movie.mkv", 0, 100) is False
+    assert cache.has("movie.mkv", 50, 150) is False
+    assert cache.has("movie.mkv", 100, 150) is False
+
+    # 4. Genuinely missing title
+    assert cache.has("missing.mkv", 0, 50) is False
+
+    # 5. Invalid ranges
+    assert cache.has("movie.mkv", 50, 10) is False
+    assert cache.has("movie.mkv", -5, 10) is False
 
 
 def test_cache_has_rejects_truncated_payload(tmp_path: Path) -> None:

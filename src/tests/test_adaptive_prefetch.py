@@ -46,6 +46,32 @@ def test_pool_pressure_throttling():
     window_extreme = mgr.calculate_window(active_leases=60, max_leases=64)
     assert window_extreme == 6
 
+    # Capacity equal to threshold (max_leases=32, threshold=32):
+    # Over-exhausted pool does not raise and produces min_window_chunks
+    assert mgr.calculate_window(active_leases=33, max_leases=32) == 4
+    # Exactly exhausted pool produces min_window_chunks
+    assert mgr.calculate_window(active_leases=32, max_leases=32) == 4
+    # Proportional throttling below threshold (active=24 -> remaining=8/16=0.5 -> 24)
+    assert mgr.calculate_window(active_leases=24, max_leases=32) == 24
+    # Unthrottled when below effective threshold (active=10 <= 16 -> 48)
+    assert mgr.calculate_window(active_leases=10, max_leases=32) == 48
+
+    # Capacity below threshold (max_leases=20, threshold=32):
+    # Over-exhausted pool
+    assert mgr.calculate_window(active_leases=25, max_leases=20) == 4
+    # Exactly exhausted pool
+    assert mgr.calculate_window(active_leases=20, max_leases=20) == 4
+    # Proportional throttling (active=15 -> remaining=5/10=0.5 -> 24)
+    assert mgr.calculate_window(active_leases=15, max_leases=20) == 24
+    # Unthrottled when below effective threshold (active=5 <= 10 -> 48)
+    assert mgr.calculate_window(active_leases=5, max_leases=20) == 48
+
+    # Capacity above threshold (max_leases=64):
+    # Fully exhausted pool produces min_window_chunks
+    assert mgr.calculate_window(active_leases=64, max_leases=64) == 4
+    # Over-exhausted pool produces min_window_chunks
+    assert mgr.calculate_window(active_leases=70, max_leases=64) == 4
+
 
 def test_cache_pressure_throttling():
     mgr = AdaptivePrefetchManager()

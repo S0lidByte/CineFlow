@@ -2341,29 +2341,45 @@ class Cache:
 
         This uses a thread-safe approach to prevent data races with concurrent writers.
         """
+        if start < 0 or end < start:
+            return False
 
-        k = self._key(cache_key, start)
-
-        # Use a separate thread lock to protect _index reads from async writers
+        # Use a separate thread lock to protect _index and _by_path reads from async writers
         # This avoids the need to make this method async
         with self._thread_lock:
-            cache_entry = self._index.get(k)
-
-            if not cache_entry:
+            s_list = self._by_path.get(cache_key)
+            if not s_list:
                 return False
 
-            chunk_end = cache_entry.start + cache_entry.size - 1
-
-            if end > chunk_end:
+            idx = bisect_right(s_list, start) - 1
+            if idx < 0:
                 return False
 
-            tier = cache_entry.tier
+            found_entry: CacheEntry | None = None
+            found_key: str | None = None
+            for candidate_idx in range(idx, -1, -1):
+                chunk_start = s_list[candidate_idx]
+                k = self._key(cache_key, chunk_start)
+                entry = self._index.get(k)
+                if not entry:
+                    continue
+                chunk_end = chunk_start + entry.size - 1
+                if start >= chunk_start and end <= chunk_end:
+                    found_entry = entry
+                    found_key = k
+                    break
+
+            if not found_entry or not found_key:
+                return False
+
+            tier = found_entry.tier
+            entry_size = found_entry.size
 
         # Check complete payload visibility outside the lock. Existence alone
         # is insufficient while recovering old non-atomic writes or external
         # cache damage; readers must never classify a truncated chunk as ready.
         return any(
-            self._file_has_size(self._file_for(k, tier=probe_tier), cache_entry.size)
+            self._file_has_size(self._file_for(found_key, tier=probe_tier), entry_size)
             for probe_tier in self._tier_probe_order(tier)
         )
 

@@ -248,12 +248,17 @@ class AdaptivePrefetchManager:
             )
 
         # Connection pool pressure throttling
-        if active_leases > self.config.pool_throttle_threshold and max_leases > 0:
-            remaining = max(1, max_leases - active_leases)
-            throttle_scale = min(
-                1.0, remaining / (max_leases - self.config.pool_throttle_threshold)
-            )
-            window = max(self.config.min_window_chunks, int(window * throttle_scale))
+        if max_leases > 0:
+            if max_leases > self.config.pool_throttle_threshold:
+                effective_threshold = self.config.pool_throttle_threshold
+            else:
+                effective_threshold = max(0, max_leases // 2)
+
+            throttle_span = max_leases - effective_threshold
+            if active_leases > effective_threshold and throttle_span > 0:
+                remaining = max(0, max_leases - active_leases)
+                throttle_scale = min(1.0, max(0.0, remaining / throttle_span))
+                window = max(self.config.min_window_chunks, int(window * throttle_scale))
 
         # Cache capacity pressure throttling:
         # Prioritize active playback over cache retention.
