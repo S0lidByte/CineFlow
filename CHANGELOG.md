@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.49.0](https://github.com/S0lidByte/CineFlow/compare/v1.48.1...v1.49.0) (2026-11-09)
+
+
+### Features
+
+* **realdebrid:** display normalized transfer titles ([#357](https://github.com/S0lidByte/CineFlow/issues/357)) ([4166c0a](https://github.com/S0lidByte/CineFlow/commit/4166c0a9762e1b89094fd30e97354f7d32d0c09f))
+
 ## [1.48.1](https://github.com/S0lidByte/CineFlow/compare/v1.48.0...v1.48.1) (2026-11-08)
 
 
