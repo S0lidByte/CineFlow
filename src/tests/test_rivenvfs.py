@@ -132,6 +132,35 @@ def mock_vfs(tmp_path):
         yield vfs
 
 
+@pytest.mark.parametrize(
+    ("getuid", "getgid", "expected_uid", "expected_gid"),
+    [
+        (None, None, 0, 0),
+        (lambda: 1000, lambda: 1001, 1000, 1001),
+    ],
+)
+def test_getattr_uses_platform_owner_functions_when_available(
+    mock_vfs, monkeypatch, getuid, getgid, expected_uid, expected_gid
+):
+    root = mock_vfs._root
+
+    async def _run() -> None:
+        monkeypatch.setattr(
+            "program.services.filesystem.vfs.rivenvfs.os.getuid",
+            getuid,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            "program.services.filesystem.vfs.rivenvfs.os.getgid",
+            getgid,
+            raising=False,
+        )
+        attrs = await mock_vfs.getattr(root.inode)
+        assert (attrs.st_uid, attrs.st_gid) == (expected_uid, expected_gid)
+
+    trio.run(_run)
+
+
 def test_subtitle_caching(mock_vfs):
     """Reading a subtitle file multiple times only queries the DB once."""
 

@@ -1,6 +1,7 @@
 """Unit tests for CineFlow logging color palette, channel defaults, state inline tags, and WCAG AA compliance."""
 
 import os
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -60,6 +61,17 @@ def test_channel_level_colors():
         assert (
             lvl.color == expected_color
         ), f"Channel {channel_name} color mismatch: got {lvl.color}, expected {expected_color}"
+
+
+def test_console_handler_does_not_enqueue_writes_to_stderr():
+    """Avoid Loguru queue writes after pytest's captured stderr has closed."""
+    setup_logger("DEBUG")
+    handlers = logger._core.handlers.values()
+    assert any(
+        getattr(handler._sink, "_stream", None) is sys.stderr
+        and handler._enqueue is False
+        for handler in handlers
+    )
 
 
 def test_state_colors_enum_coverage():

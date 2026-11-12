@@ -148,7 +148,9 @@ def setup_logger(
             "format": log_format,
             "backtrace": False,
             "diagnose": False,
-            "enqueue": True,
+            # stderr can be closed during interpreter shutdown or test-capture teardown.
+            # Keep console writes synchronous; file logging remains queued below.
+            "enqueue": False,
         }
     ]
 

@@ -2120,8 +2120,10 @@ class RivenVFS(pyfuse3.Operations):
             attrs.generation = 0
             attrs.entry_timeout = 300
             attrs.attr_timeout = 300
-            attrs.st_uid = os.getuid() if hasattr(os, "getuid") else 0
-            attrs.st_gid = os.getgid() if hasattr(os, "getgid") else 0
+            getuid = cast(Callable[[], int] | None, getattr(os, "getuid", None))
+            getgid = cast(Callable[[], int] | None, getattr(os, "getgid", None))
+            attrs.st_uid = getuid() if getuid is not None else 0
+            attrs.st_gid = getgid() if getgid is not None else 0
             # Hint larger block size to kernel
             attrs.st_blksize = 128 * 1024
             attrs.st_blocks = 1
