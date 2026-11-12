@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.49.1](https://github.com/S0lidByte/CineFlow/compare/v1.49.0...v1.49.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* adaptive prefetch and streaming cache improvements ([566de9b](https://github.com/S0lidByte/CineFlow/commit/566de9b8f4d0856f888ea1048e78c444bc1f324b))
+* **realdebrid:** align transfer title parsing and remove unused helper ([275a057](https://github.com/S0lidByte/CineFlow/commit/275a05793236082f082a2925b2660a2274455a59))
+* satisfy pinned pyright 1.1.400 for retry-after date parsing ([37cc397](https://github.com/S0lidByte/CineFlow/commit/37cc39742993785934647e6ca411a9422b636e85))
+* satisfy pyright for retry-after date parsing ([751b193](https://github.com/S0lidByte/CineFlow/commit/751b193f7246d0edf85679073c82b7d84adc5942))
+* satisfy pyright for retry-after date parsing ([65c51ee](https://github.com/S0lidByte/CineFlow/commit/65c51ee914edfd8870984ce977faf758f7fe26f3))
+* satisfy pyright for retry-after date parsing ([61cc6c7](https://github.com/S0lidByte/CineFlow/commit/61cc6c73dc685a0a9f35173d3b95f7cf7ccf9ca2))
+* **vfs:** cross-platform uid/gid fallback and sync console logging ([ab8fe63](https://github.com/S0lidByte/CineFlow/commit/ab8fe63f1170369dcf9473a78e51ab52be2a5b54))
+* websocket manager, realdebrid transfers, locking, request utils, and secure routers; add broad audit fixes tests ([73b085a](https://github.com/S0lidByte/CineFlow/commit/73b085ae1e6504af99097abaae8142d0b0c44caf))
+
 ## [1.49.0](https://github.com/S0lidByte/CineFlow/compare/v1.48.1...v1.49.0) (2026-11-09)
 
 
