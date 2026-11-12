@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.49.2](https://github.com/S0lidByte/CineFlow/compare/v1.49.1...v1.49.2) (2026-11-12)
+
+
+### Bug Fixes
+
+* **scraper:** filter unrelated results from manual scrape ([a3dbdb8](https://github.com/S0lidByte/CineFlow/commit/a3dbdb8b95509eb924c0deb8df1d95209dd95019))
+
 ## [1.49.1](https://github.com/S0lidByte/CineFlow/compare/v1.49.0...v1.49.1) (2026-11-12)
 
 
