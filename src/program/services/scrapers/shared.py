@@ -741,6 +741,22 @@ def _accumulate_ranked_torrents(
             if ranking_title != raw_title:
                 torrent = torrent.model_copy(update={"raw_title": raw_title})
 
+            # In manual mode, still reject clearly mis-matched titles
+            # (Levenshtein ratio below 0.7 means the torrent title has no meaningful
+            # resemblance to the item being scraped — e.g. "The Odyssey" appearing
+            # in results when scraping "The Hangover Part III").
+            if manual and torrent.lev_ratio < 0.7:
+                logger.debug(
+                    f"Manual scrape: rejecting low lev_ratio {torrent.lev_ratio:.2f} "
+                    f"for '{raw_title[:60]}' (title mismatch vs '{item.top_title}')"
+                )
+                if funnel is not None:
+                    funnel.record_rtn_reject(
+                        Exception(f"manual lev_ratio {torrent.lev_ratio:.2f} < 0.70")
+                    )
+                processed_infohashes.add(infohash)
+                continue
+
             if not manual and not torrent.fetch:
                 logger.debug(f"RTN rejected '{raw_title[:60]}' with fetch=False")
                 if funnel is not None:
@@ -905,14 +921,15 @@ def _accumulate_ranked_torrents(
                 funnel.record_content_filter()
             continue
 
-        if (
-            not manual
-            and torrent.data.year
-            and not _check_item_year(item, torrent.data)
-        ):
-            # If year is present, then check to make sure it's correct
+        if torrent.data.year and not _check_item_year(item, torrent.data):
+            # If year is present, check it's correct — applies in both auto and manual
+            # mode so cross-title results (e.g. "The Odyssey 2026" appearing when
+            # scraping "The Hangover Part III") are always rejected when item year
+            # is known.  _check_item_year returns True when item year is unknown,
+            # so this is safe even when the item has no year metadata.
             logger.trace(
                 f"Skipping torrent for incorrect year with {item.log_string}: {raw_title}"
+                + (" [manual mode]" if manual else "")
             )
             if funnel is not None:
                 funnel.record_content_filter()
