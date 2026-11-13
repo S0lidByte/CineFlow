@@ -14,6 +14,7 @@ class AdaptivePrefetchConfig:
     chunk_size_bytes: int = 1048576  # 1 MB
     default_fallback_chunks: int = 12
     sequential_tolerance_bytes: int = 1310720  # 1.25 MB (10 blocks)
+    interleave_tolerance_bytes: int = 16777216  # 16 MB container interleave tolerance
     ema_alpha: float = 0.35
     pool_throttle_threshold: int = (
         32  # Start scaling down if active leases > 32 (of 64 limit)
@@ -47,6 +48,7 @@ class AdaptivePrefetchManager:
         self.estimated_bitrate: float = 0.0
         self.last_read_time: float | None = None
         self.last_read_end: int | None = None
+        self._playhead_end: int | None = None
         self.current_generation: int = 0
         self.last_calculated_window: int = self.config.default_fallback_chunks
         self.seek_count: int = 0
@@ -88,11 +90,28 @@ class AdaptivePrefetchManager:
         size = end - start + 1
         is_sequential = False
 
+        tolerance = self.config.sequential_tolerance_bytes
+        interleave_tolerance = self.config.interleave_tolerance_bytes
+
         if self.last_read_end is not None and self.last_read_time is not None:
-            # Check sequential proximity
             expected_next = self.last_read_end + 1
-            if abs(start - expected_next) <= self.config.sequential_tolerance_bytes:
+            playhead = (
+                self._playhead_end
+                if self._playhead_end is not None
+                else self.last_read_end
+            )
+
+            if (
+                # 1. Contiguous with immediate previous read
+                abs(start - expected_next) <= tolerance
+                # 2. Interleaved container read behind active playhead (e.g. audio/subtitles)
+                or (playhead - interleave_tolerance) <= start <= playhead
+                # 3. Contiguous forward resume relative to playhead (e.g. video after audio)
+                or 0 <= (start - (playhead + 1)) <= tolerance
+            ):
                 is_sequential = True
+
+            if is_sequential:
                 if self._accumulated_read_start_time is None:
                     self._accumulated_read_start_time = self.last_read_time
                 self._accumulated_read_bytes += size
@@ -134,12 +153,20 @@ class AdaptivePrefetchManager:
             self.consecutive_sequential_reads = 0
             self._accumulated_read_bytes = 0
             self._accumulated_read_start_time = None
+            self._playhead_end = end
             logger.debug(
                 f"Seek detected: jumped from {self.last_read_end} to {start}. "
                 f"Advanced generation to {self.current_generation}"
             )
         elif is_sequential:
             self.consecutive_sequential_reads += 1
+            self._playhead_end = max(
+                self._playhead_end if self._playhead_end is not None else end,
+                end,
+            )
+        else:
+            # Initial read: establish active playhead
+            self._playhead_end = end
 
         self.last_read_end = end
         self.last_read_time = current_time

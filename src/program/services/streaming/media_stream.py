@@ -938,7 +938,7 @@ class MediaStream:
                     break
                 if label == "Prefetch gap-fill":
                     chunks.discard(chunk)
-        except EmptyDataException as error:
+        except (EmptyDataException, RecoverableMediaStreamException) as error:
             self._trace_stream(
                 f"{label} did not return data ({error}); keeping the stream "
                 "available for the next playhead read"
@@ -1189,12 +1189,15 @@ class MediaStream:
                         httpx.ReadError,
                         httpx.TimeoutException,
                         httpx.RemoteProtocolError,
+                        EmptyDataException,
+                        RecoverableMediaStreamException,
                     ),
                 ):
                     raise error from group
                 raise
         except (
             EmptyDataException,
+            RecoverableMediaStreamException,
             DebridServiceRateLimitedException,
             DebridServiceRefusedRangeRequestException,
             DebridServiceClosedConnectionException,
@@ -1202,6 +1205,8 @@ class MediaStream:
             httpx.TimeoutException,
             httpx.RemoteProtocolError,
         ) as e:
+            if isinstance(e, RecoverableMediaStreamException):
+                raise
             logger.exception(
                 self.build_log_message(
                     f"{e.__class__.__name__} occurred whilst managing stream connection: {e}"
@@ -1918,9 +1923,6 @@ class MediaStream:
                                                                 prefetch_gen=prefetch_gen,
                                                             )
                                                             if not prefetched:
-                                                                needs_url_refresh = (
-                                                                    False
-                                                                )
                                                                 break
                                                     else:
                                                         connection.seek(
@@ -1950,7 +1952,6 @@ class MediaStream:
                                                         prefetch_gen=prefetch_gen,
                                                     )
                                                     if not prefetched:
-                                                        needs_url_refresh = False
                                                         break
 
                             position = connection.current_read_position
@@ -2283,16 +2284,20 @@ class MediaStream:
                 if manager is not None:
                     generation = manager.current_generation
                     manager.record_read(start_byte, end_byte, monotonic())
-                    self._consumer_end = end_byte
-                    self._update_runway_observation(end_byte + 1)
+                    consumer_end = max(getattr(self, "_consumer_end", 0) or 0, end_byte)
+                    self._consumer_end = consumer_end
+                    self._update_runway_observation(consumer_end + 1)
                     if manager.current_generation != generation:
                         await self._stop_speculative_workers()
                         connection = self._active_stream_connection
-                        if connection is not None:
+                        if connection is not None and read_type == "body_read":
                             connection.seek(chunk_range=chunk_range)
                     self._protect_consumer(start_byte)
                 else:
-                    self._consumer_end = end_byte
+                    self._consumer_end = max(
+                        getattr(self, "_consumer_end", 0) or 0, end_byte
+                    )
+                    self._protect_consumer(start_byte)
 
             # Start the stream and wait for a connection before progressing with an uncached body read.
             # This MUST be done before assigning a value to current_read,
@@ -2379,25 +2384,38 @@ class MediaStream:
         if self.config.prefetch_chunks <= 0:
             return False
 
-        start, end = chunk_range.request_range
+        start, _ = chunk_range.request_range
         if start < self.config.header_size or start >= self.chunker.footer_start:
             return False
 
-        previous_end = getattr(self, "_consumer_end", None)
-        if previous_end is None:
-            previous = self.recent_reads.previous_read.value
-            if previous is None or previous.read_type not in _HOT_STREAM_READ_TYPES:
-                return False
-            previous_start, previous_end = previous.chunk_range.request_range
-            if (
-                previous_start < self.config.header_size
-                or previous_end >= self.chunker.footer_start
-            ):
-                return False
-        return (
-            previous_end < end
-            and abs(start - previous_end - 1) <= self.config.sequential_read_tolerance
+        interleave_tolerance = max(
+            self.config.sequential_read_tolerance,
+            16 * 1024 * 1024,
         )
+
+        previous_end = getattr(self, "_consumer_end", None)
+        if previous_end is not None:
+            # Active playback horizon relative to current consumer playhead:
+            # Accepts interleaved audio/subtitles behind playhead and video strides ahead
+            horizon_min = max(
+                self.config.header_size, previous_end - interleave_tolerance
+            )
+            horizon_max = previous_end + interleave_tolerance * 2
+            if horizon_min <= start <= horizon_max:
+                return True
+
+        # Check proximity to the immediate previous read
+        previous = self.recent_reads.previous_read.value
+        if previous is not None and previous.read_type in _HOT_STREAM_READ_TYPES:
+            prev_start, prev_end = previous.chunk_range.request_range
+            if (
+                prev_start >= self.config.header_size
+                and prev_end < self.chunker.footer_start
+                and abs(start - prev_end - 1) <= interleave_tolerance
+            ):
+                return True
+
+        return False
 
     def _protect_consumer(self, request_start: int) -> None:
         """Metadata probes must not move the foreground lease window."""

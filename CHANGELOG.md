@@ -8,6 +8,7 @@
 
 ### Bug Fixes
 
+* **stream:** resolve sustained playback rebuffering from container interleaving by tracking monotonic playhead in `AdaptivePrefetchManager`, recognizing active playback horizon in `_is_sequential_cache_playback`, restricting generation seek triggers to `body_read`, and preserving active cache leases
 * **stream:** prioritize settings over hardcoded prefetch limits; dynamic `max_window_chunks` scaling for high-bitrate DoVi media and baseline bitrate derivation for unprobed files $\ge 1\text{ GB}$ ([3259200](https://github.com/S0lidByte/CineFlow/commit/3259200b))
 
 ## [1.50.0](https://github.com/S0lidByte/CineFlow/compare/v1.49.2...v1.50.0) (2026-11-13)
