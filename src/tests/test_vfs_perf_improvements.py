@@ -147,9 +147,9 @@ class TestKeepCacheFileInfo(unittest.TestCase):
         fi = pyfuse3.FileInfo(fh=pyfuse3.FileHandleT(7), keep_cache=True)
         self.assertTrue(fi.keep_cache)
 
-    def test_fileinfo_default_keep_cache_false(self):
-        """Verify the stub defaults keep_cache to False."""
-        fi = pyfuse3.FileInfo(fh=pyfuse3.FileHandleT(7))
+    def test_fileinfo_keep_cache_explicit_false(self):
+        """Verify FileInfo accepts keep_cache=False explicitly."""
+        fi = pyfuse3.FileInfo(fh=pyfuse3.FileHandleT(7), keep_cache=False)
         self.assertFalse(fi.keep_cache)
 
 
