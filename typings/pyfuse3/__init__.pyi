@@ -43,7 +43,14 @@ class FileInfo:
     keep_cache: bool
     direct_io: bool
     nonseekable: bool
-    def __init__(self, *, fh: FileHandleT = ...) -> None: ...
+    def __init__(
+        self,
+        fh: FileHandleT = ...,
+        *,
+        keep_cache: bool = ...,
+        direct_io: bool = ...,
+        nonseekable: bool = ...,
+    ) -> None: ...
 
 class ReaddirToken: ...
 

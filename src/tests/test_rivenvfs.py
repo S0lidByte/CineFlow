@@ -47,8 +47,10 @@ def _ensure_pyfuse3() -> None:
         pass
 
     class FileInfo:
-        def __init__(self, fh=0):
+        def __init__(self, fh=0, keep_cache: bool = False, direct_io: bool = False):
             self.fh = fh
+            self.keep_cache = keep_cache
+            self.direct_io = direct_io
 
     class EntryAttributes:
         pass
@@ -62,6 +64,7 @@ def _ensure_pyfuse3() -> None:
         pass
 
     stub.Operations = object
+    stub.default_options = frozenset()
     stub.InodeT = InodeT
     stub.FileNameT = bytes
     stub.FileHandleT = FileHandleT

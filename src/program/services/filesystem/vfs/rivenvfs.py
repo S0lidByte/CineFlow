@@ -118,6 +118,7 @@ class FileHandle(TypedDict):
     path: str | None
     last_read_end: int
     subtitle_content: bytes | None
+    stream: MediaStream | None
 
 
 @dataclass(frozen=True)
@@ -459,9 +460,34 @@ class RivenVFS(pyfuse3.Operations):
             fuse_options |= {
                 "fsname=rivenvfs",
                 "allow_other",
+                # PERF-1: Kernel readahead and background I/O queue tuning.
+                # max_readahead=1 MiB: allow kernel to coalesce adjacent reads into
+                #   a single large request, reducing per-syscall overhead on sequential
+                #   4K Remux streams (~40 MB/s).
+                # max_background=64 / congestion_threshold=48: widen the kernel's
+                #   in-flight FUSE request queue so the FUSE loop is never stalled
+                #   waiting for a request slot during burst prefetch phases.
+                # These are Linux FUSE mount options; pyfuse3 is Linux-only so the
+                # option set is always correct.  If an older kernel ignores unknown
+                # options silently they are no-ops; if pyfuse3.init() rejects them
+                # the except block below retries without the hints.
+                "max_readahead=1048576",
+                "max_background=64",
+                "congestion_threshold=48",
             }
 
-            pyfuse3.init(self, self._mountpoint, fuse_options)
+            try:
+                pyfuse3.init(self, self._mountpoint, fuse_options)
+            except RuntimeError:
+                # Older kernels may not recognise the tuning options.  Retry with the
+                # minimal option set so the mount still succeeds.
+                logger.warning(
+                    "pyfuse3.init() rejected extended FUSE options; "
+                    "retrying with baseline options (no readahead/background tuning)"
+                )
+                fuse_options_fallback = set(pyfuse3.default_options)
+                fuse_options_fallback |= {"fsname=rivenvfs", "allow_other"}
+                pyfuse3.init(self, self._mountpoint, fuse_options_fallback)
 
             self.mounted = True
             self._set_state(VFSState.MOUNTED)
@@ -2578,11 +2604,15 @@ class RivenVFS(pyfuse3.Operations):
                     # even if the VFS node has been deleted (sync/remove).
                     "last_read_end": 0,
                     "subtitle_content": None,
+                    # PERF-3: Cached MediaStream pointer so read() bypasses
+                    # _get_stream()'s dict lookup + is_killed check on every call.
+                    # Cleared in release() and invalidated when is_killed fires.
+                    "stream": None,
                 }
 
             logger.trace(f"open: path={path} fh={fh}")
 
-            return pyfuse3.FileInfo(fh=pyfuse3.FileHandleT(fh))
+            return pyfuse3.FileInfo(fh=pyfuse3.FileHandleT(fh), keep_cache=True)
         except pyfuse3.FUSEError:
             raise
         except Exception:
@@ -2609,16 +2639,22 @@ class RivenVFS(pyfuse3.Operations):
         """
 
         try:
-            # Cache maintenance can evict, unlink, and rebuild accounting.  Run
-            # it in the mount nursery so the FUSE read path never waits on that
-            # periodic work. Cache.maybe_log_stats is single-flight.
+            # PERF-2: Gate cache maintenance on a 30-second interval so we do NOT
+            # spawn a nursery task on *every* read() call.
+            # At 128 KiB FUSE blocks a 4K Remux stream triggers ~300 reads/second;
+            # spawning a Trio task each time adds measurable task-scheduler overhead.
+            # Cache.maybe_log_stats() is single-flight (it re-checks the 30s guard
+            # internally), so we just mirror that guard here to skip the nursery
+            # task entirely when nothing would happen anyway.
             try:
                 cache = di[Cache]
-                if self.mounted:
-                    self.stream_nursery.start_soon(cache.maybe_log_stats)
-                else:
-                    # Mount-free unit tests do not have a stream nursery.
-                    await cache.maybe_log_stats()
+                _now = time.time()
+                if _now - getattr(cache, "_last_log", 0.0) >= 30:
+                    if self.mounted:
+                        self.stream_nursery.start_soon(cache.maybe_log_stats)
+                    else:
+                        # Mount-free unit tests do not have a stream nursery.
+                        await cache.maybe_log_stats()
             except Exception:
                 pass
 
@@ -2712,12 +2748,26 @@ class RivenVFS(pyfuse3.Operations):
             if request_end < request_start:
                 return b""
 
-            stream = await self._get_stream(
-                path=path,
-                fh=fh,
-                file_size=file_size,
-                original_filename=original_filename,
-            )
+            # PERF-3: Fast-path stream resolution from the file handle's cached pointer.
+            # _get_stream() does a dict lookup + is_killed check on every call; at
+            # 300 reads/second for 4K Remux that dict access serialises under Python's
+            # GIL.  Storing the pointer on the handle avoids the lookup for the common
+            # (sequential, non-killed) case.
+            _cached_stream: MediaStream | None = handle_info.get("stream")  # type: ignore[assignment]
+            if _cached_stream is not None and not (
+                getattr(_cached_stream, "is_killed", None)
+                and _cached_stream.is_killed.value
+            ):
+                stream = _cached_stream
+            else:
+                stream = await self._get_stream(
+                    path=path,
+                    fh=fh,
+                    file_size=file_size,
+                    original_filename=original_filename,
+                )
+                # Store back for subsequent reads on the same handle.
+                handle_info["stream"] = stream
 
             try:
                 return await stream.read(
@@ -2832,6 +2882,10 @@ class RivenVFS(pyfuse3.Operations):
             path = None
 
             if handle_info:
+                # PERF-3: Clear the cached stream pointer before closing so there is
+                # no dangling reference to a MediaStream that is about to be torn down.
+                handle_info["stream"] = None
+
                 # Prefer the path stored at open() time — this survives VFS node
                 # deletion (sync/remove) so the stream is always closed correctly,
                 # preventing permanent MediaStream leaks in _active_streams.

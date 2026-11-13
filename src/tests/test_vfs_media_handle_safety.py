@@ -34,8 +34,10 @@ def _ensure_pyfuse3() -> None:
         pass
 
     class FileInfo:
-        def __init__(self, fh=0):
+        def __init__(self, fh=0, keep_cache: bool = False, direct_io: bool = False):
             self.fh = fh
+            self.keep_cache = keep_cache
+            self.direct_io = direct_io
 
     class EntryAttributes:
         pass
@@ -49,7 +51,9 @@ def _ensure_pyfuse3() -> None:
         pass
 
     stub.Operations = object
+    stub.default_options = frozenset()
     stub.InodeT = InodeT
+    stub.FileNameT = bytes
     stub.FileHandleT = FileHandleT
     stub.ModeT = ModeT
     stub.FileInfo = FileInfo
@@ -59,6 +63,17 @@ def _ensure_pyfuse3() -> None:
     stub.RequestContext = RequestContext
     stub.ROOT_INODE = InodeT(1)
     stub.errno = errno_mod
+
+    def _noop(*_args, **_kwargs):
+        return None
+
+    stub.readdir_reply = _noop
+    stub.init = _noop
+    stub.main = _noop
+    stub.close = _noop
+    stub.invalidate_inode = _noop
+    stub.invalidate_entry = _noop
+    stub.RENAME_EXCHANGE = 2
     sys.modules["pyfuse3"] = stub
     sys.modules["pyfuse3.errno"] = errno_mod
 
