@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased](https://github.com/S0lidByte/CineFlow/compare/v1.50.0...HEAD)
+
+### Features
+
+* **system:** add authenticated `POST /api/v1/system/restart` and `POST /api/v1/settings/restart` endpoints with pytest-safe scheduler ([3259200](https://github.com/S0lidByte/CineFlow/commit/3259200b))
+
+### Bug Fixes
+
+* **stream:** prioritize settings over hardcoded prefetch limits; dynamic `max_window_chunks` scaling for high-bitrate DoVi media and baseline bitrate derivation for unprobed files $\ge 1\text{ GB}$ ([3259200](https://github.com/S0lidByte/CineFlow/commit/3259200b))
+
 ## [1.50.0](https://github.com/S0lidByte/CineFlow/compare/v1.49.2...v1.50.0) (2026-11-13)
 
 

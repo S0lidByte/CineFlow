@@ -179,32 +179,66 @@ Then restart CineFlow.
 
 ## CineFlow VFS and Caching
 
-CineFlow ships with a built-in virtual filesystem (VFS) optimised for streaming, intelligent caching, and media organisation.
+CineFlow ships with a high-performance built-in virtual filesystem (VFS) powered by `pyfuse3` on Linux, featuring an adaptive prefetch engine, multi-tier LRU caching, and direct streaming optimizations.
 
-| Setting | Description |
-|---------|-------------|
-| `filesystem.cache_dir` | Directory where cached chunks are stored (default `/dev/shm/riven-cache`) |
-| `filesystem.cache_max_size_mb` | Maximum total cache size in MB (default 10240) |
-| `filesystem.cache_ttl_seconds` | TTL used when eviction policy is TTL (default 2 hours) |
-| `filesystem.cache_eviction` | Eviction policy: `LRU` (default) or `TTL` |
-| `filesystem.cache_metrics` | Emit periodic VFS cache stats logs (default true) |
-| `stream.chunk_size_mb` | Size of each on-demand CDN request chunk (default 1 MiB) |
-| `stream.sequential_read_tolerance_blocks` | Interleaved sequential-read tolerance in 128 KiB blocks (default 10) |
-| `stream.scan_tolerance_blocks` | Jump size that classifies a read as a library scan (default 25) |
+### Streaming & Cache Settings
 
-Chunks are fetched **on demand** for the bytes requested by the media client. There is no ahead-of-playback prefetch setting.
+| Setting | Type / Range | Default | Description |
+|---|---|---|---|
+| `filesystem.cache_dir` | string | `/dev/shm/riven-cache` | Directory where cached media chunks are stored (tmpfs or disk) |
+| `filesystem.cache_hot_dir` | string / null | `null` | Optional high-speed NVMe directory for two-tier cache demotion |
+| `filesystem.cache_max_size_mb` | integer | `10240` (10 GiB) | Maximum total cache capacity in MB across tiers |
+| `filesystem.tmpfs_cache_max_mb` | integer | `1024` (1 GiB) | Hard safety cap when cache resides on tmpfs (`/dev/shm`) to prevent OOM |
+| `filesystem.cache_ttl_seconds` | integer | `7200` (2h) | Expiration window when eviction policy is set to `TTL` |
+| `filesystem.cache_eviction` | `LRU` \| `TTL` | `LRU` | Cache eviction policy (least recently used or time-to-live) |
+| `filesystem.cache_metrics` | boolean | `true` | Periodic cache performance metrics logged every 30 seconds |
+| `stream.chunk_size_mb` | integer (1–16) | `1` | Size of each on-demand CDN request chunk (4 MiB recommended for 4K) |
+| `stream.prefetch_chunks` | integer (0–128) | `12` | Base sequential chunks prefetched ahead of the active read position |
+| `stream.target_buffer_seconds` | float (5.0–120.0) | `15.0` | Target playback buffer runway maintained continuously by prefetch |
+| `stream.min_safe_runway_seconds` | float (2.0–60.0) | `8.0` | Minimum safe cached buffer before starvation warning or burst refill |
+| `stream.parallel_prefetch_workers` | `1` \| `2` \| `4` | `1` | Concurrent prefetch workers (`1` recommended to avoid CDN rate contention) |
+| `stream.autotune_mode` | enum | `balanced` | Dynamic prefetch mode (`disabled`, `conservative`, `balanced`, `aggressive`) |
+| `stream.sequential_read_tolerance_blocks`| integer | `10` | Interleaved sequential-read tolerance in 128 KiB blocks |
+| `stream.scan_tolerance_blocks` | integer | `25` | Forward seek jump size that classifies a read as a library scan |
 
-By default, CineFlow uses **LRU eviction** — the least recently used cache blocks are removed when space runs low. Set `filesystem.cache_eviction` to `TTL` to expire blocks by `filesystem.cache_ttl_seconds` instead.
+### Adaptive Prefetching Engine
 
-### Baseline metrics before further cache work
+CineFlow continuously maintains a comfortable playback runway ahead of media players:
+- **Continuous Buffer Refill**: Unlike naive on-demand readers, the adaptive prefetch manager evaluates cached buffer runway ($T_{\text{runway}} = \text{cached\_bytes} / \text{bitrate}$) and maintains delivery until `target_buffer_seconds` is satisfied.
+- **Bitrate Estimation & Cold-Start Derivation**: Automatically calculates Exponential Moving Average (EMA) playback bitrates. For unprobed large files ($\ge 1\text{ GB}$), CineFlow derives a conservative baseline bitrate (up to 120 Mbps for 4K Remux) to prevent initial buffer starvation.
+- **User Settings Priority**: User-configured buffer targets and prefetch chunk limits strictly dictate prefetch ceilings; hardcoded legacy bounds are never applied over user settings.
+- **Kernel I/O Optimization**: FUSE readahead coalescing (`max_readahead=1048576`), direct stream handle caching, and Linux page cache retention (`keep_cache=True`) ensure zero stutter during seek-ahead and header inspection.
 
-With `filesystem.cache_metrics` enabled, VFS logs emit `Cache stats: {...}` about every 30s. Capture these before proposing prefetch or extra cache tiers:
+### Recommended Settings for 4K UHD Remux & Dolby Vision (DoVi)
 
-- `hits` / `misses` (and derived hit ratio)
-- `bytes_from_cache` / `bytes_written`
-- `evictions`, `total_bytes`, `entries`
+For high-bitrate 4K Remux, Dolby Vision Profile 7/8, and IMAX Enhanced media (60–100+ Mbps):
 
-Also note STREAM/VFS log lines for read types (`header_scan`, `footer_scan`, `sequential_read`, `seek`, `body_read`) during library scan, playback, and seek. Miss latency and CDN byte volume are not in the snapshot today — time those from logs or external tooling if needed.
+```json
+{
+  "stream": {
+    "chunk_size_mb": 4,
+    "prefetch_chunks": 32,
+    "target_buffer_seconds": 25.0,
+    "min_safe_runway_seconds": 10.0,
+    "parallel_prefetch_workers": 1,
+    "autotune_mode": "balanced"
+  },
+  "filesystem": {
+    "cache_dir": "/mnt/fast-ssd/cineflow-cache",
+    "cache_max_size_mb": 20480
+  }
+}
+```
+
+> **Client Direct Play Notice:** Web browsers (such as Chrome / Plex Web) lack native support for Dolby Vision Profile 7/8 in MKV containers, forcing Plex Media Server to transcode 4K video on the fly. Always use dedicated client apps that support Direct Play (e.g. **Plex Desktop for Windows/macOS**, **Infuse on Apple TV**, or **Kodi / Shield TV**) for seamless high-bitrate playback.
+
+### Live Restart API
+
+Operational streaming settings take effect upon backend restart. You can trigger a graceful restart directly from the Frontend (saving the **Operations** settings tab automatically schedules a restart) or via API:
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/system/restart" -H "x-api-key: YOUR_API_KEY"
+```
 
 ---
 
