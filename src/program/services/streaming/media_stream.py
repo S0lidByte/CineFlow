@@ -596,7 +596,28 @@ class MediaStream:
         from .adaptive_prefetch import AdaptivePrefetchConfig, AdaptivePrefetchManager
 
         configured_prefetch = self.config.prefetch_chunks
-        max_chunks = max(48, configured_prefetch) if configured_prefetch > 0 else 48
+        # Allow max_window_chunks to scale based on user-configured target_buffer_seconds
+        # and prefetch_chunks so user settings have priority over the historical 48-chunk floor.
+        _chunk_bytes = self.config.chunk_size
+        _ref_bitrate_bps = (
+            120_000_000  # 120 Mbps reference ceiling for 4K UHD Remux / DoVi
+        )
+        _target_chunks_for_buffer = (
+            ceil(
+                (_ref_bitrate_bps * self.config.target_buffer_seconds)
+                / (8 * _chunk_bytes)
+            )
+            if _chunk_bytes > 0
+            else 48
+        )
+        max_chunks = max(48, configured_prefetch, _target_chunks_for_buffer)
+
+        effective_initial_bitrate = bitrate
+        if effective_initial_bitrate is None and file_size >= 1024 * 1024 * 1024:
+            # Derive conservative lower-bound baseline bitrate assuming 2-hour nominal duration (7200s).
+            # Clamped between 4 Mbps (standard 1080p) and 120 Mbps (4K UHD Remux).
+            derived = int((file_size * 8) / 7200)
+            effective_initial_bitrate = max(4_000_000, min(120_000_000, derived))
 
         self._publish_telemetry_snapshot(self.session_statistics)
 
@@ -609,7 +630,7 @@ class MediaStream:
                 target_buffer_seconds=self.config.target_buffer_seconds,
                 min_safe_runway_seconds=self.config.min_safe_runway_seconds,
             ),
-            initial_bitrate=bitrate,
+            initial_bitrate=effective_initial_bitrate,
         )
 
         self.file_metadata = FileMetadata(

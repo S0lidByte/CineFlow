@@ -567,3 +567,18 @@ async def clear_all_blacklisted_streams() -> ClearBlacklistedStreamsResponse:
         message=f"Successfully cleared and restored {cleared_count} blacklisted stream candidates",
         cleared_count=cleared_count,
     )
+
+
+@router.post(
+    "/restart",
+    summary="Restart CineFlow Backend",
+    description="Trigger a graceful restart of the CineFlow backend process to reload settings.",
+    operation_id="restart_settings",
+    response_model=MessageResponse,
+)
+async def restart_settings() -> MessageResponse:
+    """Trigger a graceful restart of the CineFlow backend process."""
+    from program.utils.restart import schedule_backend_restart
+
+    schedule_backend_restart(delay_seconds=0.5)
+    return MessageResponse(message="Backend restart initiated.")

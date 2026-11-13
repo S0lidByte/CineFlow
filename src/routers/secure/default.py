@@ -826,3 +826,18 @@ async def generate_debug_bundle() -> DebugResponse:
         system_info=system_info,
         errors=errors,
     )
+
+
+@router.post(
+    "/system/restart",
+    summary="Restart CineFlow Backend",
+    description="Trigger a graceful restart of the CineFlow backend process to reload operational settings.",
+    operation_id="restart_system",
+    response_model=MessageResponse,
+)
+async def restart_system() -> MessageResponse:
+    """Trigger a graceful restart of the CineFlow backend process."""
+    from program.utils.restart import schedule_backend_restart
+
+    schedule_backend_restart(delay_seconds=0.5)
+    return MessageResponse(message="Backend restart initiated.")

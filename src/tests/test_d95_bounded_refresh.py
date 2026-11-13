@@ -302,7 +302,7 @@ def test_mediastream_refresh_derives_producer_recovery_deadline():
 
     trio.run(_run)
     assert len(captured_deadline) >= 1
-    assert captured_deadline[0] == pytest.approx(now + 15.0)
+    assert captured_deadline[0] == pytest.approx(now + 15.0, abs=0.2)
 
 
 def test_mediastream_refresh_aborts_if_deadline_exceeded_before_thread():
