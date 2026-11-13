@@ -174,11 +174,19 @@ class AdaptivePrefetchManager:
             return 0.0
         return (self._cached_runway_bytes + self._inflight_runway_bytes) * 8.0 / bitrate
 
+    def should_refill_prefetch(self) -> bool:
+        """Indicate whether prefetch buffer should be refilled toward target buffer seconds."""
+        bitrate = self.get_effective_bitrate()
+        if bitrate <= 0:
+            return True
+        return self.cached_runway_seconds() < self.config.target_buffer_seconds
+
     def should_prefetch_now(self) -> bool:
         """Indicate whether observed runway is approaching the fetch-latency tail."""
         bitrate = self.get_effective_bitrate()
         if bitrate <= 0:
-            return False
+            min_bytes = self.config.min_window_chunks * self.config.chunk_size_bytes
+            return self._cached_runway_bytes < min_bytes
         return self.cached_runway_seconds() < max(
             self.config.min_safe_runway_seconds,
             self.get_fetch_p95() + 0.5,
@@ -258,7 +266,9 @@ class AdaptivePrefetchManager:
             if active_leases > effective_threshold and throttle_span > 0:
                 remaining = max(0, max_leases - active_leases)
                 throttle_scale = min(1.0, max(0.0, remaining / throttle_span))
-                window = max(self.config.min_window_chunks, int(window * throttle_scale))
+                window = max(
+                    self.config.min_window_chunks, int(window * throttle_scale)
+                )
 
         # Cache capacity pressure throttling:
         # Prioritize active playback over cache retention.

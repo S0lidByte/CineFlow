@@ -574,6 +574,8 @@ class MediaStream:
             sequential_read_tolerance_blocks=stream_settings.sequential_read_tolerance_blocks,
             scan_tolerance_blocks=stream_settings.scan_tolerance_blocks,
             prefetch_chunks=stream_settings.prefetch_chunks,
+            target_buffer_seconds=stream_settings.target_buffer_seconds,
+            min_safe_runway_seconds=stream_settings.min_safe_runway_seconds,
         )
 
         self.session_statistics = SessionStatistics()
@@ -604,6 +606,8 @@ class MediaStream:
                 default_fallback_chunks=configured_prefetch,
                 max_window_chunks=max_chunks,
                 sequential_tolerance_bytes=self.config.sequential_read_tolerance,
+                target_buffer_seconds=self.config.target_buffer_seconds,
+                min_safe_runway_seconds=self.config.min_safe_runway_seconds,
             ),
             initial_bitrate=bitrate,
         )
@@ -1774,7 +1778,14 @@ class MediaStream:
                                     )
                                     should_prefetch = (
                                         ap_manager is None
-                                        or ap_manager.should_prefetch_now()
+                                        or (
+                                            ap_manager.should_refill_prefetch()
+                                            if hasattr(
+                                                ap_manager,
+                                                "should_refill_prefetch",
+                                            )
+                                            else ap_manager.should_prefetch_now()
+                                        )
                                         or ap_manager.get_effective_bitrate() <= 0
                                     )
                                     if (
@@ -2279,7 +2290,14 @@ class MediaStream:
                 and foreground
                 and (
                     getattr(self, "adaptive_prefetch", None) is None
-                    or self.adaptive_prefetch.should_prefetch_now()
+                    or (
+                        self.adaptive_prefetch.should_refill_prefetch()
+                        if hasattr(
+                            self.adaptive_prefetch,
+                            "should_refill_prefetch",
+                        )
+                        else self.adaptive_prefetch.should_prefetch_now()
+                    )
                     or self.adaptive_prefetch.get_effective_bitrate() <= 0
                 )
             ):

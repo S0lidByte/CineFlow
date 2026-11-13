@@ -294,3 +294,38 @@ def test_provider_fetch_and_starvation_observations():
     mgr.record_starvation()
     assert mgr.get_fetch_p95() == pytest.approx(1.25)
     assert mgr.starvation_count == 1
+
+
+def test_should_refill_prefetch_maintains_target_buffer_runway():
+    # 20 Mbps = 2,500,000 bytes/sec
+    mgr = AdaptivePrefetchManager(initial_bitrate=20_000_000)
+    assert mgr.config.target_buffer_seconds == 15.0
+
+    # 1. Unknown bitrate always allows refill
+    zero_mgr = AdaptivePrefetchManager()
+    assert zero_mgr.should_refill_prefetch() is True
+
+    # 2. Runway below target (10 MB = 4.0s < 15.0s) -> allows refill
+    mgr.record_runway(cached_bytes=10_000_000)
+    assert mgr.cached_runway_seconds() == pytest.approx(4.0)
+    assert mgr.should_refill_prefetch() is True
+
+    # 3. Runway reaching target (37.5 MB = 15.0s) -> pauses refill
+    mgr.record_runway(cached_bytes=37_500_000)
+    assert mgr.cached_runway_seconds() == pytest.approx(15.0)
+    assert mgr.should_refill_prefetch() is False
+
+    # 4. Runway exceeding target (50 MB = 20.0s) -> pauses refill
+    mgr.record_runway(cached_bytes=50_000_000)
+    assert mgr.should_refill_prefetch() is False
+
+
+def test_should_prefetch_now_zero_bitrate_boundary():
+    mgr = AdaptivePrefetchManager()
+    # When bitrate is unknown, fewer than min_window_chunks cached triggers prefetch pressure
+    min_bytes = mgr.config.min_window_chunks * mgr.config.chunk_size_bytes
+    mgr.record_runway(cached_bytes=min_bytes - 1)
+    assert mgr.should_prefetch_now() is True
+
+    mgr.record_runway(cached_bytes=min_bytes + 1)
+    assert mgr.should_prefetch_now() is False

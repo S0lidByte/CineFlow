@@ -30,6 +30,12 @@ class Config:
     # sequential body playback (0 disables).
     prefetch_chunks: int = 12
 
+    # Target buffer duration in seconds for adaptive prefetch window sizing.
+    target_buffer_seconds: float = 15.0
+
+    # Minimum safe runway in seconds before foreground streams are under pressure.
+    min_safe_runway_seconds: float = 8.0
+
     @property
     def block_size(self) -> int:
         """Kernel block size; the byte length the OS reads/writes at a time."""

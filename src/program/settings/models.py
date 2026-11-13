@@ -1432,6 +1432,25 @@ class StreamModel(Observable):
             "(default 25 × 128 KiB). Leave at default unless tuning scan vs playback detection."
         ),
     )
+    target_buffer_seconds: float = Field(
+        default=15.0,
+        ge=5.0,
+        le=120.0,
+        description=(
+            "Target playback buffer in seconds for adaptive prefetch window sizing "
+            "(default 15.0s). Higher values maintain more runway ahead of playback to prevent "
+            "starvation on high-bitrate media and high-latency CDNs."
+        ),
+    )
+    min_safe_runway_seconds: float = Field(
+        default=8.0,
+        ge=2.0,
+        le=60.0,
+        description=(
+            "Minimum safe playback runway in seconds before foreground streams are considered "
+            "under pressure (default 8.0s). Background transfers yield when runway drops below this threshold."
+        ),
+    )
 
 
 class AppModel(Observable):

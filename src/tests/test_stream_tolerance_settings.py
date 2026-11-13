@@ -68,3 +68,34 @@ def test_stream_model_custom_tolerances_compute_expected_bytes() -> None:
     )
     assert config.sequential_read_tolerance == 5 * 128 * 1024
     assert config.scan_tolerance == 40 * 128 * 1024
+
+
+def test_stream_model_buffer_and_runway_settings_propagation() -> None:
+    """Verify target_buffer_seconds and min_safe_runway_seconds propagation."""
+    model = StreamModel()
+    assert model.target_buffer_seconds == 15.0
+    assert model.min_safe_runway_seconds == 8.0
+
+    custom = StreamModel(
+        target_buffer_seconds=25.0,
+        min_safe_runway_seconds=12.0,
+    )
+    assert custom.target_buffer_seconds == 25.0
+    assert custom.min_safe_runway_seconds == 12.0
+
+    config = Config(
+        chunk_size=custom.chunk_size_mb * 1024 * 1024,
+        activity_timeout_seconds=custom.activity_timeout_seconds,
+        chunk_wait_timeout_seconds=custom.chunk_wait_timeout_seconds,
+        connect_timeout_seconds=custom.connect_timeout_seconds,
+        target_buffer_seconds=custom.target_buffer_seconds,
+        min_safe_runway_seconds=custom.min_safe_runway_seconds,
+    )
+    assert config.target_buffer_seconds == 25.0
+    assert config.min_safe_runway_seconds == 12.0
+
+    with pytest.raises(ValidationError):
+        StreamModel(target_buffer_seconds=4.0)
+
+    with pytest.raises(ValidationError):
+        StreamModel(min_safe_runway_seconds=1.0)
