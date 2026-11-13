@@ -23,9 +23,10 @@ def test_apprise_version_and_json_url_smoke() -> None:
     app = Apprise()
     assert app.add("json://localhost/notify")
     assert len(app) == 1
-    # notify may fail to connect; API must still be callable without raising TypeError
+    # notify may fail to connect; API must still be callable without raising TypeError.
+    # Apprise v1 returned a bool; Apprise v2 returns an AppriseResult object supporting __bool__.
     result = app.notify(title="cineflow-smoke", body="phase-2c")
-    assert result is False or result is True
+    assert bool(result) in (False, True)
 
 
 def test_fastapi_testclient_smoke() -> None:
