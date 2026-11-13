@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.50.0](https://github.com/S0lidByte/CineFlow/compare/v1.49.2...v1.50.0) (2026-11-13)
+
+
+### Features
+
+* **streaming:** add configurable target_buffer_seconds and min_safe_runway_seconds to prevent prefetch starvation ([4afce05](https://github.com/S0lidByte/CineFlow/commit/4afce05088e65a04e85ea11d1e8287174d05715b))
+
+
+### Bug Fixes
+
+* **tests:** align keep_cache FileInfo test with real pyfuse3 behavior on Linux ([4f76c6a](https://github.com/S0lidByte/CineFlow/commit/4f76c6acae682daf3f94d980116a53398c83905a))
+
+
+### Performance Improvements
+
+* **vfs:** implement FUSE kernel readahead tuning, nursery spawn gating, stream pointer caching, and keep_cache=True ([25f75c4](https://github.com/S0lidByte/CineFlow/commit/25f75c499e663a03fc1cf4fe4945381bee2a5d41))
+
 ## [1.49.2](https://github.com/S0lidByte/CineFlow/compare/v1.49.1...v1.49.2) (2026-11-12)
 
 
