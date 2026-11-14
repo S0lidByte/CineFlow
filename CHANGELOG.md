@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.50.4](https://github.com/S0lidByte/CineFlow/compare/v1.50.3...v1.50.4) (2026-11-14)
+
+
+### Bug Fixes
+
+* **stream:** implement in-memory FUSE chunk slice acceleration to eliminate disk re-read storms ([c367b2d](https://github.com/S0lidByte/CineFlow/commit/c367b2d57a465fab34ca6d3ebdf7dd9be1419f8a))
+
 ## [1.50.3](https://github.com/S0lidByte/CineFlow/compare/v1.50.2...v1.50.3) (2026-11-14)
 
 
