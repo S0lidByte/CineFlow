@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased](https://github.com/S0lidByte/CineFlow/compare/v1.50.1...HEAD)
+
+### Bug Fixes
+
+* **updaters:** resolve Connection Refused (Errno 111) stack trace dumping, add lazy revalidation for offline media servers during startup, register PlexAPI if watchlist is enabled, and normalize base URLs ([52b1203](https://github.com/S0lidByte/CineFlow/commit/52b12031))
+
 ## [1.50.1](https://github.com/S0lidByte/CineFlow/compare/v1.50.0...v1.50.1) (2026-11-13)
 
 
