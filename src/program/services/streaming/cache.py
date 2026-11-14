@@ -122,6 +122,7 @@ class TimedSliceResult(NamedTuple):
     data: bytes
     sched_delay_s: float
     exec_s: float
+    full_payload: bytes | None = None
 
 
 @dataclass
@@ -394,6 +395,12 @@ class Cache:
         # Count of refused evictions when all candidates are protected
         self.eviction_refusals: int = 0
 
+        # In-memory chunk payload cache (MRU/LRU of recently accessed chunk bytes).
+        # Eliminates redundant disk I/O and threadpool hops when FUSE slices a chunk into 128 KiB blocks.
+        self._memory_chunks = OrderedDict[str, bytes]()
+        self._memory_chunks_max_bytes: int = 256 * 1024 * 1024  # 256 MiB RAM ceiling
+        self._memory_chunks_bytes: int = 0
+
         try:
             os.makedirs(self.cfg.cache_dir, exist_ok=True)
         except Exception as e:
@@ -478,6 +485,57 @@ class Cache:
                         return cand_data, probe_tier, cand_k, cand_start
         return None
 
+    def _get_memory_slice(self, key: str, offset: int, size: int) -> bytes | None:
+        """Fetch slice directly from RAM if chunk payload is in the in-memory cache."""
+        with self._thread_lock:
+            data = self._memory_chunks.get(key)
+            if data is not None:
+                self._memory_chunks.move_to_end(key)
+                if len(data) >= offset + size:
+                    return data[offset : offset + size]
+                entry = self._index.get(key)
+                if entry is not None and len(data) >= entry.size:
+                    if len(data) > offset:
+                        return data[offset:]
+                    return b""
+        return None
+
+    def _store_memory_chunk_locked(self, key: str, data: bytes) -> None:
+        """Store chunk payload in RAM cache. Must be called under self._thread_lock."""
+        if not data:
+            return
+        existing = self._memory_chunks.get(key)
+        if existing is not None:
+            if len(existing) > len(data):
+                # Do not replace a larger/complete payload with a smaller partial payload
+                return
+            self._memory_chunks.pop(key, None)
+            self._memory_chunks_bytes -= len(existing)
+        self._memory_chunks[key] = data
+        self._memory_chunks_bytes += len(data)
+        while (
+            self._memory_chunks_bytes > self._memory_chunks_max_bytes
+            and len(self._memory_chunks) > 1
+        ):
+            _, evicted = self._memory_chunks.popitem(last=False)
+            self._memory_chunks_bytes -= len(evicted)
+
+    def _store_memory_chunk(self, key: str, data: bytes) -> None:
+        """Store chunk payload in the bounded in-memory MRU/LRU cache (256 MiB cap)."""
+        with self._thread_lock:
+            self._store_memory_chunk_locked(key, data)
+
+    def _evict_memory_chunk_locked(self, key: str) -> None:
+        """Evict a chunk from RAM cache. Must be called under self._thread_lock."""
+        existing = self._memory_chunks.pop(key, None)
+        if existing is not None:
+            self._memory_chunks_bytes -= len(existing)
+
+    def _evict_memory_chunk(self, key: str) -> None:
+        """Evict a chunk from RAM cache."""
+        with self._thread_lock:
+            self._evict_memory_chunk_locked(key)
+
     @staticmethod
     def _read_file_slice(path: Path, offset: int, size: int) -> bytes:
         with path.open("rb") as f:
@@ -489,13 +547,29 @@ class Cache:
     ) -> TimedSliceResult:
         t_enter = time.perf_counter()
         sched_delay = max(0.0, t_enter - sched_time)
+        full_payload: bytes | None = None
         try:
-            data = self._read_file_slice(path, offset, size)
-        except FileNotFoundError:
+            # Read full chunk file if <= 16 MiB to accelerate subsequent FUSE slice reads from RAM
+            try:
+                with path.open("rb") as f:
+                    content = f.read()
+                if len(content) >= offset + size:
+                    data = content[offset : offset + size]
+                    full_payload = content
+                elif len(content) > offset:
+                    data = content[offset:]
+                else:
+                    data = b""
+            except OSError:
+                data = self._read_file_slice(path, offset, size)
+        except (FileNotFoundError, OSError):
             data = b""
         t_exit = time.perf_counter()
         return TimedSliceResult(
-            data=data, sched_delay_s=sched_delay, exec_s=max(0.0, t_exit - t_enter)
+            data=data,
+            sched_delay_s=sched_delay,
+            exec_s=max(0.0, t_exit - t_enter),
+            full_payload=full_payload,
         )
 
     @staticmethod
@@ -716,6 +790,16 @@ class Cache:
             slice_breakdown.key_prefix = key[:8]
             slice_breakdown.preferred_tier = preferred
 
+        # Fast path: check in-memory chunk slice first (0ms disk I/O, zero threadpool wait)
+        mem_slice = self._get_memory_slice(key, offset, size)
+        if mem_slice is not None:
+            if slice_breakdown is not None:
+                probe_timing = TierProbeTiming(tier=preferred, success=True)
+                probe_timing.elapsed_s = max(0.0, time.perf_counter() - t_slice_start)
+                slice_breakdown.probes.append(probe_timing)
+                slice_breakdown.total_slice_s = probe_timing.elapsed_s
+            return mem_slice
+
         for tier in self._tier_probe_order(preferred):
             t_probe_start = time.perf_counter()
             probe_timing = TierProbeTiming(tier=tier, success=False)
@@ -734,6 +818,8 @@ class Cache:
                 )
                 limiter_wait = self._read_limiter.pop_borrower_wait(borrower_id)
                 data = timed_res.data
+                if timed_res.full_payload is not None:
+                    self._store_memory_chunk(key, timed_res.full_payload)
                 probe_timing.limiter_wait_s = limiter_wait
                 probe_timing.sched_delay_s = max(
                     0.0, timed_res.sched_delay_s - limiter_wait
@@ -858,6 +944,7 @@ class Cache:
                 if k in self._index:
                     # Key was re-admitted / re-written concurrently; do not unlink new file!
                     continue
+                self._evict_memory_chunk_locked(k)
             tier = (tiers or {}).get(k, "warm")
             fp = self._file_for(k, tier=tier)
             try:
@@ -1599,6 +1686,7 @@ class Cache:
                         self._index.pop(victim_key, None)
                         self._leases_by_key.pop(victim_key, None)
                         self._active_readers.pop(victim_key, None)
+                        self._evict_memory_chunk_locked(victim_key)
 
                         lst = self._by_path.get(victim_entry.cache_key)
                         if lst:
@@ -1663,6 +1751,7 @@ class Cache:
                         self._index.pop(k, None)
                         self._leases_by_key.pop(k, None)
                         self._active_readers.pop(k, None)
+                        self._evict_memory_chunk_locked(k)
                         lst = self._by_path.get(cache_entry.cache_key)
 
                         if lst:
@@ -2037,6 +2126,7 @@ class Cache:
                     self._hot_bytes = max(0, self._hot_bytes - prev.size)
                 if prev:
                     self._total_bytes = max(0, self._total_bytes - prev.size)
+                self._evict_memory_chunk(self._key(cache_key, start))
 
             self._metrics.record_miss()
             return b""
@@ -2059,6 +2149,7 @@ class Cache:
                 self._total_bytes += sz
                 if found_tier == "hot":
                     self._hot_bytes += sz
+                self._store_memory_chunk(found_key, found_data)
 
         if stream_id is not None:
             self.acquire_lease(

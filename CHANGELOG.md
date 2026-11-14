@@ -19,10 +19,11 @@
 
 * **changelog:** record updaters connection resilience fix ([a93d65b](https://github.com/S0lidByte/CineFlow/commit/a93d65b6de7b203a97158f9fe7bf10f1a9c028bf))
 
-## [Unreleased](https://github.com/S0lidByte/CineFlow/compare/v1.50.1...HEAD)
+## [Unreleased](https://github.com/S0lidByte/CineFlow/compare/v1.50.2...HEAD)
 
 ### Bug Fixes
 
+* **stream:** implement in-memory FUSE chunk slice acceleration (`_memory_chunks` 256 MiB LRU cache) and single-read full chunk caching to eliminate 128 KiB disk re-read storms and threadpool contention during high-bitrate media playback
 * **stream:** eliminate cache probe threadpool starvation, lock contention in read planning, backward seek horizon desynchronization, and false general_scan classification during active playback
 * **updaters:** resolve Connection Refused (Errno 111) stack trace dumping, add lazy revalidation for offline media servers during startup, register PlexAPI if watchlist is enabled, and normalize base URLs ([52b1203](https://github.com/S0lidByte/CineFlow/commit/52b12031))
 
