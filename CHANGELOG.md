@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.50.1](https://github.com/S0lidByte/CineFlow/compare/v1.50.0...v1.50.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **stream:** prioritize settings over hardcoded prefetch limits and add backend restart endpoint ([3259200](https://github.com/S0lidByte/CineFlow/commit/3259200b8cc2a3b0e76e51594f7018ad151fa560))
+* **stream:** resolve sustained playback buffering from container interleaving and false seeks ([fa9c52e](https://github.com/S0lidByte/CineFlow/commit/fa9c52e4469a3daefe0231148fa9f900e3ed2158))
+
+
+### Documentation
+
+* update VFS caching and prefetch settings guide and changelog ([ae041f0](https://github.com/S0lidByte/CineFlow/commit/ae041f0cfa3eaf4ec587fcafa4756b51c76b3140))
+
 ## [Unreleased](https://github.com/S0lidByte/CineFlow/compare/v1.50.0...HEAD)
 
 ### Features
