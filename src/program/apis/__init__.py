@@ -34,7 +34,10 @@ def __setup_tvdb():
 
 
 def __setup_plex():
-    if not settings_manager.settings.updaters.plex.enabled:
+    if (
+        not settings_manager.settings.updaters.plex.enabled
+        and not settings_manager.settings.content.plex_watchlist.enabled
+    ):
         return
 
     di[PlexAPI] = PlexAPI(

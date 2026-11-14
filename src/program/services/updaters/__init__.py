@@ -33,7 +33,24 @@ class Updater(Runner[None, BaseUpdater]):
         self.initialized = self.validate()
 
     def validate(self) -> bool:
-        """Validate that at least one updater service is initialized."""
+        """Validate that at least one updater service is initialized.
+
+        Re-attempts validation for any uninitialized service that is enabled.
+        """
+        for service in self.services.values():
+            if not service.initialized and getattr(
+                getattr(service, "settings", None), "enabled", False
+            ):
+                try:
+                    if service.validate():
+                        service.initialized = True
+                        logger.success(
+                            f"{service.__class__.__name__} updater initialized"
+                        )
+                except Exception as e:
+                    logger.debug(
+                        f"Failed to initialize {service.__class__.__name__}: {e}"
+                    )
 
         initialized_services = [
             service for service in self.services.values() if service.initialized
@@ -59,6 +76,9 @@ class Updater(Runner[None, BaseUpdater]):
         Yields:
             MediaItem: The item after processing
         """
+
+        if not self.initialized:
+            self.initialized = self.validate()
 
         if not self.initialized:
             logger.debug("Updater not initialized; skipping update process")
@@ -136,6 +156,20 @@ class Updater(Runner[None, BaseUpdater]):
         success = False
 
         for service in self.services.values():
+            if not service.initialized and getattr(
+                getattr(service, "settings", None), "enabled", False
+            ):
+                try:
+                    if service.validate():
+                        service.initialized = True
+                        logger.success(
+                            f"{service.__class__.__name__} updater initialized"
+                        )
+                except Exception as e:
+                    logger.debug(
+                        f"Failed to initialize {service.__class__.__name__}: {e}"
+                    )
+
             if service.initialized:
                 try:
                     if service.refresh_path(path):

@@ -1,10 +1,17 @@
 """Emby Updater module"""
 
 from loguru import logger
+from requests.exceptions import (
+    ConnectionError as RequestsConnectionError,
+)
+from requests.exceptions import (
+    Timeout as RequestsTimeout,
+)
 
 from program.services.updaters.base import BaseUpdater
 from program.settings import settings_manager
 from program.utils.request import SmartSession
+from program.utils.url_sanitizer import sanitize_url_for_logs
 
 
 class EmbyUpdater(BaseUpdater):
@@ -32,13 +39,23 @@ class EmbyUpdater(BaseUpdater):
             return False
 
         try:
+            url = self.settings.url.rstrip("/")
             response = self.session.get(
-                f"{self.settings.url}/Users?api_key={self.settings.api_key}"
+                f"{url}/Users", params={"api_key": self.settings.api_key}
             )
             if response.ok:
                 return True
+            logger.error(
+                f"Emby validation returned HTTP {response.status_code} at {sanitize_url_for_logs(url)}"
+            )
+        except (RequestsConnectionError, RequestsTimeout) as e:
+            logger.error(
+                f"Failed to connect to Emby at {sanitize_url_for_logs(self.settings.url)}: {e}"
+            )
         except Exception as e:
-            logger.exception(f"Emby exception thrown: {e}")
+            logger.exception(
+                f"Unexpected error validating Emby at {sanitize_url_for_logs(self.settings.url)}: {e}"
+            )
 
         return False
 
