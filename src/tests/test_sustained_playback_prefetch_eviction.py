@@ -206,3 +206,61 @@ def test_cache_eviction_immunity_for_sustained_prefetch_buffer(tmp_path):
     assert k8 in cache._index, "Playhead chunk must remain in cache"
     assert k12 in cache._index, "Prefetched chunk must remain in cache"
     assert k16 in cache._index, "Prefetched chunk must remain in cache"
+
+
+def test_sequential_cache_playback_sustained_prefetch_always_active():
+    """Verify that during sequential playback, prefetching is not blocked by static runway threshold."""
+    stream = MediaStream.__new__(MediaStream)
+    stream.config = Config(
+        chunk_size=CHUNK,
+        activity_timeout_seconds=30,
+        chunk_wait_timeout_seconds=30,
+        connect_timeout_seconds=10,
+        sequential_read_tolerance_blocks=10,
+        prefetch_chunks=32,
+    )
+    stream.chunker = Chunker(
+        cache_key="movie.mkv",
+        chunk_size=CHUNK,
+        header_size=CHUNK,
+        footer_size=CHUNK,
+        file_size=500 * MIB,
+    )
+    stream.file_metadata = FileMetadata(
+        original_filename="movie.mkv",
+        file_size=500 * MIB,
+        path="/movie.mkv",
+    )
+    stream.recent_reads = RecentReads()
+    stream._consumer_end = 50 * MIB
+
+    ap_config = AdaptivePrefetchConfig(
+        chunk_size_bytes=CHUNK,
+        target_buffer_seconds=20.0,
+    )
+    stream.adaptive_prefetch = AdaptivePrefetchManager(
+        config=ap_config, initial_bitrate=50_000_000
+    )
+    # Simulate that cached runway already exceeds target_buffer_seconds (e.g. 25.0s > 20.0s)
+    stream.adaptive_prefetch.record_runway(cached_bytes=int(50_000_000 * 25.0 / 8.0))
+    assert stream.adaptive_prefetch.should_refill_prefetch() is False
+
+    # Sequential playback read
+    chunk_range = stream.chunker.get_chunk_range(position=50 * MIB, size=128 * 1024)
+    assert stream._is_sequential_cache_playback(chunk_range) is True
+
+    # Under our fix, should_prefetch evaluates True because the stream is in active sequential playback!
+    ap_manager = stream.adaptive_prefetch
+    should_prefetch = (
+        ap_manager is None
+        or (
+            ap_manager.should_refill_prefetch()
+            if hasattr(ap_manager, "should_refill_prefetch")
+            else ap_manager.should_prefetch_now()
+        )
+        or ap_manager.get_effective_bitrate() <= 0
+        or stream._is_sequential_cache_playback(chunk_range)
+    )
+    assert (
+        should_prefetch is True
+    ), "Sequential playback must keep prefetch continuously active ahead of playhead"

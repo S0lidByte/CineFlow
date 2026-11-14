@@ -30,6 +30,7 @@
 
 ### Bug Fixes
 
+* **stream:** implement continuous parallel prefetch replenishment and sequential playback refill bypass to prevent buffer starvation during active streaming
 * **stream:** implement in-memory FUSE chunk slice acceleration (`_memory_chunks` 256 MiB LRU cache) and single-read full chunk caching to eliminate 128 KiB disk re-read storms and threadpool contention during high-bitrate media playback
 * **stream:** eliminate cache probe threadpool starvation, lock contention in read planning, backward seek horizon desynchronization, and false general_scan classification during active playback
 * **updaters:** resolve Connection Refused (Errno 111) stack trace dumping, add lazy revalidation for offline media servers during startup, register PlexAPI if watchlist is enabled, and normalize base URLs ([52b1203](https://github.com/S0lidByte/CineFlow/commit/52b12031))
