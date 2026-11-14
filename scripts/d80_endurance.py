@@ -664,22 +664,22 @@ async def scenario(
         sample()
         return result
 
-    async def ensure(need: int) -> None:
+    async def ensure(need: int, *args: Any, **kwargs: Any) -> None:
         counters["hot_reclaim_calls"] += 1
         counters["hot_demotion_attempts"] += 1
         counters["demotion_attempts"] += 1
         if cache._hot_bytes + cache._hot_reserved_bytes + need > hot_cap * 0.85:
             counters["hot_projected_pressure_calls"] += 1
         before = cache._hot_bytes
-        await original_ensure(need)
+        await original_ensure(need, *args, **kwargs)
         reclaimed = max(0, before - cache._hot_bytes)
         counters["hot_reclaimed_bytes"] += reclaimed
         sample()
 
-    async def evict(need: int = 0) -> bool:
+    async def evict(need: int = 0, *args: Any, **kwargs: Any) -> bool:
         counters["warm_reclaim_calls"] += 1
         before = cache._total_bytes
-        result = await original_evict(need)
+        result = await original_evict(need, *args, **kwargs)
         counters["warm_reclaimed_bytes"] += max(0, before - cache._total_bytes)
         counters["warm_reclaim_veto_returns"] += int(not result)
         sample()

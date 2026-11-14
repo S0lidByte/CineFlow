@@ -440,6 +440,44 @@ class Cache:
         async with self._index_lock:
             yield
 
+    def _probe_candidate_sync(
+        self,
+        cache_key: str,
+        candidate_starts: list[int],
+        start: int,
+        end: int,
+    ) -> tuple[bytes, Literal["hot", "warm"], str, int] | None:
+        """Synchronously check candidate chunk files on disk in a single thread execution
+
+        to eliminate threadpool starvation storms (avoiding up to 16 separate run_sync dispatches).
+        """
+        tiers: tuple[Literal["hot", "warm"], ...] = (
+            ("hot", "warm") if self.cfg.two_tier else ("warm",)
+        )
+        for cand_start in candidate_starts:
+            cand_k = self._key(cache_key, cand_start)
+            for probe_tier in tiers:
+                fp = self._file_for(cand_k, tier=probe_tier)
+                try:
+                    if not fp.is_file():
+                        continue
+                except OSError:
+                    continue
+
+                # Verify metadata sidecar if present
+                meta = self._read_metadata(cand_k, tier=probe_tier)
+                if meta is not None:
+                    meta_ck, meta_start = meta
+                    if meta_ck != cache_key or meta_start != cand_start:
+                        continue
+
+                cand_data = self._read_file_all(fp)
+                if cand_data is not None:
+                    cand_end = cand_start + len(cand_data) - 1
+                    if cand_start <= start and cand_end >= end:
+                        return cand_data, probe_tier, cand_k, cand_start
+        return None
+
     @staticmethod
     def _read_file_slice(path: Path, offset: int, size: int) -> bytes:
         with path.open("rb") as f:
@@ -1718,9 +1756,7 @@ class Cache:
         chunk_start_offset = 0
         chunk_tier: Literal["hot", "warm"] = "warm"
 
-        lock_acquire = time.time()
-        async with self.locks():
-            lock_wait_s += time.time() - lock_acquire
+        with self._thread_lock:
             s_list = self._by_path.get(cache_key)
 
             if s_list:
@@ -1835,12 +1871,10 @@ class Cache:
                 pass
 
         # Slow path: multi-chunk stitching for cross-chunk boundary requests
-        # Plan the read operations while holding the lock, then release it for I/O
+        # Plan the read operations while holding the thread lock, then release it for I/O
         chunks_to_read = list[ChunkInfo]()
 
-        lock_acquire = time.time()
-        async with self.locks():
-            lock_wait_s += time.time() - lock_acquire
+        with self._thread_lock:
             s_list = self._by_path.get(cache_key)
 
             if s_list:
@@ -1982,28 +2016,15 @@ class Cache:
             if 0 not in candidate_starts and start < 64 * 1024 * 1024:
                 candidate_starts.append(0)
 
-        for cand_start in candidate_starts:
-            cand_k = self._key(cache_key, cand_start)
-            for probe_tier in ("hot", "warm") if self.cfg.two_tier else ("warm",):
-                fp = self._file_for(cand_k, tier=probe_tier)  # type: ignore[arg-type]
-                cand_data = await trio.to_thread.run_sync(self._read_file_all, fp)
-                if cand_data is not None:
-                    # Verify metadata sidecar if present
-                    meta = self._read_metadata(cand_k, tier=probe_tier)
-                    if meta is not None:
-                        meta_ck, meta_start = meta
-                        if meta_ck != cache_key or meta_start != cand_start:
-                            continue
-                    # Check if this candidate chunk covers the requested read range [start, end]
-                    cand_end = cand_start + len(cand_data) - 1
-                    if cand_start <= start and cand_end >= end:
-                        found_data = cand_data
-                        found_tier = probe_tier
-                        found_key = cand_k
-                        found_start = cand_start
-                        break
-            if found_data is not None:
-                break
+        found = await trio.to_thread.run_sync(
+            self._probe_candidate_sync,
+            cache_key,
+            candidate_starts,
+            start,
+            end,
+        )
+        if found is not None:
+            found_data, found_tier, found_key, found_start = found
 
         if timing is not None:
             timing.fallback_probe_s = time.perf_counter() - fallback_started

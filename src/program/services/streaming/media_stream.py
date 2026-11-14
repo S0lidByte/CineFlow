@@ -2207,6 +2207,14 @@ class MediaStream:
 
         self.chunker.header_chunk.emit_cache_signal()
 
+        if not self.is_streaming.value and self.config.prefetch_chunks > 0:
+            async with self._start_lock:
+                if not self.is_streaming.value:
+                    try:
+                        self.nursery.start_soon(self.run, self.config.header_size)
+                    except Exception:
+                        pass
+
         return data[read_position : read_position + size]
 
     async def scan_footer(self, read_position: int, size: int) -> bytes:
@@ -2284,14 +2292,20 @@ class MediaStream:
                 if manager is not None:
                     generation = manager.current_generation
                     manager.record_read(start_byte, end_byte, monotonic())
-                    consumer_end = max(getattr(self, "_consumer_end", 0) or 0, end_byte)
-                    self._consumer_end = consumer_end
-                    self._update_runway_observation(consumer_end + 1)
                     if manager.current_generation != generation:
+                        consumer_end = end_byte
+                        self._consumer_end = consumer_end
+                        self._update_runway_observation(consumer_end + 1)
                         await self._stop_speculative_workers()
                         connection = self._active_stream_connection
                         if connection is not None and read_type == "body_read":
                             connection.seek(chunk_range=chunk_range)
+                    else:
+                        consumer_end = max(
+                            getattr(self, "_consumer_end", 0) or 0, end_byte
+                        )
+                        self._consumer_end = consumer_end
+                        self._update_runway_observation(consumer_end + 1)
                     self._protect_consumer(start_byte)
                 else:
                     self._consumer_end = max(
@@ -3072,27 +3086,37 @@ class MediaStream:
         ) and file_size - self.footer_size <= start <= file_size:
             return "footer_scan"
 
+        session_stats = getattr(self, "session_statistics", None)
+        body_read_count = (
+            getattr(session_stats, "body_read_count", 0)
+            if session_stats is not None
+            else 0
+        )
+        is_streaming_obj = getattr(self, "is_streaming", None)
+        is_streaming_active = (
+            getattr(is_streaming_obj, "value", False)
+            if is_streaming_obj is not None
+            else False
+        )
+
         if (
-            # This behaviour is seen during scanning
-            # and captures large jumps in read position
-            # generally observed when the player is reading the footer
-            # for cues or metadata after initial playback start.
-            #
-            # Scans typically read a single block (128 KB) or two blocks.
-            self.recent_reads.last_read_end is not None
+            body_read_count == 0
+            and not is_streaming_active
             and (
-                abs(self.recent_reads.last_read_end - start)
-                > self.config.scan_tolerance
+                (
+                    self.recent_reads.last_read_end is not None
+                    and (
+                        abs(self.recent_reads.last_read_end - start)
+                        > self.config.scan_tolerance
+                    )
+                    and start != self.config.header_size
+                    and size <= self.config.block_size * 2
+                )
+                or (
+                    start > self.config.header_size
+                    and self.recent_reads.last_read_end is None
+                )
             )
-            and start != self.config.header_size
-            and size <= self.config.block_size * 2
-        ) or (
-            # This behaviour is seen when seeking.
-            # Playback has already begun, so the header has been served
-            # for this file, but the scan happens on a new file handle
-            # and is the first request to be made.
-            start > self.config.header_size
-            and self.recent_reads.last_read_end is None
         ):
             return "general_scan"
 

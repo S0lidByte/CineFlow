@@ -311,7 +311,8 @@ class BenchmarkRunner:
                 seeks_sorted = sorted(seeks, key=lambda s: s[0])
                 seek_idx = 0
 
-                is_first_read = True
+                has_started_playback = False
+                startup_duration = 0.0
 
                 while time.monotonic() - start_clock < duration_seconds:
                     elapsed = time.monotonic() - start_clock
@@ -350,9 +351,14 @@ class BenchmarkRunner:
                     )
                     r_duration = time.monotonic() - r_start
 
-                    if is_first_read:
-                        ttfb_ms = r_duration * 1000.0
-                        is_first_read = False
+                    if not has_started_playback:
+                        startup_duration += r_duration
+                        last_read = stream.recent_reads.current_read.value
+                        if (
+                            last_read and last_read.read_type == "body_read"
+                        ) or curr_pos >= stream.config.header_size:
+                            has_started_playback = True
+                            ttfb_ms = startup_duration * 1000.0
                     # If read took longer than 150ms and wasn't instantaneous from cache, count stall
                     elif r_duration > 0.150:
                         rebuffer_events += 1
@@ -431,80 +437,88 @@ class BenchmarkRunner:
         )
 
 
-async def run_benchmark_suite(mode: str = "baseline") -> list[ScenarioResult]:
+async def run_benchmark_suite(
+    mode: str = "baseline", target_scenario: str | None = None
+) -> list[ScenarioResult]:
     """Execute Scenarios A through F."""
     runner = BenchmarkRunner(mode=mode)
     results: list[ScenarioResult] = []
 
     try:
         # Scenario A: Low-bitrate 1080p stream (~2 Mbps, 0.25 MB/s)
-        res_a = await runner.run_scenario(
-            scenario_id="A",
-            name="Low-Bitrate 1080p (2 Mbps)",
-            bitrate_mbps=2.0,
-            file_size_gb=1.5,
-            duration_seconds=10.0,
-        )
-        results.append(res_a)
+        if target_scenario in (None, "A"):
+            res_a = await runner.run_scenario(
+                scenario_id="A",
+                name="Low-Bitrate 1080p (2 Mbps)",
+                bitrate_mbps=2.0,
+                file_size_gb=1.5,
+                duration_seconds=10.0,
+            )
+            results.append(res_a)
 
         # Scenario B: Medium-bitrate 1080p stream (~10 Mbps, 1.25 MB/s)
-        res_b = await runner.run_scenario(
-            scenario_id="B",
-            name="Medium-Bitrate 1080p (10 Mbps)",
-            bitrate_mbps=10.0,
-            file_size_gb=7.5,
-            duration_seconds=10.0,
-        )
-        results.append(res_b)
+        if target_scenario in (None, "B"):
+            res_b = await runner.run_scenario(
+                scenario_id="B",
+                name="Medium-Bitrate 1080p (10 Mbps)",
+                bitrate_mbps=10.0,
+                file_size_gb=7.5,
+                duration_seconds=10.0,
+            )
+            results.append(res_b)
 
         # Scenario C: High-bitrate 4K Remux (~80 Mbps, 10 MB/s)
-        res_c = await runner.run_scenario(
-            scenario_id="C",
-            name="High-Bitrate 4K Remux (80 Mbps)",
-            bitrate_mbps=80.0,
-            file_size_gb=60.0,
-            duration_seconds=10.0,
-        )
-        results.append(res_c)
+        if target_scenario in (None, "C"):
+            res_c = await runner.run_scenario(
+                scenario_id="C",
+                name="High-Bitrate 4K Remux (80 Mbps)",
+                bitrate_mbps=80.0,
+                file_size_gb=60.0,
+                duration_seconds=10.0,
+            )
+            results.append(res_c)
 
         # Scenario D: Sustained Sequential Playback (20s)
-        res_d = await runner.run_scenario(
-            scenario_id="D",
-            name="Sustained Sequential Playback",
-            bitrate_mbps=25.0,
-            file_size_gb=20.0,
-            duration_seconds=15.0,
-        )
-        results.append(res_d)
+        if target_scenario in (None, "D"):
+            res_d = await runner.run_scenario(
+                scenario_id="D",
+                name="Sustained Sequential Playback",
+                bitrate_mbps=25.0,
+                file_size_gb=20.0,
+                duration_seconds=15.0,
+            )
+            results.append(res_d)
 
         # Scenario E: Random Seek Playback (5 seeks)
-        seeks = [
-            (2.0, 500 * 1024 * 1024),
-            (4.0, 1500 * 1024 * 1024),
-            (6.0, 2500 * 1024 * 1024),
-            (8.0, 800 * 1024 * 1024),
-            (10.0, 3000 * 1024 * 1024),
-        ]
-        res_e = await runner.run_scenario(
-            scenario_id="E",
-            name="Random Seek Playback (5 seeks)",
-            bitrate_mbps=20.0,
-            file_size_gb=30.0,
-            duration_seconds=12.0,
-            seeks=seeks,
-        )
-        results.append(res_e)
+        if target_scenario in (None, "E"):
+            seeks = [
+                (2.0, 500 * 1024 * 1024),
+                (4.0, 1500 * 1024 * 1024),
+                (6.0, 2500 * 1024 * 1024),
+                (8.0, 800 * 1024 * 1024),
+                (10.0, 3000 * 1024 * 1024),
+            ]
+            res_e = await runner.run_scenario(
+                scenario_id="E",
+                name="Random Seek Playback (5 seeks)",
+                bitrate_mbps=20.0,
+                file_size_gb=30.0,
+                duration_seconds=12.0,
+                seeks=seeks,
+            )
+            results.append(res_e)
 
         # Scenario F: Multi-Stream Concurrency (4 concurrent streams)
-        res_f = await runner.run_scenario(
-            scenario_id="F",
-            name="Multi-Stream Concurrency (4 streams)",
-            bitrate_mbps=15.0,
-            file_size_gb=10.0,
-            duration_seconds=10.0,
-            concurrent_streams=4,
-        )
-        results.append(res_f)
+        if target_scenario in (None, "F"):
+            res_f = await runner.run_scenario(
+                scenario_id="F",
+                name="Multi-Stream Concurrency (4 streams)",
+                bitrate_mbps=15.0,
+                file_size_gb=10.0,
+                duration_seconds=10.0,
+                concurrent_streams=4,
+            )
+            results.append(res_f)
 
     finally:
         runner.cleanup()
@@ -533,7 +547,10 @@ def print_results_table(mode: str, results: list[ScenarioResult]) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CineFlow VFS Benchmark")
     parser.add_argument("--mode", choices=["baseline", "adaptive"], default="baseline")
+    parser.add_argument(
+        "--scenario", choices=["A", "B", "C", "D", "E", "F"], default=None
+    )
     args = parser.parse_args()
 
-    results = trio.run(run_benchmark_suite, args.mode)
+    results = trio.run(run_benchmark_suite, args.mode, args.scenario)
     print_results_table(args.mode, results)
