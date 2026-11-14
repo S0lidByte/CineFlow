@@ -1945,35 +1945,11 @@ class MediaStream:
                                                     parallel_workers > 1
                                                     and prefetch_gen is not None
                                                 ):
-                                                    while ahead and not getattr(
-                                                        self.is_killed, "value", False
-                                                    ):
-                                                        if self.adaptive_prefetch.should_abort_prefetch(
-                                                            prefetch_gen
-                                                        ):
-                                                            break
-                                                        await self._parallel_prefetch(
-                                                            ahead,
-                                                            prefetch_gen,
-                                                            _process_chunks,
-                                                        )
-                                                        consumer_end = getattr(
-                                                            self, "_consumer_end", None
-                                                        )
-                                                        if consumer_end is None:
-                                                            break
-                                                        self._update_runway_observation(
-                                                            consumer_end + 1
-                                                        )
-                                                        window = self._prefetch_window()
-                                                        ahead = self.chunker.get_prefetch_uncached(
-                                                            after_end=consumer_end,
-                                                            count=window,
-                                                        )
-                                                        if (
-                                                            connection.seek_required.value
-                                                        ):
-                                                            break
+                                                    await self._parallel_prefetch(
+                                                        ahead,
+                                                        prefetch_gen,
+                                                        _process_chunks,
+                                                    )
                                                 else:
                                                     prefetched = await self._run_opportunistic_prefetch(
                                                         ahead,
