@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.50.5](https://github.com/S0lidByte/CineFlow/compare/v1.50.4...v1.50.5) (2026-11-14)
+
+
+### Bug Fixes
+
+* **stream:** eliminate unbounded prefetch loop in parallel prefetch workers ([5317102](https://github.com/S0lidByte/CineFlow/commit/53171022a33a1e76f1dcac3f9fb53b18c048442b))
+* **stream:** implement continuous parallel prefetch replenishment to eliminate buffer edge stalls ([10495f8](https://github.com/S0lidByte/CineFlow/commit/10495f8350e8ec5205579e9cc4f09f6e8ce6b594))
+
 ## [1.50.4](https://github.com/S0lidByte/CineFlow/compare/v1.50.3...v1.50.4) (2026-11-14)
 
 
