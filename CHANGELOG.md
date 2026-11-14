@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.50.2](https://github.com/S0lidByte/CineFlow/compare/v1.50.1...v1.50.2) (2026-11-14)
+
+
+### Bug Fixes
+
+* **updaters:** resolve connection refused error handling, lazy revalidation, and plexapi registration ([52b1203](https://github.com/S0lidByte/CineFlow/commit/52b12031e32f6a10f089c574677c4bc149cd93ca))
+
+
+### Documentation
+
+* **changelog:** record updaters connection resilience fix ([a93d65b](https://github.com/S0lidByte/CineFlow/commit/a93d65b6de7b203a97158f9fe7bf10f1a9c028bf))
+
 ## [Unreleased](https://github.com/S0lidByte/CineFlow/compare/v1.50.1...HEAD)
 
 ### Bug Fixes
