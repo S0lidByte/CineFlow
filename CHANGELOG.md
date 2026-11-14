@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.50.3](https://github.com/S0lidByte/CineFlow/compare/v1.50.2...v1.50.3) (2026-11-14)
+
+
+### Bug Fixes
+
+* **stream:** eliminate cache probe threadpool starvation, seek desync, and false general_scan buffering ([3f934f9](https://github.com/S0lidByte/CineFlow/commit/3f934f95e27f185d3b6a49953b716d43135c84bc))
+
 ## [1.50.2](https://github.com/S0lidByte/CineFlow/compare/v1.50.1...v1.50.2) (2026-11-14)
 
 
