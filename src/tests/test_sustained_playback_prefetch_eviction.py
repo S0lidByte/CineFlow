@@ -135,7 +135,7 @@ def test_adaptive_prefetch_mkv_forward_cluster_strides_no_false_seek():
 
 
 def test_adaptive_prefetch_true_seek_detection():
-    """Verify that jumps beyond interleave tolerance (>32 MB) correctly trigger true seeks."""
+    """Verify that jumps beyond forward tolerance (>5 MB) correctly trigger true seeks."""
     config = AdaptivePrefetchConfig(
         chunk_size_bytes=CHUNK,
         interleave_tolerance_bytes=16 * MIB,

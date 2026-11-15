@@ -103,12 +103,9 @@ class AdaptivePrefetchManager:
 
             # Container interleaving and demuxer strides:
             # - Backward interleave reads (e.g. audio/subtitles behind playhead): up to interleave_tolerance (16 MB)
-            # - Forward demuxer cluster strides relative to playhead or last read: up to interleave_tolerance * 2 (32 MB)
-            forward_tolerance = max(
-                tolerance,
-                interleave_tolerance * 2,
-                self.config.chunk_size_bytes * 8,
-            )
+            # - Forward demuxer cluster strides relative to playhead or last read: up to 5 MB
+            # (accommodates 4K MKV video/audio cluster strides up to 4.5 MB without suppressing multi-chunk seeks)
+            forward_tolerance = max(tolerance, 5 * 1024 * 1024)
 
             if (
                 # 1. Contiguous with immediate previous read or within forward tolerance
