@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.50.6](https://github.com/S0lidByte/CineFlow/compare/v1.50.5...v1.50.6) (2026-11-15)
+
+
+### Bug Fixes
+
+* **stream:** derive baseline bitrate and enforce prefetch floor for smaller files ([92f9703](https://github.com/S0lidByte/CineFlow/commit/92f97037b58d55406e9792a629f71ff17454a026))
+* **stream:** eliminate false seek generation bumps during 4K MKV demuxer forward striding ([2edaef3](https://github.com/S0lidByte/CineFlow/commit/2edaef39e47210f5418c24e5b02b200669b35744))
+* **stream:** preserve unknown bitrate fallback while enforcing prefetch floor for low bitrate streams ([b99b291](https://github.com/S0lidByte/CineFlow/commit/b99b2913154b01a2b975560316930a7f7ba37150))
+* **stream:** tune forward cluster stride tolerance to 5MB for 4K MKV demuxing without suppressing discrete chunk seeks ([e7c6c9c](https://github.com/S0lidByte/CineFlow/commit/e7c6c9c9d7952754e5e732a48ebd97068c1df715))
+
 ## [1.50.5](https://github.com/S0lidByte/CineFlow/compare/v1.50.4...v1.50.5) (2026-11-14)
 
 
