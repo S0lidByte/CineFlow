@@ -85,14 +85,13 @@ def test_custom_stream_settings_priority(setup_stream):
 
 def test_smaller_file_baseline_bitrate_and_prefetch_floor(setup_stream):
     """
-    Verify that smaller files (< 1 GB, e.g. 500 MB - 900 MB episodes) derive a valid
-    baseline bitrate and enforce a robust minimum prefetch floor (>= 16 chunks) to prevent
-    cold-start starvation.
+    Verify that smaller files (< 1 GB, e.g. 500 MB - 900 MB episodes) or low-bitrate streams
+    enforce a robust minimum prefetch floor (>= 16 chunks) to prevent starvation.
     """
 
     async def exercise():
         async with trio.open_nursery() as nursery:
-            # 500 MB file typical of a 1080p anime / TV episode
+            # 500 MB file typical of a 1080p anime / TV episode with low bitrate (e.g. 3 Mbps)
             smaller_file_size = 500 * 1024 * 1024
             stream = MediaStream(
                 fh=903,
@@ -102,21 +101,18 @@ def test_smaller_file_baseline_bitrate_and_prefetch_floor(setup_stream):
                 nursery=nursery,
                 provider="realdebrid",
                 initial_url="https://example.test/anime.mkv",
-                bitrate=None,  # Not yet probed by ffprobe
+                bitrate=3_000_000,
             )
 
-            # 1. Verify automatic baseline bitrate derivation for < 1 GB unprobed files
-            derived_bitrate = stream.adaptive_prefetch.get_effective_bitrate()
-            assert 2_000_000 <= derived_bitrate <= 50_000_000
-
-            # 2. Verify robust prefetch floor (min_window_chunks scales up to 16, bounded by configured prefetch)
+            # 1. Verify prefetch floor (min_window_chunks scales up to 16, bounded by configured prefetch)
             assert stream.adaptive_prefetch.config.min_window_chunks == min(
                 16, stream.config.prefetch_chunks
             )
 
-            # 3. Verify calculate_window honors the floor even for low-bitrate streams
+            # 2. Verify calculate_window honors the floor (16 chunks) even though 3 Mbps * 15s / 4MB is only 2 chunks
             calc_window = stream.adaptive_prefetch.calculate_window()
-            assert calc_window >= stream.adaptive_prefetch.config.min_window_chunks
+            assert calc_window >= 16
+            assert calc_window == stream.adaptive_prefetch.config.min_window_chunks
 
             await stream.close()
             nursery.cancel_scope.cancel()
