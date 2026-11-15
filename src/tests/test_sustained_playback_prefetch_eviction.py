@@ -73,6 +73,67 @@ def test_adaptive_prefetch_container_interleave_tracking():
     ), "Bitrate estimation must remain positive and active"
 
 
+def test_adaptive_prefetch_mkv_forward_cluster_strides_no_false_seek():
+    """
+    Verify that 4K HEVC MKV demuxer forward cluster strides (1.5 MB - 5 MB)
+    do not trigger false seek detection or increment the generation token.
+    """
+    config = AdaptivePrefetchConfig(
+        chunk_size_bytes=CHUNK,
+        sequential_tolerance_bytes=1310720,  # 1.25 MB
+        interleave_tolerance_bytes=16 * MIB,  # 16 MB
+    )
+    mgr = AdaptivePrefetchManager(config=config, initial_bitrate=50_000_000)
+    size_128k = 128 * 1024
+    t = 1.0
+
+    # Initial video cluster read from Resident Evil trace
+    pos = 12099366911
+    mgr.record_read(pos, pos + size_128k - 1, current_time=t)
+    assert mgr.current_generation == 0
+    assert mgr.seek_count == 0
+
+    # Demuxer strides forward 2.49 MB to the next video cluster
+    t += 0.05
+    pos_next_cluster = 12101857280
+    is_seq = mgr.record_read(
+        pos_next_cluster, pos_next_cluster + size_128k - 1, current_time=t
+    )
+    assert is_seq is True
+    assert (
+        mgr.current_generation == 0
+    ), "2.49 MB forward stride must NOT bump generation token"
+    assert mgr.seek_count == 0
+
+    # Demuxer reads interleaved audio packet 1.8 MB behind active playhead
+    t += 0.05
+    pos_audio = 12100000000
+    is_seq = mgr.record_read(pos_audio, pos_audio + size_128k - 1, current_time=t)
+    assert is_seq is True
+    assert (
+        mgr.current_generation == 0
+    ), "Interleaved audio must NOT bump generation token"
+    assert mgr.seek_count == 0
+
+    # Demuxer strides forward 4.5 MB to next keyframe cluster
+    t += 0.05
+    pos_keyframe = pos_next_cluster + int(4.5 * MIB)
+    is_seq = mgr.record_read(pos_keyframe, pos_keyframe + size_128k - 1, current_time=t)
+    assert is_seq is True
+    assert (
+        mgr.current_generation == 0
+    ), "4.5 MB forward stride must NOT bump generation token"
+    assert mgr.seek_count == 0
+
+    # True user seek: user skips 60 MB forward
+    t += 0.5
+    pos_seek = pos_keyframe + 60 * MIB
+    is_seq_seek = mgr.record_read(pos_seek, pos_seek + size_128k - 1, current_time=t)
+    assert is_seq_seek is False
+    assert mgr.current_generation == 1, "60 MB jump must correctly trigger true seek"
+    assert mgr.seek_count == 1
+
+
 def test_adaptive_prefetch_true_seek_detection():
     """Verify that jumps beyond interleave tolerance (>32 MB) correctly trigger true seeks."""
     config = AdaptivePrefetchConfig(
