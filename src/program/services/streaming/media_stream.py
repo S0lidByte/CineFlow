@@ -613,16 +613,24 @@ class MediaStream:
         max_chunks = max(48, configured_prefetch, _target_chunks_for_buffer)
 
         effective_initial_bitrate = bitrate
-        if effective_initial_bitrate is None and file_size >= 1024 * 1024 * 1024:
-            # Derive conservative lower-bound baseline bitrate assuming 2-hour nominal duration (7200s).
-            # Clamped between 4 Mbps (standard 1080p) and 120 Mbps (4K UHD Remux).
-            derived = int((file_size * 8) / 7200)
-            effective_initial_bitrate = max(4_000_000, min(120_000_000, derived))
+        if effective_initial_bitrate is None and file_size > 0:
+            # Derive conservative lower-bound baseline bitrate.
+            # For large files (>=1GB), assume 2-hour nominal duration (7200s), clamped between 4 Mbps and 120 Mbps.
+            # For smaller files (<1GB), assume 45-minute nominal duration (2700s), clamped between 2 Mbps and 50 Mbps.
+            if file_size >= 1024 * 1024 * 1024:
+                derived = int((file_size * 8) / 7200)
+                effective_initial_bitrate = max(4_000_000, min(120_000_000, derived))
+            else:
+                derived = int((file_size * 8) / 2700)
+                effective_initial_bitrate = max(2_000_000, min(50_000_000, derived))
 
         self._publish_telemetry_snapshot(self.session_statistics)
 
+        # Enforce robust prefetch floor for smaller/lower-bitrate files (e.g. 16 chunks or configured_prefetch)
+        _min_prefetch = min(16, configured_prefetch) if configured_prefetch > 0 else 4
         self.adaptive_prefetch = AdaptivePrefetchManager(
             config=AdaptivePrefetchConfig(
+                min_window_chunks=_min_prefetch,
                 chunk_size_bytes=self.config.chunk_size,
                 default_fallback_chunks=configured_prefetch,
                 max_window_chunks=max_chunks,
