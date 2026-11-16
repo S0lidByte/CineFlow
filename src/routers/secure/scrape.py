@@ -32,6 +32,7 @@ from program.media.stream import Stream as ItemStream
 from program.program import Program
 from program.services.downloaders import Downloader
 from program.services.downloaders.models import (
+    VALID_VIDEO_EXTENSIONS,
     DebridFile,
     TorrentContainer,
     TorrentInfo,
@@ -65,7 +66,7 @@ class Stream(BaseModel):
     parsed_data: ParsedData
     rank: int
     lev_ratio: float
-    is_cached: bool = False
+    is_cached: bool | None = None
 
 
 class ScrapeStreamEvent(BaseModel):
@@ -430,6 +431,77 @@ async def resolve_torrent_container(
                     try:
                         info = await asyncio.to_thread(service.get_torrent_info, tid)
                         if info and info.files:
+                            # CRITICAL: Verify whether the torrent is actually downloaded and ready
+                            is_downloaded = False
+                            info_status = getattr(info, "status", None)
+                            if info_status == "downloaded":
+                                is_downloaded = True
+                            elif info_status == "waiting_files_selection" and hasattr(
+                                service, "select_files"
+                            ):
+                                try:
+                                    video_exts: tuple[str, ...] = tuple(
+                                        str(ext).lower()
+                                        for ext in VALID_VIDEO_EXTENSIONS
+                                    )
+                                    video_ids: list[int] = [
+                                        int(fid)
+                                        for fid, fmeta in info.files.items()
+                                        if getattr(fmeta, "filename", "")
+                                        .lower()
+                                        .endswith(video_exts)
+                                    ]
+                                    if video_ids:
+                                        await asyncio.to_thread(
+                                            service.select_files, tid, video_ids
+                                        )
+                                        refreshed = await asyncio.to_thread(
+                                            service.get_torrent_info, tid
+                                        )
+                                        if (
+                                            refreshed
+                                            and getattr(refreshed, "status", None)
+                                            == "downloaded"
+                                        ):
+                                            info = refreshed
+                                            is_downloaded = True
+                                        elif refreshed:
+                                            info = refreshed
+                                except Exception as sel_err:
+                                    logger.debug(
+                                        f"Failed to probe file selection on {service_key}: {sel_err}"
+                                    )
+                            elif service_key == "alldebrid":
+                                is_downloaded = (
+                                    info_status in ("Ready", "downloaded")
+                                    or getattr(info, "status_code", 0) == 4
+                                    or info_status is None
+                                )
+                            elif service_key == "torbox":
+                                is_downloaded = (
+                                    getattr(info, "download_state", "") == "completed"
+                                    or getattr(info, "cached", False) is True
+                                    or info_status is None
+                                )
+                            elif service_key == "premiumize":
+                                is_downloaded = info_status in ("finished", None)
+                            elif info_status in (
+                                "downloaded",
+                                "ready",
+                                "finished",
+                                "completed",
+                            ) or (info_status is None and service_key != "realdebrid"):
+                                is_downloaded = True
+
+                            if not is_downloaded:
+                                service_errors.append(
+                                    (
+                                        service_name,
+                                        f"Torrent is not cached on {service_key} (status={info_status or 'unknown'})",
+                                    )
+                                )
+                                continue
+
                             valid_files = list[DebridFile]()
                             for f in info.files.values():
                                 try:
@@ -796,6 +868,7 @@ def scrape_item(
                                     parsed_data=s.parsed_data,
                                     rank=s.rank,
                                     lev_ratio=s.lev_ratio,
+                                    is_cached=getattr(s, "is_cached", None),
                                 )
                                 all_streams[infohash] = stream_obj
                                 new_streams[infohash] = stream_obj

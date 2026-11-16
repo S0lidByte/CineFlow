@@ -491,3 +491,126 @@ def test_failure_after_remote_creation_cleans_up_created_transfer_only(
         assert res.status_code == 500
         # The created transfer was deleted to avoid leaving orphaned remote transfers
         mock_rd.delete_torrent.assert_called_once_with("rd-cleanup-706")
+
+
+@pytest.mark.asyncio
+async def test_resolve_torrent_container_fallback_rejects_uncached_and_cleans_up():
+    """Fallback probe in resolve_torrent_container rejects uncached status and cleans up probe torrent."""
+    from routers.secure.scrape import resolve_torrent_container
+
+    mock_rd = MagicMock()
+    mock_rd.key = "realdebrid"
+    mock_rd.initialized = True
+    # Instant availability returns None (cache miss)
+    mock_rd.get_instant_availability.return_value = None
+    # Fallback probe adds torrent temporarily
+    mock_rd.add_torrent.return_value = "probe-tid-999"
+    # Info has files but status is "downloading" (NOT "downloaded")
+    mock_rd.get_torrent_info.return_value = _make_torrent_info(
+        "probe-tid-999", name="Uncached.Probe.2026.mkv", status="downloading"
+    )
+
+    downloader = FakeDownloaderHolder(
+        services_dict={RealDebridDownloader: mock_rd},
+        initialized_services=[mock_rd],
+    )
+
+    test_hash = "a" * 40
+    container, error, used_service = await resolve_torrent_container(
+        test_hash, downloader, item_type="movie"
+    )
+
+    assert container is None
+    assert error is not None
+    assert "not cached on realdebrid" in error.lower()
+    # Ensure probe torrent was deleted immediately
+    mock_rd.delete_torrent.assert_called_once_with("probe-tid-999")
+
+
+def test_submit_transfer_empty_title_fallback(scrape_client):
+    """submit_transfer handles empty or None title from Real-Debrid during magnet conversion without TypeError."""
+    _, session_factory = scrape_client
+
+    with session_factory() as session:
+        movie = Movie({"title": "Fallback Title Movie", "year": 2026})
+        movie.id = 801
+        session.add(movie)
+        session.commit()
+
+    test_hash = "b" * 40
+    magnet = f"magnet:?xt=urn:btih:{test_hash}"
+
+    mock_rd = MagicMock()
+    mock_rd.key = "realdebrid"
+    mock_rd.initialized = True
+    mock_rd.add_torrent.return_value = "rd-empty-title-801"
+    # Simulate torrent info during early magnet conversion: name is empty string
+    info_empty_name = _make_torrent_info(
+        "rd-empty-title-801", name="", status="magnet_conversion"
+    )
+    mock_rd.get_torrent_info.return_value = info_empty_name
+    mock_rd.select_files = MagicMock()
+
+    res = rd_transfers_service.submit_transfer(
+        magnet_or_infohash=magnet,
+        media_item_id=801,
+        rd=mock_rd,
+    )
+
+    assert res.success is True
+    assert res.transfer_id == "rd-empty-title-801"
+    assert res.torrent_info.status == "magnet_conversion"
+
+
+def test_real_resolve_torrent_container_integrated_with_start_session_uncached(
+    scrape_client, monkeypatch
+):
+    """End-to-end integration: unmocked resolve_torrent_container correctly rejects uncached and routes to submit_transfer."""
+    client, session_factory = scrape_client
+
+    with session_factory() as session:
+        movie = Movie({"title": "Uncached Integration Movie", "year": 2026})
+        movie.id = 901
+        session.add(movie)
+        session.commit()
+
+    mock_rd = MagicMock()
+    mock_rd.key = "realdebrid"
+    mock_rd.initialized = True
+    mock_rd.get_instant_availability.return_value = None
+    # For probe and submit
+    mock_rd.add_torrent.side_effect = ["probe-tid-901", "submit-tid-901"]
+    mock_rd.get_torrent_info.side_effect = [
+        _make_torrent_info("probe-tid-901", status="downloading"),  # probe check
+        _make_torrent_info("submit-tid-901", status="downloading"),  # submit info
+    ]
+    mock_rd._fair_usage_remaining.return_value = 0.0
+    mock_rd.api.session.breakers = {}
+
+    downloader = FakeDownloaderHolder(
+        services_dict={RealDebridDownloader: mock_rd},
+        initialized_services=[mock_rd],
+    )
+
+    mock_prog = MagicMock()
+    mock_prog.services.downloader = downloader
+    monkeypatch.setattr(
+        "routers.secure.scrape.di",
+        {__import__("program.program").program.Program: mock_prog},
+    )
+
+    test_hash = "c" * 40
+    magnet = f"magnet:?xt=urn:btih:{test_hash}&dn=Uncached.Integration.Movie.mkv"
+
+    # NOTE: resolve_torrent_container is NOT mocked here!
+    res = client.post(
+        "/api/v1/scrape/start_session",
+        params={"item_id": 901, "allow_uncached": True, "magnet": magnet},
+        headers=_signed_bff_headers(),
+    )
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["containers"] is None
+    assert data["parsed_files"] == []
+    assert data["torrent_id"] == "submit-tid-901"
+    assert "queued for cloud download" in data["message"].lower()

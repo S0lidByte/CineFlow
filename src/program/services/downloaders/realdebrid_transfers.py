@@ -1024,10 +1024,16 @@ class RealDebridTransfersService:
                             .first()
                         )
                         if not stream:
-                            parsed_data = parse(info.name)
+                            raw_title = (
+                                (info.name or "").strip()
+                                or getattr(info, "alternative_filename", None)
+                                or getattr(item, "title", None)
+                                or clean_hash
+                            ).strip()
+                            parsed_data = parse(raw_title or clean_hash)
                             stream = Stream(
                                 Torrent(
-                                    raw_title=info.name,
+                                    raw_title=raw_title or clean_hash,
                                     infohash=clean_hash,
                                     data=parsed_data,
                                     rank=0,
