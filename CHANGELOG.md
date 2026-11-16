@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.50.7](https://github.com/S0lidByte/CineFlow/compare/v1.50.6...v1.50.7) (2026-11-16)
+
+
+### Bug Fixes
+
+* **scrape:** remediate uncached stream resolution and Real-Debrid cloud transfers ([f0ede3f](https://github.com/S0lidByte/CineFlow/commit/f0ede3f2e0a9fc3ec3933641ec780ead6680a156))
+
 ## [1.50.6](https://github.com/S0lidByte/CineFlow/compare/v1.50.5...v1.50.6) (2026-11-15)
 
 
