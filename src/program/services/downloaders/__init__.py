@@ -760,6 +760,20 @@ class Downloader(Runner[None, DownloaderBase]):
         if isinstance(item, (Show, Season, Episode)):
             season_number = file_data.seasons[0] if file_data.seasons else None
 
+            # Direct episode match fallback if file_data has no episodes parsed
+            if isinstance(item, Episode) and not file_data.episodes:
+                logger.debug(
+                    f"match_file_to_item: direct episode match for {item.log_string} -> updating attributes"
+                )
+                self._update_attributes(
+                    item,
+                    file,
+                    download_result,
+                    service,
+                    file_data,
+                )
+                return True
+
             for file_episode in file_data.episodes:
                 if episode_cap and file_episode > episode_cap:
                     logger.debug(

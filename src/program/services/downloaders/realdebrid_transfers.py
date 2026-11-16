@@ -1188,20 +1188,29 @@ class RealDebridTransfersService:
                     except ValueError:
                         pass
             elif item_type in ("show", "season", "episode"):
-                if getattr(parsed, "type", "") == "movie" and not (
-                    parsed.seasons or parsed.episodes
+                if (
+                    item_type == "show"
+                    and getattr(parsed, "type", "") == "movie"
+                    and not (parsed.seasons or parsed.episodes)
                 ):
                     raise HTTPException(
                         status_code=400,
-                        detail="Cannot attach a Movie torrent to a TV series or episode.",
+                        detail="Cannot attach a Movie torrent to a TV show.",
                     )
                 if item_type == "episode":
-                    ep_num = getattr(item, "episode_number", None)
-                    season_num = getattr(item, "season_number", None)
+                    ep_num = getattr(item, "number", None)
+                    parent_season = getattr(item, "parent", None)
+                    season_num = (
+                        getattr(parent_season, "number", None)
+                        if parent_season
+                        else None
+                    )
+                    abs_num = getattr(item, "absolute_number", None)
                     if (
                         parsed.episodes
                         and ep_num is not None
                         and ep_num not in parsed.episodes
+                        and (abs_num is None or abs_num not in parsed.episodes)
                     ):
                         raise HTTPException(
                             status_code=400,
@@ -1217,7 +1226,7 @@ class RealDebridTransfersService:
                             detail=f"Torrent seasons ({parsed.seasons}) do not match season #{season_num}.",
                         )
                 elif item_type == "season":
-                    season_num = getattr(item, "season_number", None)
+                    season_num = getattr(item, "number", None)
                     if (
                         parsed.seasons
                         and season_num is not None
@@ -1266,7 +1275,9 @@ class RealDebridTransfersService:
             ):
                 item.last_state = States.Scraped
 
-            item_title = str(item.title or f"Media #{item.id}")
+            item_title = getattr(
+                item, "log_string", str(item.title or f"Media #{item.id}")
+            )
             session.commit()
 
         # If already downloaded on Real-Debrid, immediately trigger ingestion
@@ -1455,6 +1466,20 @@ class RealDebridTransfersService:
                                             States.Scraped,
                                         ):
                                             parent.store_state(States.Downloaded)
+                                    top_parent = (
+                                        getattr(parent, "parent", None)
+                                        if parent
+                                        else None
+                                    )
+                                    if top_parent is not None and hasattr(
+                                        top_parent, "store_state"
+                                    ):
+                                        if getattr(top_parent, "state", None) in (
+                                            States.Requested,
+                                            States.Indexed,
+                                            States.Scraped,
+                                        ):
+                                            top_parent.store_state(States.Downloaded)
                                     ingested_count += 1
                                     logger.success(
                                         f"Successfully ingested completed Real-Debrid transfer {tid} for {matched_item.log_string}"

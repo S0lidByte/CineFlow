@@ -18,7 +18,7 @@ from sqlalchemy.pool import StaticPool
 
 from program.contracts.operation_ledger import OperationLedger, enqueue_operation
 from program.db.base_model import get_base_metadata
-from program.media.item import Episode, MediaEntry, MediaItem, Movie
+from program.media.item import Episode, MediaEntry, MediaItem, Movie, Season, Show
 from program.media.models import ActiveStream
 from program.media.state import States
 from program.media.stream import Stream
@@ -1988,3 +1988,128 @@ def test_attached_external_transfer_cannot_be_cancelled(api_client, monkeypatch)
     )
     assert cancel_resp.status_code == 403
     assert "cannot cancel unmanaged or external" in cancel_resp.json()["detail"].lower()
+
+
+def test_attach_transfer_to_tv_episode_success(api_client, monkeypatch):
+    """Attaching a transfer to a specific TV episode must validate season/episode and link."""
+    client, session_factory = api_client
+    test_hash = "8888888888888888888888888888888888888888"
+    with session_factory() as session:
+        show = Show({"title": "Severance", "year": 2022, "tvdb_id": 371980})
+        show.id = 810
+        session.add(show)
+        session.flush()
+
+        season = Season({"number": 1, "title": "Season 1"})
+        season.id = 811
+        season.parent = show
+        session.add(season)
+        session.flush()
+
+        episode = Episode({"number": 3, "title": "In Perpetuity"})
+        episode.id = 812
+        episode.parent = season
+        session.add(episode)
+        session.commit()
+
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    info = TorrentInfo(
+        id="rd-ext-ep-3",
+        name="Severance.S01E03.1080p.WEB.H264.mkv",
+        status="downloading",
+        bytes=2000000000,
+        progress=45.0,
+        infohash=test_hash,
+        files={},
+        links=[],
+    )
+    mock_rd.get_torrent_info.return_value = info
+    mock_rd.get_torrents.return_value = []
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.post(
+        "/api/v1/operations/realdebrid/transfers/rd-ext-ep-3/attach",
+        json={"media_item_id": 812},
+        headers=_signed_bff_headers("platform:admin"),
+    )
+    assert response.status_code == 200
+    res = response.json()
+    assert res["success"] is True
+    assert "attached to" in res["message"].lower()
+
+    with session_factory() as session:
+        ep = session.get(Episode, 812)
+        assert ep is not None
+        assert ep.active_stream is not None
+        assert ep.active_stream.id == "rd-ext-ep-3"
+        assert ep.active_stream.infohash == test_hash
+
+
+def test_attach_transfer_to_tv_episode_mismatch_rejected(api_client, monkeypatch):
+    """Mismatched episode number between torrent and selected Episode item must return 400."""
+    client, session_factory = api_client
+    test_hash = "9999999999999999999999999999999999999999"
+    with session_factory() as session:
+        show = Show({"title": "Severance", "year": 2022, "tvdb_id": 371980})
+        show.id = 820
+        session.add(show)
+        session.flush()
+
+        season = Season({"number": 1, "title": "Season 1"})
+        season.id = 821
+        season.parent = show
+        session.add(season)
+        session.flush()
+
+        episode = Episode({"number": 3, "title": "In Perpetuity"})
+        episode.id = 822
+        episode.parent = season
+        session.add(episode)
+        session.commit()
+
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    info = TorrentInfo(
+        id="rd-ext-ep-5",
+        name="Severance.S01E05.1080p.WEB.H264.mkv",
+        status="downloading",
+        bytes=2000000000,
+        progress=45.0,
+        infohash=test_hash,
+        files={},
+        links=[],
+    )
+    mock_rd.get_torrent_info.return_value = info
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.post(
+        "/api/v1/operations/realdebrid/transfers/rd-ext-ep-5/attach",
+        json={"media_item_id": 822},
+        headers=_signed_bff_headers("platform:admin"),
+    )
+    assert response.status_code == 400
+    assert (
+        "torrent episodes ([5]) do not match episode #3"
+        in response.json()["detail"].lower()
+    )
