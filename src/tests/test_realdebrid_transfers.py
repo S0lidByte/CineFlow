@@ -1543,6 +1543,113 @@ def test_poll_and_ingest_transfers_unseen_direct_lookup(api_client, monkeypatch)
     assert mock_downloader.start_manual_download.called
 
 
+def test_poll_and_ingest_transfers_unseen_episode_direct_lookup(
+    api_client, monkeypatch
+):
+    """Direct-polled unseen episode transfer must bubble status to parent season and top-parent show."""
+    client, session_factory = api_client
+    test_hash = "7777777777777777777777777777777777777777"
+    with session_factory() as session:
+        show = Show({"title": "Direct Poll Show", "year": 2023, "tvdb_id": 99881})
+        show.id = 850
+        show.last_state = States.Scraped
+        session.add(show)
+        session.flush()
+
+        season = Season({"number": 2, "title": "Season 2"})
+        season.id = 851
+        season.parent = show
+        season.last_state = States.Scraped
+        session.add(season)
+        session.flush()
+
+        episode = Episode({"number": 4, "title": "Episode 4"})
+        episode.id = 852
+        episode.parent = season
+        episode.last_state = States.Scraped
+        episode.active_stream = ActiveStream(
+            infohash=test_hash, id="rd-unseen-ep-4", is_external=True
+        )
+        session.add(episode)
+        session.commit()
+
+        enqueue_operation(
+            session=session,
+            operation_type="realdebrid.poll_transfer",
+            media_item_id=852,
+            payload={"torrent_id": "rd-unseen-ep-4", "infohash": test_hash},
+        )
+        session.commit()
+
+    mock_rd = MagicMock()
+    mock_rd.initialized = True
+    # 100 unrelated torrents so the episode transfer is not in the list
+    mock_rd.get_torrents.return_value = [
+        {
+            "id": f"unrelated-{i}",
+            "filename": f"Unrelated.Torrent.{i}.mkv",
+            "hash": f"{i:040d}",
+            "bytes": 1000000000,
+            "progress": 100.0,
+            "status": "downloaded",
+            "added": "2026-11-08T00:00:00.000Z",
+        }
+        for i in range(100)
+    ]
+
+    info = TorrentInfo(
+        id="rd-unseen-ep-4",
+        name="Direct.Poll.Show.S02E04.1080p.mkv",
+        status="downloaded",
+        bytes=2000000000,
+        progress=100.0,
+        infohash=test_hash,
+        files={},
+        links=["https://real-debrid.com/d/unseenep4"],
+    )
+    mock_rd.get_torrent_info.return_value = info
+    mock_rd._process_torrent.return_value = (None, "fallback", info)
+
+    mock_downloader = MagicMock()
+    mock_downloader.start_manual_download.return_value = True
+
+    monkeypatch.setattr(
+        "program.services.downloaders.realdebrid_transfers._get_rd_downloader",
+        lambda: mock_rd,
+    )
+    from kink import di
+
+    from program.program import Program
+
+    mock_program = MagicMock()
+    mock_program.services.downloader = mock_downloader
+    monkeypatch.setitem(di._services, Program, mock_program)
+
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "enabled", True
+    )
+    monkeypatch.setattr(
+        settings_manager.settings.downloaders.real_debrid, "api_key", "rd_key"
+    )
+
+    response = client.post(
+        "/api/v1/operations/realdebrid/transfers/poll",
+        headers=_signed_bff_headers("platform:admin"),
+    )
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json["ingested"] == 1
+
+    # Verify state bubbled to episode, season, and show
+    with session_factory() as session:
+        ep_db = session.get(Episode, 852)
+        season_db = session.get(Season, 851)
+        show_db = session.get(Show, 850)
+        assert ep_db.last_state == States.Downloaded
+        assert season_db.last_state == States.Downloaded
+        assert show_db.last_state == States.Downloaded
+
+
 def test_attach_completed_transfer_triggers_immediate_ingestion(
     api_client, monkeypatch
 ):

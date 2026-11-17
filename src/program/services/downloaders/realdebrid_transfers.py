@@ -1460,7 +1460,13 @@ class RealDebridTransfersService:
                                     if parent is not None and hasattr(
                                         parent, "store_state"
                                     ):
-                                        if getattr(parent, "state", None) in (
+                                        parent_state = getattr(
+                                            parent,
+                                            "last_state",
+                                            getattr(parent, "state", None),
+                                        )
+                                        if parent_state in (
+                                            States.Unknown,
                                             States.Requested,
                                             States.Indexed,
                                             States.Scraped,
@@ -1474,7 +1480,13 @@ class RealDebridTransfersService:
                                     if top_parent is not None and hasattr(
                                         top_parent, "store_state"
                                     ):
-                                        if getattr(top_parent, "state", None) in (
+                                        top_state = getattr(
+                                            top_parent,
+                                            "last_state",
+                                            getattr(top_parent, "state", None),
+                                        )
+                                        if top_state in (
+                                            States.Unknown,
                                             States.Requested,
                                             States.Indexed,
                                             States.Scraped,
@@ -1658,12 +1670,40 @@ class RealDebridTransfersService:
                                         if parent is not None and hasattr(
                                             parent, "store_state"
                                         ):
-                                            if getattr(parent, "state", None) in (
+                                            parent_state = getattr(
+                                                parent,
+                                                "last_state",
+                                                getattr(parent, "state", None),
+                                            )
+                                            if parent_state in (
+                                                States.Unknown,
                                                 States.Requested,
                                                 States.Indexed,
                                                 States.Scraped,
                                             ):
                                                 parent.store_state(States.Downloaded)
+                                        top_parent = (
+                                            getattr(parent, "parent", None)
+                                            if parent
+                                            else None
+                                        )
+                                        if top_parent is not None and hasattr(
+                                            top_parent, "store_state"
+                                        ):
+                                            top_state = getattr(
+                                                top_parent,
+                                                "last_state",
+                                                getattr(top_parent, "state", None),
+                                            )
+                                            if top_state in (
+                                                States.Unknown,
+                                                States.Requested,
+                                                States.Indexed,
+                                                States.Scraped,
+                                            ):
+                                                top_parent.store_state(
+                                                    States.Downloaded
+                                                )
                                         ingested_count += 1
                                         logger.success(
                                             f"Successfully ingested completed direct-polled Real-Debrid transfer {as_id} for {unseen_item.log_string}"
