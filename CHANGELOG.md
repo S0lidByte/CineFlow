@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.51.0](https://github.com/S0lidByte/CineFlow/compare/v1.50.7...v1.51.0) (2026-11-17)
+
+
+### Features
+
+* **activity:** support TV show season and episode attachment for Real-Debrid transfers ([23723a9](https://github.com/S0lidByte/CineFlow/commit/23723a903f601eff4765af23bca4afff5380e206))
+
 ## [1.50.7](https://github.com/S0lidByte/CineFlow/compare/v1.50.6...v1.50.7) (2026-11-16)
 
 
