@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.51.1](https://github.com/S0lidByte/CineFlow/compare/v1.51.0...v1.51.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* **transfers:** ensure TV show state bubbling and unknown state handling during transfer ingestion ([ecc030a](https://github.com/S0lidByte/CineFlow/commit/ecc030a83134590062bb99e25ecc699a6c66abcd))
+
 ## [1.51.0](https://github.com/S0lidByte/CineFlow/compare/v1.50.7...v1.51.0) (2026-11-17)
 
 
