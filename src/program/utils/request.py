@@ -1097,11 +1097,11 @@ class SmartSession:
 
     def _raise_requests_timeout(self, e: httpx.TimeoutException):
         # Map to requests.exceptions.Timeout
-        raise requests.exceptions.Timeout(str(e))
+        raise requests.exceptions.Timeout(str(e)) from e
 
     def _raise_requests_connection(self, e: httpx.RequestError):
         # Map to requests.exceptions.ConnectionError (base RequestException)
-        raise requests.exceptions.ConnectionError(str(e))
+        raise requests.exceptions.ConnectionError(str(e)) from e
 
 
 def get_hostname_from_url(url: str) -> str:

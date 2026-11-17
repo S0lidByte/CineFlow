@@ -4,12 +4,21 @@ from kink import di
 from loguru import logger
 from plexapi.exceptions import BadRequest, Unauthorized
 from plexapi.library import LibrarySection
-from requests.exceptions import ConnectionError as RequestsConnectionError
-from urllib3.exceptions import MaxRetryError, NewConnectionError, RequestError
+from requests.exceptions import (
+    ConnectionError as RequestsConnectionError,
+)
+from requests.exceptions import (
+    RequestException,
+)
+from requests.exceptions import (
+    Timeout as RequestsTimeout,
+)
+from urllib3.exceptions import MaxRetryError, NewConnectionError
 
 from program.apis.plex_api import PlexAPI
 from program.services.updaters.base import BaseUpdater
 from program.settings import settings_manager
+from program.utils.url_sanitizer import sanitize_url_for_logs
 
 
 class PlexUpdater(BaseUpdater):
@@ -40,28 +49,50 @@ class PlexUpdater(BaseUpdater):
             return False
 
         try:
-            self.api = di[PlexAPI]
+            url = self.settings.url.rstrip("/") if self.settings.url else ""
+            token = self.settings.token.strip() if self.settings.token else ""
+
+            try:
+                self.api = di[PlexAPI]
+                self.api.BASE_URL = url
+                self.api.token = token
+            except Exception:
+                self.api = PlexAPI(token, url)
+                di[PlexAPI] = self.api
+
             self.api.validate_server()
             self.sections = self.api.map_sections_with_paths()
             self.initialized = True
 
             return True
         except Unauthorized as e:
-            logger.error(f"Plex is not authorized!: {e}")
-        except TimeoutError as e:
-            logger.exception(f"Plex timeout error: {e}")
+            logger.error(
+                f"Plex is not authorized at {sanitize_url_for_logs(self.settings.url)}: {e}"
+            )
         except BadRequest as e:
-            logger.exception(f"Plex is not configured correctly!: {e}")
+            logger.error(
+                f"Plex server rejected request (check configuration) at {sanitize_url_for_logs(self.settings.url)}: {e}"
+            )
+        except (RequestsConnectionError, NewConnectionError) as e:
+            logger.error(
+                f"Failed to connect to Plex at {sanitize_url_for_logs(self.settings.url)}: {e}"
+            )
+        except (RequestsTimeout, TimeoutError) as e:
+            logger.error(
+                f"Connection to Plex timed out at {sanitize_url_for_logs(self.settings.url)}: {e}"
+            )
         except MaxRetryError as e:
-            logger.exception(f"Plex max retries exceeded: {e}")
-        except NewConnectionError as e:
-            logger.exception(f"Plex new connection error: {e}")
-        except RequestsConnectionError as e:
-            logger.exception(f"Plex requests connection error: {e}")
-        except RequestError as e:
-            logger.exception(f"Plex request error: {e}")
+            logger.error(
+                f"Plex connection max retries exceeded at {sanitize_url_for_logs(self.settings.url)}: {e}"
+            )
+        except RequestException as e:
+            logger.error(
+                f"Plex network request error at {sanitize_url_for_logs(self.settings.url)}: {e}"
+            )
         except Exception as e:
-            logger.exception(f"Plex exception thrown: {e}")
+            logger.exception(
+                f"Unexpected error validating Plex server at {sanitize_url_for_logs(self.settings.url)}: {e}"
+            )
         return False
 
     def refresh_path(self, path: str) -> bool:

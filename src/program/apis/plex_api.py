@@ -30,7 +30,7 @@ class PlexAPI:
     def __init__(self, token: str, base_url: str):
         self.rss_urls: list[str] | None = None
         self.token = token
-        self.BASE_URL = base_url
+        self.BASE_URL = base_url.rstrip("/") if base_url else ""
 
         self.session = SmartSession(
             rate_limits={

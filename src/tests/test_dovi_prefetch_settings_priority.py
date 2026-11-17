@@ -81,3 +81,64 @@ def test_custom_stream_settings_priority(setup_stream):
                 settings_manager.settings.stream.prefetch_chunks = original_prefetch
 
     trio.run(exercise)
+
+
+def test_smaller_file_baseline_bitrate_and_prefetch_floor(setup_stream):
+    """
+    Verify that smaller files (< 1 GB, e.g. 500 MB - 900 MB episodes) or low-bitrate streams
+    enforce a robust minimum prefetch floor (min(16, prefetch_chunks)) to prevent starvation.
+    """
+
+    async def exercise():
+        original_prefetch = settings_manager.settings.stream.prefetch_chunks
+        try:
+            # 1. Test with production/recommended prefetch (48 chunks)
+            settings_manager.settings.stream.prefetch_chunks = 48
+            async with trio.open_nursery() as nursery:
+                smaller_file_size = 500 * 1024 * 1024
+                stream48 = MediaStream(
+                    fh=903,
+                    file_size=smaller_file_size,
+                    path="/Anime.S01E01.1080p.mkv",
+                    original_filename="Anime.S01E01.1080p.mkv",
+                    nursery=nursery,
+                    provider="realdebrid",
+                    initial_url="https://example.test/anime.mkv",
+                    bitrate=3_000_000,
+                )
+
+                # Floor is min(16, 48) = 16 chunks
+                assert stream48.adaptive_prefetch.config.min_window_chunks == 16
+                calc_window = stream48.adaptive_prefetch.calculate_window()
+                assert (
+                    calc_window == 16
+                )  # Raw calculation is only 2 chunks, clamped to floor 16
+
+                await stream48.close()
+                nursery.cancel_scope.cancel()
+
+            # 2. Test with default/lower prefetch (12 chunks)
+            settings_manager.settings.stream.prefetch_chunks = 12
+            async with trio.open_nursery() as nursery:
+                stream12 = MediaStream(
+                    fh=904,
+                    file_size=smaller_file_size,
+                    path="/Anime.S01E02.1080p.mkv",
+                    original_filename="Anime.S01E02.1080p.mkv",
+                    nursery=nursery,
+                    provider="realdebrid",
+                    initial_url="https://example.test/anime2.mkv",
+                    bitrate=3_000_000,
+                )
+
+                # Floor is bounded by user setting min(16, 12) = 12 chunks
+                assert stream12.adaptive_prefetch.config.min_window_chunks == 12
+                calc_window12 = stream12.adaptive_prefetch.calculate_window()
+                assert calc_window12 == 12
+
+                await stream12.close()
+                nursery.cancel_scope.cancel()
+        finally:
+            settings_manager.settings.stream.prefetch_chunks = original_prefetch
+
+    trio.run(exercise)

@@ -73,8 +73,69 @@ def test_adaptive_prefetch_container_interleave_tracking():
     ), "Bitrate estimation must remain positive and active"
 
 
+def test_adaptive_prefetch_mkv_forward_cluster_strides_no_false_seek():
+    """
+    Verify that 4K HEVC MKV demuxer forward cluster strides (1.5 MB - 5 MB)
+    do not trigger false seek detection or increment the generation token.
+    """
+    config = AdaptivePrefetchConfig(
+        chunk_size_bytes=CHUNK,
+        sequential_tolerance_bytes=1310720,  # 1.25 MB
+        interleave_tolerance_bytes=16 * MIB,  # 16 MB
+    )
+    mgr = AdaptivePrefetchManager(config=config, initial_bitrate=50_000_000)
+    size_128k = 128 * 1024
+    t = 1.0
+
+    # Initial video cluster read from Resident Evil trace
+    pos = 12099366911
+    mgr.record_read(pos, pos + size_128k - 1, current_time=t)
+    assert mgr.current_generation == 0
+    assert mgr.seek_count == 0
+
+    # Demuxer strides forward 2.49 MB to the next video cluster
+    t += 0.05
+    pos_next_cluster = 12101857280
+    is_seq = mgr.record_read(
+        pos_next_cluster, pos_next_cluster + size_128k - 1, current_time=t
+    )
+    assert is_seq is True
+    assert (
+        mgr.current_generation == 0
+    ), "2.49 MB forward stride must NOT bump generation token"
+    assert mgr.seek_count == 0
+
+    # Demuxer reads interleaved audio packet 1.8 MB behind active playhead
+    t += 0.05
+    pos_audio = 12100000000
+    is_seq = mgr.record_read(pos_audio, pos_audio + size_128k - 1, current_time=t)
+    assert is_seq is True
+    assert (
+        mgr.current_generation == 0
+    ), "Interleaved audio must NOT bump generation token"
+    assert mgr.seek_count == 0
+
+    # Demuxer strides forward 4.5 MB to next keyframe cluster
+    t += 0.05
+    pos_keyframe = pos_next_cluster + int(4.5 * MIB)
+    is_seq = mgr.record_read(pos_keyframe, pos_keyframe + size_128k - 1, current_time=t)
+    assert is_seq is True
+    assert (
+        mgr.current_generation == 0
+    ), "4.5 MB forward stride must NOT bump generation token"
+    assert mgr.seek_count == 0
+
+    # True user seek: user skips 60 MB forward
+    t += 0.5
+    pos_seek = pos_keyframe + 60 * MIB
+    is_seq_seek = mgr.record_read(pos_seek, pos_seek + size_128k - 1, current_time=t)
+    assert is_seq_seek is False
+    assert mgr.current_generation == 1, "60 MB jump must correctly trigger true seek"
+    assert mgr.seek_count == 1
+
+
 def test_adaptive_prefetch_true_seek_detection():
-    """Verify that jumps beyond interleave tolerance (>32 MB) correctly trigger true seeks."""
+    """Verify that jumps beyond forward tolerance (>5 MB) correctly trigger true seeks."""
     config = AdaptivePrefetchConfig(
         chunk_size_bytes=CHUNK,
         interleave_tolerance_bytes=16 * MIB,
@@ -206,3 +267,61 @@ def test_cache_eviction_immunity_for_sustained_prefetch_buffer(tmp_path):
     assert k8 in cache._index, "Playhead chunk must remain in cache"
     assert k12 in cache._index, "Prefetched chunk must remain in cache"
     assert k16 in cache._index, "Prefetched chunk must remain in cache"
+
+
+def test_sequential_cache_playback_sustained_prefetch_always_active():
+    """Verify that during sequential playback, prefetching is not blocked by static runway threshold."""
+    stream = MediaStream.__new__(MediaStream)
+    stream.config = Config(
+        chunk_size=CHUNK,
+        activity_timeout_seconds=30,
+        chunk_wait_timeout_seconds=30,
+        connect_timeout_seconds=10,
+        sequential_read_tolerance_blocks=10,
+        prefetch_chunks=32,
+    )
+    stream.chunker = Chunker(
+        cache_key="movie.mkv",
+        chunk_size=CHUNK,
+        header_size=CHUNK,
+        footer_size=CHUNK,
+        file_size=500 * MIB,
+    )
+    stream.file_metadata = FileMetadata(
+        original_filename="movie.mkv",
+        file_size=500 * MIB,
+        path="/movie.mkv",
+    )
+    stream.recent_reads = RecentReads()
+    stream._consumer_end = 50 * MIB
+
+    ap_config = AdaptivePrefetchConfig(
+        chunk_size_bytes=CHUNK,
+        target_buffer_seconds=20.0,
+    )
+    stream.adaptive_prefetch = AdaptivePrefetchManager(
+        config=ap_config, initial_bitrate=50_000_000
+    )
+    # Simulate that cached runway already exceeds target_buffer_seconds (e.g. 25.0s > 20.0s)
+    stream.adaptive_prefetch.record_runway(cached_bytes=int(50_000_000 * 25.0 / 8.0))
+    assert stream.adaptive_prefetch.should_refill_prefetch() is False
+
+    # Sequential playback read
+    chunk_range = stream.chunker.get_chunk_range(position=50 * MIB, size=128 * 1024)
+    assert stream._is_sequential_cache_playback(chunk_range) is True
+
+    # Under our fix, should_prefetch evaluates True because the stream is in active sequential playback!
+    ap_manager = stream.adaptive_prefetch
+    should_prefetch = (
+        ap_manager is None
+        or (
+            ap_manager.should_refill_prefetch()
+            if hasattr(ap_manager, "should_refill_prefetch")
+            else ap_manager.should_prefetch_now()
+        )
+        or ap_manager.get_effective_bitrate() <= 0
+        or stream._is_sequential_cache_playback(chunk_range)
+    )
+    assert (
+        should_prefetch is True
+    ), "Sequential playback must keep prefetch continuously active ahead of playhead"

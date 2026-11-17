@@ -468,3 +468,83 @@ def test_cache_eviction_handles_index_inconsistency_deterministically(
         assert "corrupted_key" not in cache._index
 
     trio.run(_run)
+
+
+def test_cache_in_memory_slice_acceleration_eliminates_disk_io(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Subsequent slice reads within a cached chunk must be served from memory with 0 disk I/O."""
+    cache = _make_cache(tmp_path)
+    chunk_payload = b"X" * (1024 * 1024)  # 1 MiB chunk
+    disk_reads: list[str] = []
+    real_to_thread = trio.to_thread.run_sync
+
+    async def tracking_to_thread(fn, *args, **kwargs):
+        name = getattr(fn, "__name__", str(fn))
+        if name in ("_read_file_slice", "_read_file_slice_timed"):
+            disk_reads.append(name)
+        return await real_to_thread(fn, *args, **kwargs)
+
+    monkeypatch.setattr(trio.to_thread, "run_sync", tracking_to_thread)
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, chunk_payload)
+
+        # First slice: 128 KiB from offset 0 -> triggers 1 physical chunk read into memory
+        slice_0 = await cache.get("movie.mkv", 0, 131071)
+        assert slice_0 == chunk_payload[:131072]
+        assert len(disk_reads) == 1, "first slice must read full chunk from disk"
+
+        # Second slice: 128 KiB from offset 131072 -> served directly from in-memory chunk
+        slice_1 = await cache.get("movie.mkv", 131072, 262143)
+        assert slice_1 == chunk_payload[131072:262144]
+        assert (
+            len(disk_reads) == 1
+        ), "second slice must be served from memory without disk I/O"
+
+        # Third slice: 128 KiB from offset 262144 -> served directly from in-memory chunk
+        slice_2 = await cache.get("movie.mkv", 262144, 393215)
+        assert slice_2 == chunk_payload[262144:393216]
+        assert (
+            len(disk_reads) == 1
+        ), "third slice must also be served from memory without disk I/O"
+
+    trio.run(_run)
+
+
+def test_cache_memory_chunks_lru_eviction(tmp_path: Path) -> None:
+    """In-memory chunk cache must strictly enforce its byte cap and evict LRU chunks."""
+    cache = _make_cache(tmp_path)
+    # Set cap to 250 bytes
+    cache._memory_chunks_max_bytes = 250
+
+    async def _run() -> None:
+        p1 = b"A" * 100
+        p2 = b"B" * 100
+        p3 = b"C" * 100
+
+        await cache.put("movie.mkv", 0, p1)
+        await cache.put("movie.mkv", 100, p2)
+        await cache.put("movie.mkv", 200, p3)
+
+        # Read all three to populate _memory_chunks
+        await cache.get("movie.mkv", 0, 99)
+        await cache.get("movie.mkv", 100, 199)
+        await cache.get("movie.mkv", 200, 299)
+
+        # Total size of p1 + p2 + p3 is 300, which exceeds 250 cap.
+        # Oldest chunk (p1) must have been evicted from RAM cache.
+        assert cache._memory_chunks_bytes <= 250
+        k1 = cache._key("movie.mkv", 0)
+        assert k1 not in cache._memory_chunks
+        k2 = cache._key("movie.mkv", 100)
+        assert k2 in cache._memory_chunks
+        k3 = cache._key("movie.mkv", 200)
+        assert k3 in cache._memory_chunks
+
+        # Accessing p1 still succeeds seamlessly by reading back from disk
+        got_p1 = await cache.get("movie.mkv", 0, 99)
+        assert got_p1 == p1
+        assert k1 in cache._memory_chunks
+
+    trio.run(_run)

@@ -192,7 +192,8 @@ class TestEmbyUpdater:
         """Test successful path refresh"""
         mock_settings["emby"].settings.updaters.emby.enabled = True
 
-        updater = EmbyUpdater()
+        with patch.object(EmbyUpdater, "validate", return_value=True):
+            updater = EmbyUpdater()
 
         # Mock the session.post call
         with patch.object(updater.session, "post") as mock_post:
@@ -215,7 +216,8 @@ class TestEmbyUpdater:
         """Test failed path refresh"""
         mock_settings["emby"].settings.updaters.emby.enabled = True
 
-        updater = EmbyUpdater()
+        with patch.object(EmbyUpdater, "validate", return_value=True):
+            updater = EmbyUpdater()
 
         with patch.object(updater.session, "post") as mock_post:
             mock_response = Mock()
@@ -249,7 +251,8 @@ class TestJellyfinUpdater:
         """Test that Jellyfin refresh ignores the path parameter"""
         mock_settings["jellyfin"].settings.updaters.jellyfin.enabled = True
 
-        updater = JellyfinUpdater()
+        with patch.object(JellyfinUpdater, "validate", return_value=True):
+            updater = JellyfinUpdater()
 
         with patch.object(updater.session, "post") as mock_post:
             mock_response = Mock()
@@ -267,7 +270,8 @@ class TestJellyfinUpdater:
         """Test failed library refresh"""
         mock_settings["jellyfin"].settings.updaters.jellyfin.enabled = True
 
-        updater = JellyfinUpdater()
+        with patch.object(JellyfinUpdater, "validate", return_value=True):
+            updater = JellyfinUpdater()
 
         with patch.object(updater.session, "post") as mock_post:
             mock_response = Mock()
@@ -483,3 +487,87 @@ class TestUpdaterIntegration:
                     call_args[1]["json"]["Updates"][0]["Path"]
                     == "/mnt/library/shows/Test Show/Season 01"
                 )
+
+
+class TestUpdaterResilience:
+    """Test suite for connection resilience, error handling, and lazy revalidation."""
+
+    def test_plex_validate_connection_refused_handled_cleanly(self, mock_settings):
+        """Verify that connection refused error during Plex validation returns False without unhandled exceptions."""
+        from requests.exceptions import ConnectionError as RequestsConnectionError
+
+        mock_settings["plex"].settings.updaters.plex.enabled = True
+        mock_settings["plex"].settings.updaters.plex.url = "http://127.0.0.1:32400"
+        mock_settings["plex"].settings.updaters.plex.token = "test-token"
+
+        with patch("program.services.updaters.plex.di") as mock_di:
+            mock_api = Mock()
+            mock_api.validate_server.side_effect = RequestsConnectionError(
+                "[Errno 111] Connection refused"
+            )
+            mock_di.__contains__.return_value = True
+            mock_di.__getitem__.return_value = mock_api
+
+            updater = PlexUpdater()
+            assert updater.initialized is False
+
+    def test_plex_validate_timeout_handled_cleanly(self, mock_settings):
+        """Verify that timeout error during Plex validation is caught cleanly."""
+        from requests.exceptions import Timeout as RequestsTimeout
+
+        mock_settings["plex"].settings.updaters.plex.enabled = True
+        mock_settings["plex"].settings.updaters.plex.url = "http://127.0.0.1:32400"
+        mock_settings["plex"].settings.updaters.plex.token = "test-token"
+
+        with patch("program.services.updaters.plex.di") as mock_di:
+            mock_api = Mock()
+            mock_api.validate_server.side_effect = RequestsTimeout(
+                "Connection timed out"
+            )
+            mock_di.__contains__.return_value = True
+            mock_di.__getitem__.return_value = mock_api
+
+            updater = PlexUpdater()
+            assert updater.initialized is False
+
+    def test_updater_lazy_revalidation_when_service_recovers(
+        self, mock_settings, mock_movie
+    ):
+        """Verify that Updater re-validates an initially offline service during run()."""
+        from requests.exceptions import ConnectionError as RequestsConnectionError
+
+        mock_settings["plex"].settings.updaters.plex.enabled = True
+        mock_settings["plex"].settings.updaters.plex.url = "http://127.0.0.1:32400"
+        mock_settings["plex"].settings.updaters.plex.token = "test-token"
+
+        with patch("program.services.updaters.plex.di") as mock_di:
+            mock_api = Mock()
+            # Fails initially on startup
+            mock_api.validate_server.side_effect = RequestsConnectionError(
+                "[Errno 111] Connection refused"
+            )
+            mock_di.__contains__.return_value = True
+            mock_di.__getitem__.return_value = mock_api
+
+            updater = Updater()
+            plex_service = updater.services[PlexUpdater]
+            assert plex_service.initialized is False
+            assert updater.initialized is False
+
+            # Plex server comes online
+            mock_api.validate_server.side_effect = None
+            mock_api.validate_server.return_value = True
+            mock_section = Mock()
+            mock_section.locations = ["/mnt/library/movies"]
+            mock_api.map_sections_with_paths.return_value = {
+                mock_section: ["/mnt/library/movies"]
+            }
+            mock_api.update_section.return_value = True
+
+            # When run() is called, lazy re-validation succeeds
+            results = list(updater.run(mock_movie))
+            assert len(results) == 1
+            assert plex_service.initialized is True
+            assert updater.initialized is True
+            assert mock_movie.updated is True
+            mock_api.update_section.assert_called_once()

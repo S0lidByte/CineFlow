@@ -1,5 +1,65 @@
 # Changelog
 
+## [1.50.7](https://github.com/S0lidByte/CineFlow/compare/v1.50.6...v1.50.7) (2026-11-16)
+
+
+### Bug Fixes
+
+* **scrape:** remediate uncached stream resolution and Real-Debrid cloud transfers ([f0ede3f](https://github.com/S0lidByte/CineFlow/commit/f0ede3f2e0a9fc3ec3933641ec780ead6680a156))
+
+## [1.50.6](https://github.com/S0lidByte/CineFlow/compare/v1.50.5...v1.50.6) (2026-11-15)
+
+
+### Bug Fixes
+
+* **stream:** derive baseline bitrate and enforce prefetch floor for smaller files ([92f9703](https://github.com/S0lidByte/CineFlow/commit/92f97037b58d55406e9792a629f71ff17454a026))
+* **stream:** eliminate false seek generation bumps during 4K MKV demuxer forward striding ([2edaef3](https://github.com/S0lidByte/CineFlow/commit/2edaef39e47210f5418c24e5b02b200669b35744))
+* **stream:** preserve unknown bitrate fallback while enforcing prefetch floor for low bitrate streams ([b99b291](https://github.com/S0lidByte/CineFlow/commit/b99b2913154b01a2b975560316930a7f7ba37150))
+* **stream:** tune forward cluster stride tolerance to 5MB for 4K MKV demuxing without suppressing discrete chunk seeks ([e7c6c9c](https://github.com/S0lidByte/CineFlow/commit/e7c6c9c9d7952754e5e732a48ebd97068c1df715))
+
+## [1.50.5](https://github.com/S0lidByte/CineFlow/compare/v1.50.4...v1.50.5) (2026-11-14)
+
+
+### Bug Fixes
+
+* **stream:** eliminate unbounded prefetch loop in parallel prefetch workers ([5317102](https://github.com/S0lidByte/CineFlow/commit/53171022a33a1e76f1dcac3f9fb53b18c048442b))
+* **stream:** implement continuous parallel prefetch replenishment to eliminate buffer edge stalls ([10495f8](https://github.com/S0lidByte/CineFlow/commit/10495f8350e8ec5205579e9cc4f09f6e8ce6b594))
+
+## [1.50.4](https://github.com/S0lidByte/CineFlow/compare/v1.50.3...v1.50.4) (2026-11-14)
+
+
+### Bug Fixes
+
+* **stream:** implement in-memory FUSE chunk slice acceleration to eliminate disk re-read storms ([c367b2d](https://github.com/S0lidByte/CineFlow/commit/c367b2d57a465fab34ca6d3ebdf7dd9be1419f8a))
+
+## [1.50.3](https://github.com/S0lidByte/CineFlow/compare/v1.50.2...v1.50.3) (2026-11-14)
+
+
+### Bug Fixes
+
+* **stream:** eliminate cache probe threadpool starvation, seek desync, and false general_scan buffering ([3f934f9](https://github.com/S0lidByte/CineFlow/commit/3f934f95e27f185d3b6a49953b716d43135c84bc))
+
+## [1.50.2](https://github.com/S0lidByte/CineFlow/compare/v1.50.1...v1.50.2) (2026-11-14)
+
+
+### Bug Fixes
+
+* **updaters:** resolve connection refused error handling, lazy revalidation, and plexapi registration ([52b1203](https://github.com/S0lidByte/CineFlow/commit/52b12031e32f6a10f089c574677c4bc149cd93ca))
+
+
+### Documentation
+
+* **changelog:** record updaters connection resilience fix ([a93d65b](https://github.com/S0lidByte/CineFlow/commit/a93d65b6de7b203a97158f9fe7bf10f1a9c028bf))
+
+## [Unreleased](https://github.com/S0lidByte/CineFlow/compare/v1.50.2...HEAD)
+
+### Bug Fixes
+
+* **stream:** implement continuous parallel prefetch replenishment and sequential playback refill bypass to prevent buffer starvation during active streaming
+* **stream:** implement in-memory FUSE chunk slice acceleration (`_memory_chunks` 256 MiB LRU cache) and single-read full chunk caching to eliminate 128 KiB disk re-read storms and threadpool contention during high-bitrate media playback
+* **stream:** eliminate cache probe threadpool starvation, lock contention in read planning, backward seek horizon desynchronization, and false general_scan classification during active playback
+* **updaters:** resolve Connection Refused (Errno 111) stack trace dumping, add lazy revalidation for offline media servers during startup, register PlexAPI if watchlist is enabled, and normalize base URLs ([52b1203](https://github.com/S0lidByte/CineFlow/commit/52b12031))
+
 ## [1.50.1](https://github.com/S0lidByte/CineFlow/compare/v1.50.0...v1.50.1) (2026-11-13)
 
 

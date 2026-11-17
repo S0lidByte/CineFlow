@@ -101,13 +101,20 @@ class AdaptivePrefetchManager:
                 else self.last_read_end
             )
 
+            # Container interleaving and demuxer strides:
+            # - Backward interleave reads (e.g. audio/subtitles behind playhead): up to interleave_tolerance (16 MB)
+            # - Forward demuxer cluster strides relative to playhead or last read: up to 5 MB
+            # (accommodates 4K MKV video/audio cluster strides up to 4.5 MB without suppressing multi-chunk seeks)
+            forward_tolerance = max(tolerance, 5 * 1024 * 1024)
+
             if (
-                # 1. Contiguous with immediate previous read
-                abs(start - expected_next) <= tolerance
+                # 1. Contiguous with immediate previous read or within forward tolerance
+                0 <= (start - expected_next) <= forward_tolerance
+                or abs(start - expected_next) <= tolerance
                 # 2. Interleaved container read behind active playhead (e.g. audio/subtitles)
                 or (playhead - interleave_tolerance) <= start <= playhead
-                # 3. Contiguous forward resume relative to playhead (e.g. video after audio)
-                or 0 <= (start - (playhead + 1)) <= tolerance
+                # 3. Contiguous forward resume / cluster stride relative to playhead
+                or 0 <= (start - (playhead + 1)) <= forward_tolerance
             ):
                 is_sequential = True
 
