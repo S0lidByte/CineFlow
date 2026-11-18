@@ -1558,7 +1558,7 @@ wheels = [
 
 [[package]]
 name = "riven"
-version = "1.51.0"
+version = "1.51.1"
 source = { virtual = "." }
 default-groups = ["dev", "test"]
 dependencies = [
