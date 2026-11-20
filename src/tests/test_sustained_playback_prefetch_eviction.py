@@ -75,7 +75,7 @@ def test_adaptive_prefetch_container_interleave_tracking():
 
 def test_adaptive_prefetch_mkv_forward_cluster_strides_no_false_seek():
     """
-    Verify that 4K HEVC MKV demuxer forward cluster strides (1.5 MB - 5 MB)
+    Verify that 4K HEVC MKV demuxer forward cluster strides (1.5 MB - 20 MB)
     do not trigger false seek detection or increment the generation token.
     """
     config = AdaptivePrefetchConfig(
@@ -125,9 +125,23 @@ def test_adaptive_prefetch_mkv_forward_cluster_strides_no_false_seek():
     ), "4.5 MB forward stride must NOT bump generation token"
     assert mgr.seek_count == 0
 
+    # Demuxer strides forward 15 MB to next 4K HDR GOP keyframe cluster
+    t += 0.05
+    pos_keyframe_high_bitrate = pos_keyframe + int(15.0 * MIB)
+    is_seq = mgr.record_read(
+        pos_keyframe_high_bitrate,
+        pos_keyframe_high_bitrate + size_128k - 1,
+        current_time=t,
+    )
+    assert is_seq is True
+    assert (
+        mgr.current_generation == 0
+    ), "15 MB high-bitrate stride must NOT bump generation token"
+    assert mgr.seek_count == 0
+
     # True user seek: user skips 60 MB forward
     t += 0.5
-    pos_seek = pos_keyframe + 60 * MIB
+    pos_seek = pos_keyframe_high_bitrate + 60 * MIB
     is_seq_seek = mgr.record_read(pos_seek, pos_seek + size_128k - 1, current_time=t)
     assert is_seq_seek is False
     assert mgr.current_generation == 1, "60 MB jump must correctly trigger true seek"
@@ -135,7 +149,7 @@ def test_adaptive_prefetch_mkv_forward_cluster_strides_no_false_seek():
 
 
 def test_adaptive_prefetch_true_seek_detection():
-    """Verify that jumps beyond forward tolerance (>5 MB) correctly trigger true seeks."""
+    """Verify that jumps beyond interleave tolerance (>32 MB) correctly trigger true seeks."""
     config = AdaptivePrefetchConfig(
         chunk_size_bytes=CHUNK,
         interleave_tolerance_bytes=16 * MIB,
