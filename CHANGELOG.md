@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.51.2](https://github.com/S0lidByte/CineFlow/compare/v1.51.1...v1.51.2) (2026-11-20)
+
+
+### Bug Fixes
+
+* **stream:** restore dynamic forward cluster stride tolerance to eliminate demuxing false seeks and prefetch aborts ([8bdb5d6](https://github.com/S0lidByte/CineFlow/commit/8bdb5d6b367b2eeed4a18d09a984670f3612a275))
+
+
+### Reverts
+
+* **stream:** restore 5MB forward demuxer stride tolerance to preserve discrete chunk seek semantics ([59979fc](https://github.com/S0lidByte/CineFlow/commit/59979fc3dc11933225eaacd75a7a4ce36e96d035))
+
 ## [1.51.1](https://github.com/S0lidByte/CineFlow/compare/v1.51.0...v1.51.1) (2026-11-17)
 
 
