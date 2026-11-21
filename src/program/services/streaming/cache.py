@@ -1287,6 +1287,17 @@ class Cache:
         """Alias for eviction_refusals counter."""
         return self.eviction_refusals
 
+    @property
+    def on_put_latency(self) -> Callable[[CachePutLatencyBreakdown], None] | None:
+        """Callback invoked on cache put completion for latency telemetry."""
+        return self._on_put_latency
+
+    @on_put_latency.setter
+    def on_put_latency(
+        self, callback: Callable[[CachePutLatencyBreakdown], None] | None
+    ) -> None:
+        self._on_put_latency = callback
+
     def protected_bytes(self) -> int:
         """Return total bytes of currently protected chunks."""
         with self._thread_lock:

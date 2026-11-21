@@ -204,9 +204,7 @@ class EnduranceRunner:
             metrics_enabled=True,
         )
         cache = Cache(cfg)
-        cache._on_put_latency = (
-            self.put_latencies.append
-        )  # pyright: ignore[reportPrivateUsage]
+        cache.on_put_latency = self.put_latencies.append
         di[Cache] = cache
         di[ChunkCacheNotifier] = ChunkCacheNotifier()
         return cache
