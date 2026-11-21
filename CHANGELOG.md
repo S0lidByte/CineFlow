@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.52.0](https://github.com/S0lidByte/CineFlow/compare/v1.51.2...v1.52.0) (2026-11-21)
+
+
+### Features
+
+* **stream:** enforce HTTP/1.1 transport isolation for multi-worker prefetch and harden prefetch guidance ([593a244](https://github.com/S0lidByte/CineFlow/commit/593a244b8762885aa0730e2c63d030634a61c614))
+
 ## [1.51.2](https://github.com/S0lidByte/CineFlow/compare/v1.51.1...v1.51.2) (2026-11-20)
 
 
