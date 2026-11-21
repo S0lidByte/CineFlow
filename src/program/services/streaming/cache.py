@@ -2281,8 +2281,8 @@ class Cache:
 
         # Check admission under pressure:
         # If admission is prefetch and cache is under tight watermark pressure,
-        # drop speculative prefetch caching early.
-        if admission == "prefetch":
+        # drop speculative prefetch caching early (warm tier only; hot tier has separate reservation).
+        if admission == "prefetch" and write_tier == "warm":
             with self._thread_lock:
                 warm_bytes = max(0, self._total_bytes - self._hot_bytes)
             warm_hard_cap = self.cfg.max_size_bytes

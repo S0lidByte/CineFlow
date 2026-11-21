@@ -136,10 +136,17 @@ class _DeliveryRegistry:
             return entry
 
     async def publish(self, start: int, payload: bytes) -> None:
-        """Transition a PENDING entry to READY_TRANSIENT and wake waiters."""
+        """Transition a PENDING entry to READY_TRANSIENT and wake waiters, or register a transient entry for upcoming readers."""
         async with self._lock:
             entry = self._entries.get(start)
-            if entry is None or entry.state != _DeliveryState.PENDING:
+            if entry is None:
+                entry = _DeliveryEntry(start=start, waiter_count=1)
+                entry.payload = payload
+                entry.state = _DeliveryState.READY_TRANSIENT
+                entry.ready.set()
+                self._entries[start] = entry
+                return
+            if entry.state != _DeliveryState.PENDING:
                 return
             entry.payload = payload
             entry.state = _DeliveryState.READY_TRANSIENT
@@ -3391,22 +3398,17 @@ class MediaStream:
             admission=admission,
         )
 
-        if (
-            result == CachePutResult.SKIPPED_PREFETCH_PRESSURE
-            and self._delivery_registry.has_pending(start)
+        if result in (
+            CachePutResult.SKIPPED_PREFETCH_PRESSURE,
+            CachePutResult.REFUSED_PHYSICAL_PRESSURE,
         ):
-            # A foreground reader can arrive while speculative admission awaits
-            # the cache shard. Deliver the same bytes; never issue another fetch.
-            await self._delivery_registry.publish(start=start, payload=data)
-
-        if result == CachePutResult.REFUSED_PHYSICAL_PRESSURE:
             # Persistent cache cannot admit this chunk. Publish bytes directly
-            # into the delivery registry so waiting readers get the data without
-            # issuing a second HTTP request (one-provider-fetch invariant).
+            # into the delivery registry so waiting or upcoming readers get the
+            # data without issuing a second HTTP request (one-provider-fetch invariant).
             await self._delivery_registry.publish(start=start, payload=data)
             logger.debug(
                 self.build_log_message(
-                    f"Cache admission refused for start={start} ({len(data)} bytes); "
+                    f"Cache admission refused/skipped for start={start} ({len(data)} bytes); "
                     "published to transient delivery registry"
                 )
             )
