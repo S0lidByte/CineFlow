@@ -58,6 +58,7 @@ class TrioStreamingHttpPool:
         max_body_streams: int = MAX_BODY_STREAMS,
         warn_interval: float = 5.0,
         connect_timeout: float | None = None,
+        http2: bool | None = None,
     ) -> None:
         if proxy_url is None:
             try:
@@ -105,6 +106,7 @@ class TrioStreamingHttpPool:
         self._foreground_pressure: Callable[[], bool] | None = None
         self._closed = False
 
+        self._http2_configured: bool | None = http2
         self._clients = self._create_generation_clients()
 
     @property
@@ -116,6 +118,25 @@ class TrioStreamingHttpPool:
     def active_leases(self) -> int:
         """Total active leased connections across all generations."""
         return sum(self._active_leases_by_gen.values())
+
+    @property
+    def http2(self) -> bool:
+        """Whether HTTP/2 transport multiplexing is active.
+
+        In HTTP/2, all requests to the same hostname are multiplexed onto a single TCP socket,
+        forcing parallel prefetch workers to share one TCP congestion window and causing chunk contention
+        on non-Cloudflare CDNs. When parallel_prefetch_workers > 1, HTTP/1.1 is enforced to isolate
+        each worker onto its own independent TCP connection and congestion window.
+        """
+        if self._http2_configured is not None:
+            return self._http2_configured
+        try:
+            from program.settings import settings_manager
+
+            workers = int(settings_manager.settings.stream.parallel_prefetch_workers)
+            return bool(workers <= 1)
+        except Exception:
+            return True
 
     def register_foreground_pressure_callback(
         self, callback: Callable[[], bool] | None
@@ -161,7 +182,7 @@ class TrioStreamingHttpPool:
     def _create_client(self, *, proxy_url: str | None = None) -> httpx.AsyncClient:
         """Create a native Trio-compatible AsyncClient with streaming limits and timeouts."""
         return httpx.AsyncClient(
-            http2=True,
+            http2=self.http2,
             follow_redirects=True,
             proxy=proxy_url,
             limits=stream_http_limits(),

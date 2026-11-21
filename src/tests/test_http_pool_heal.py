@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import httpx
+import pytest
 import trio
 from kink import di
 
@@ -599,3 +600,88 @@ def test_trio_streaming_http_pool_drain_and_teardown():
             await pool.teardown()
 
     trio.run(_run)
+
+
+def test_trio_streaming_http_pool_http2_transport_isolation_by_workers(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Parallel prefetch workers > 1 enforces HTTP/1.1 transport isolation to prevent single-socket CDN throttling."""
+    from program.settings import settings_manager
+
+    # Case 1: single worker (default) -> HTTP/2 multiplexing enabled
+    monkeypatch.setattr(
+        settings_manager.settings.stream, "parallel_prefetch_workers", 1
+    )
+    pool_single = http_pool.TrioStreamingHttpPool()
+    try:
+        assert pool_single.http2 is True
+        client = pool_single.get_client()
+        assert (
+            getattr(getattr(client._transport, "_pool", None), "_http2", None) is True
+        )
+    finally:
+        trio.run(pool_single.teardown)
+
+    # Case 2: 2 workers -> HTTP/1.1 enforced (dedicated TCP socket per worker)
+    monkeypatch.setattr(
+        settings_manager.settings.stream, "parallel_prefetch_workers", 2
+    )
+    pool_dual = http_pool.TrioStreamingHttpPool()
+    try:
+        assert pool_dual.http2 is False
+        client = pool_dual.get_client()
+        assert (
+            getattr(getattr(client._transport, "_pool", None), "_http2", None) is False
+        )
+    finally:
+        trio.run(pool_dual.teardown)
+
+    # Case 3: 4 workers -> HTTP/1.1 enforced
+    monkeypatch.setattr(
+        settings_manager.settings.stream, "parallel_prefetch_workers", 4
+    )
+    pool_quad = http_pool.TrioStreamingHttpPool()
+    try:
+        assert pool_quad.http2 is False
+        client = pool_quad.get_client()
+        assert (
+            getattr(getattr(client._transport, "_pool", None), "_http2", None) is False
+        )
+    finally:
+        trio.run(pool_quad.teardown)
+
+
+def test_trio_streaming_http_pool_http2_explicit_override(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Explicit http2 argument to TrioStreamingHttpPool overrides settings."""
+    from program.settings import settings_manager
+
+    monkeypatch.setattr(
+        settings_manager.settings.stream, "parallel_prefetch_workers", 2
+    )
+
+    # Override to True even when workers=2
+    pool_h2 = http_pool.TrioStreamingHttpPool(http2=True)
+    try:
+        assert pool_h2.http2 is True
+        client = pool_h2.get_client()
+        assert (
+            getattr(getattr(client._transport, "_pool", None), "_http2", None) is True
+        )
+    finally:
+        trio.run(pool_h2.teardown)
+
+    # Override to False even when workers=1
+    monkeypatch.setattr(
+        settings_manager.settings.stream, "parallel_prefetch_workers", 1
+    )
+    pool_h1 = http_pool.TrioStreamingHttpPool(http2=False)
+    try:
+        assert pool_h1.http2 is False
+        client = pool_h1.get_client()
+        assert (
+            getattr(getattr(client._transport, "_pool", None), "_http2", None) is False
+        )
+    finally:
+        trio.run(pool_h1.teardown)

@@ -1393,7 +1393,11 @@ class StreamModel(Observable):
     )
     parallel_prefetch_workers: Literal[1, 2, 4] = Field(
         default=1,
-        description="Maximum simultaneous per-stream body transfers including the foreground connection (1, 2, or 4).",
+        description=(
+            "Recommended: 1. A single sequential stream avoids CDN chunk contention "
+            "and delivers full line speed (100–300 Mbps). Setting to 2 or 4 divides "
+            "per-worker throughput in half on non-Cloudflare CDNs."
+        ),
     )
     connect_timeout_seconds: int = Field(
         default=10,

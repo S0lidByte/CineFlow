@@ -410,7 +410,8 @@ def test_smartsession_in_flight_slow_stream_overshoot_or_deadline_classification
 
     transport = httpx.MockTransport(slow_streaming_handler)
     session = SmartSession(retries=0)
-    # Inject mock transport into the underlying httpx client
+    # Inject mock transport into the underlying httpx client and clear environment proxy mounts
+    session._client._mounts = {}
     session._client._transport = transport
 
     # 1. Start with a tight deadline of 0.15s (shorter than the 0.5s slow drip)
