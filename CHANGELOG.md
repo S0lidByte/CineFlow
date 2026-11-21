@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.52.1](https://github.com/S0lidByte/CineFlow/compare/v1.52.0...v1.52.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* **stream:** expose on_put_latency property on Cache to eliminate static analysis private usage ([8a60e25](https://github.com/S0lidByte/CineFlow/commit/8a60e25b41f7a957ccefe57e4bcb075537e5efcb))
+* **stream:** protect hot-tier prefetch from warm watermark pressure and retain transient chunk delivery ([6f1b0bf](https://github.com/S0lidByte/CineFlow/commit/6f1b0bf5171d944a552aa3a28ee226bd43141137))
+
 ## [1.52.0](https://github.com/S0lidByte/CineFlow/compare/v1.51.2...v1.52.0) (2026-11-21)
 
 
