@@ -534,6 +534,32 @@ def test_run_total_body_bound_out_of_order_and_cleanup(workers):
     trio.run(run)
 
 
+def test_run_opens_parallel_response_while_cached_reader_finishes():
+    from trio.testing import wait_all_tasks_blocked
+
+    async def run():
+        h = _Harness(workers=2)
+        entry = await h.stream._delivery_registry.register_pending(0)
+        h.start_read()
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(h.stream.run, 4)
+                await h.entered[1].wait()
+                await wait_all_tasks_blocked()
+                assert h.active == h.peak == 2
+                assert ("background", 8) in h.requests
+                assert h.stream._delivery_registry.get_pending_starts() == [0]
+                h.gates[2].set()
+                await h.published[2].wait()
+                assert h.stored[8] == bytes([8]) * 4
+                await h.stream._delivery_registry.release_reservation(entry)
+                await h.stream.close()
+            assert h.active == h.leases == 0
+            assert not h.stream._producer_claims._owners
+
+    trio.run(run)
+
+
 def test_pending_demand_after_pool_wait_prevents_speculative_open():
     async def run():
         h = _Harness()
@@ -547,6 +573,35 @@ def test_pending_demand_after_pool_wait_prevents_speculative_open():
                 h.admission_gate.set()
             assert h.requests == []
             assert h.stream._delivery_registry.get_entry(24) is entry
+            assert h.stream._producer_claims._owners == {}
+
+    trio.run(run)
+
+
+@pytest.mark.parametrize("wait_for_pool", [False, True])
+def test_cached_foreground_reservation_does_not_suppress_prefetch(wait_for_pool):
+    async def run():
+        h = _Harness()
+        h.gates[2].set()
+        if wait_for_pool:
+            h.admission_gate = trio.Event()
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                if wait_for_pool:
+                    nursery.start_soon(
+                        h.stream._fetch_speculative_span, [h.chunks[2]], 0
+                    )
+                    await h.admission_entered.wait()
+                entry = await h.stream._delivery_registry.register_pending(4)
+                h.chunks[1].emit_cache_signal()
+                if h.admission_gate is not None:
+                    h.admission_gate.set()
+                else:
+                    await h.stream._fetch_speculative_span([h.chunks[2]], 0)
+
+            assert h.stored == {8: bytes([8]) * 4}
+            assert h.stream._delivery_registry.get_entry(4) is entry
+            assert h.stream._delivery_registry.get_pending_starts() == [4]
             assert h.stream._producer_claims._owners == {}
 
     trio.run(run)

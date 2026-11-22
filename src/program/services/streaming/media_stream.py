@@ -1045,6 +1045,15 @@ class MediaStream:
         if done is not None:
             await done.wait()
 
+    def _has_uncached_foreground_demand(self) -> bool:
+        """Yield upstream capacity only to reads that still need provider bytes."""
+        # A successful cache write wakes the reader before it releases its
+        # reservation. That cache-backed tail must not stop the speculative span.
+        return any(
+            not self.chunker.get_chunk_range(position=start).first_chunk.is_cached.value
+            for start in self._delivery_registry.get_pending_starts()
+        )
+
     async def _fetch_speculative_chunk(self, chunk: Chunk, generation: int) -> None:
         """Fetch one exact bounded range, with independent response and cache-first handoff."""
         from .cache import CachePutResult
@@ -1055,7 +1064,7 @@ class MediaStream:
         if not acquired:
             return
         try:
-            if chunk.is_cached.value or self._delivery_registry.get_pending_starts():
+            if chunk.is_cached.value or self._has_uncached_foreground_demand():
                 return
             # Reserve a body token before opening the independent HTTP response.
             # Speculative saturation is a soft yield, never a pool heal.
@@ -1067,7 +1076,7 @@ class MediaStream:
                     if (
                         not self._transport_generation_live(generation)
                         or chunk.is_cached.value
-                        or self._delivery_registry.get_pending_starts()
+                        or self._has_uncached_foreground_demand()
                     ):
                         return
                     lease = pool.acquire_lease(use_proxy=self._use_proxy_client)
@@ -1163,7 +1172,7 @@ class MediaStream:
                 break
             if (
                 hasattr(self, "_delivery_registry")
-                and self._delivery_registry.get_pending_starts()
+                and self._has_uncached_foreground_demand()
             ):
                 break
             await self._fetch_speculative_chunk(chunk, generation)
