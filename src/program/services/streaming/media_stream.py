@@ -1397,6 +1397,11 @@ class MediaStream:
                                     ):
                                         for claimed_chunk in chunks:
                                             while not claimed_chunk.is_cached.value:
+                                                # A nested read may have requested a reconnect.
+                                                # Preserve its first missing offset until the
+                                                # connection watcher actually replaces the body.
+                                                if connection.seek_required.value:
+                                                    return
                                                 delivery = (
                                                     self._delivery_registry.get_entry(
                                                         claimed_chunk.start

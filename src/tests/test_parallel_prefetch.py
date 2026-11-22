@@ -945,3 +945,54 @@ def test_consecutive_prefetch_windows_boundary_handoff():
                 await h.stream.close()
 
     trio.run(run)
+
+
+def test_parallel_prefetch_reopens_at_first_gap_when_a_chunk_becomes_cached():
+    """A late cache hit must not move the reconnect past earlier missing bytes."""
+    from contextlib import asynccontextmanager
+
+    from ordered_set import OrderedSet
+
+    from program.services.streaming.stream_connection import StreamConnection
+
+    async def run():
+        h = _Harness(workers=2)
+        h.stream.adaptive_prefetch.calculate_window = lambda **_: 7
+        h.stream.chunker.get_prefetch_uncached = lambda **_: OrderedSet(
+            chunk for chunk in h.chunks[1:] if not chunk.is_cached.value
+        )
+        opened = []
+        reopened = trio.Event()
+
+        @asynccontextmanager
+        async def connection(*, position):
+            async with h.connection(position=position) as conn:
+                # Use production seek behavior, including its immediate position update.
+                conn.seek = StreamConnection.seek.__get__(conn)
+                opened.append(position)
+                if len(opened) == 2:
+                    reopened.set()
+                yield conn
+
+        h.stream.manage_connection = connection
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(h.stream.run, 4)
+                h.start_read()
+                await h.entered[1].wait()
+                # Chunk 2 was included in the original primary span. Another
+                # handle caches it while chunk 1 is still being transferred.
+                h.chunks[2].emit_cache_signal()
+                h.gates[1].set()
+                await reopened.wait()
+                actual = opened[:2]
+                if actual == [4, 12]:
+                    h.gates[3].set()
+                    await h.published[3].wait()
+                await h.stream.close()
+
+        assert actual == [4, 12]
+        assert h.stored[12] == bytes([12]) * 4
+        assert h.stream._producer_claims._owners == {}
+
+    trio.run(run)
