@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.52.3](https://github.com/S0lidByte/CineFlow/compare/v1.52.2...v1.52.3) (2026-11-22)
+
+
+### Bug Fixes
+
+* **stream:** preserve the first missing chunk on prefetch reconnect ([a6e23e1](https://github.com/S0lidByte/CineFlow/commit/a6e23e16800b8f1bfe2c395976cc2e6b7487667e))
+
 ## [1.52.2](https://github.com/S0lidByte/CineFlow/compare/v1.52.1...v1.52.2) (2026-11-22)
 
 
