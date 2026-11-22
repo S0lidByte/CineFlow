@@ -54,3 +54,52 @@ jobs:
       - name: Pytest (unit)
         run: |
           uv run pytest -q -m "not db and not fuse"
+
+  fuse-validation:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/prefetch-fuse-validation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: pyproject.toml
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+
+      - name: Prepare FUSE on the disposable runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fuse3 libfuse3-dev pkg-config
+          if [ ! -c /dev/fuse ]; then sudo modprobe fuse; fi
+          test -c /dev/fuse
+          if [ ! -r /dev/fuse ] || [ ! -w /dev/fuse ]; then sudo chmod a+rw /dev/fuse; fi
+          if ! grep -Eq '^[[:space:]]*user_allow_other([[:space:]]|$)' /etc/fuse.conf; then
+            printf '\nuser_allow_other\n' | sudo tee -a /etc/fuse.conf
+          fi
+
+      - name: Install the candidate's locked dependencies
+        run: uv sync --locked --all-extras --dev
+
+      - name: Run real kernel FUSE tests and reject skipped coverage
+        run: |
+          uv run pytest -o addopts= -q -ra -m fuse \
+            --junitxml "$RUNNER_TEMP/fuse-validation.xml" \
+            src/tests/integration/test_real_pyfuse3_vfs.py \
+            src/tests/integration/test_real_pyfuse3_adaptive_prefetch.py \
+            src/tests/integration/test_real_pyfuse3_vfs_stress.py
+          uv run python - "$RUNNER_TEMP/fuse-validation.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          cases = ET.parse(sys.argv[1]).findall('.//testcase')
+          if len(cases) < 16 or any(case.find('skipped') is not None for case in cases):
+              raise SystemExit(f'Real FUSE coverage incomplete ({len(cases)} cases)')
+          print(f'Verified {len(cases)} real FUSE test cases without skips.')
+          PY
