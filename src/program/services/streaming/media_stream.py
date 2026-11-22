@@ -103,6 +103,9 @@ class _DeliveryEntry:
     ready: trio.Event = field(default_factory=trio.Event)
     waiter_count: int = 0
     borrower_count: int = 0
+    # Monotonic timestamp when this entry was created; used to expire
+    # proactively-published transient entries that no reader ever claimed.
+    registered_at: float = field(default_factory=monotonic)
 
 
 class _DeliveryRegistry:
@@ -135,18 +138,49 @@ class _DeliveryRegistry:
             self._entries[start] = entry
             return entry
 
+    # Maximum age (seconds) for a proactively-published READY_TRANSIENT entry
+    # that was never claimed by any reader.  After this window the entry is
+    # considered stale and will be swept out by _expire_stale_transients().
+    _TRANSIENT_TTL_SECONDS: float = 10.0
+
     async def publish(self, start: int, payload: bytes) -> None:
-        """Transition a PENDING entry to READY_TRANSIENT and wake waiters, or register a transient entry for upcoming readers."""
+        """Transition a PENDING entry to READY_TRANSIENT and wake waiters.
+
+        When a PENDING entry exists (a reader registered via register_pending()
+        is waiting), publish wakes it immediately.
+
+        When no entry exists the payload is stored as a zero-waiter
+        READY_TRANSIENT entry so that readers arriving shortly after the
+        producer (e.g. the VFS read that follows a prefetch publish) can still
+        find the bytes without issuing a second HTTP request.  The entry is
+        self-expiring via _expire_stale_transients() so it cannot accumulate
+        indefinitely in the absence of a consumer.
+
+        Crucially, waiter_count is kept at 0 (not 1) for proactively-published
+        entries.  Setting it to 1 without a matching release_reservation() /
+        release_borrow() call caused the entry to live forever and poisoned
+        has_pending() checks in the prefetch admission path, which in turn
+        forced every subsequent prefetch to be reclassified as a "demand" fetch
+        and broke the prefetch loop — producing the per-second streaming freeze.
+        """
         async with self._lock:
             entry = self._entries.get(start)
             if entry is None:
-                entry = _DeliveryEntry(start=start, waiter_count=1)
+                # No reader is waiting yet.  Publish a zero-waiter transient
+                # entry so upcoming readers can grab the payload without a
+                # second round-trip.  waiter_count stays 0 so that:
+                #   • has_pending() correctly returns False (no one is waiting),
+                #     preserving prefetch admission classification.
+                #   • The entry is cleaned up by _expire_stale_transients()
+                #     if no reader ever arrives within _TRANSIENT_TTL_SECONDS.
+                entry = _DeliveryEntry(start=start, waiter_count=0)
                 entry.payload = payload
                 entry.state = _DeliveryState.READY_TRANSIENT
                 entry.ready.set()
                 self._entries[start] = entry
                 return
             if entry.state != _DeliveryState.PENDING:
+                # Already READY_TRANSIENT or RETIRED — nothing to do.
                 return
             entry.payload = payload
             entry.state = _DeliveryState.READY_TRANSIENT
@@ -237,9 +271,51 @@ class _DeliveryRegistry:
         return None
 
     def has_pending(self, start: int) -> bool:
-        """Sync check: is there a PENDING or READY_TRANSIENT entry for this offset?"""
+        """Sync check: is there a PENDING entry with at least one active waiter for this offset?
+
+        READY_TRANSIENT entries that were proactively published (waiter_count==0)
+        are intentionally excluded: they don't represent an in-flight demand
+        fetch, so treating them as "pending" would corrupt prefetch admission
+        classification (forcing prefetch chunks to be reclassified as demand
+        fetches and stalling the prefetch loop).
+        """
         entry = self._entries.get(start)
-        return entry is not None and entry.state != _DeliveryState.RETIRED
+        if entry is None:
+            return False
+        if entry.state == _DeliveryState.PENDING and entry.waiter_count > 0:
+            return True
+        # A READY_TRANSIENT entry with actual waiters (reader registered via
+        # register_pending before the payload arrived) also counts as pending
+        # from the admission perspective.
+        if entry.state == _DeliveryState.READY_TRANSIENT and entry.waiter_count > 0:
+            return True
+        return False
+
+    async def expire_stale_transients(self) -> None:
+        """Remove READY_TRANSIENT entries that exceeded the TTL with no active consumers.
+
+        Called periodically from the prefetch loop to prevent zero-waiter
+        transient entries (published proactively when no reader was waiting)
+        from leaking into the registry indefinitely.
+        """
+        cutoff = monotonic() - self._TRANSIENT_TTL_SECONDS
+        async with self._lock:
+            stale = [
+                start
+                for start, entry in self._entries.items()
+                if (
+                    entry.state == _DeliveryState.READY_TRANSIENT
+                    and entry.waiter_count == 0
+                    and entry.borrower_count == 0
+                    and entry.registered_at < cutoff
+                )
+            ]
+            for start in stale:
+                entry = self._entries.pop(start, None)
+                if entry is not None:
+                    # Ensure any late-arriving waiter on entry.ready is unblocked.
+                    entry.state = _DeliveryState.RETIRED
+                    entry.ready.set()
 
     def get_entry(self, start: int) -> _DeliveryEntry | None:
         """Sync access to an entry (for waiting on entry.ready)."""
@@ -917,6 +993,10 @@ class MediaStream:
                     break
                 self._update_runway_observation(consumer_end + 1)
                 window = self._prefetch_window()
+                # Sweep any stale proactive transient entries before re-evaluating
+                # the prefetch window; this prevents zero-waiter READY_TRANSIENT
+                # entries from poisoning has_pending() and get_prefetch_uncached().
+                await self._delivery_registry.expire_stale_transients()
                 if label != "Prefetch gap-fill":
                     chunks = self.chunker.get_prefetch_uncached(
                         after_end=consumer_end,
