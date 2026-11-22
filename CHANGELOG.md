@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+* **stream:** keep parallel prefetch running when a foreground reader is already served by the cache but has not released its reservation.
+
 ## [1.52.3](https://github.com/S0lidByte/CineFlow/compare/v1.52.2...v1.52.3) (2026-11-22)
 
 
