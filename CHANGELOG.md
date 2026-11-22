@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.52.2](https://github.com/S0lidByte/CineFlow/compare/v1.52.1...v1.52.2) (2026-11-22)
+
+
+### Bug Fixes
+
+* **stream:** fence proactive transient delivery and sweep stale entries to prevent prefetch stalls ([855da58](https://github.com/S0lidByte/CineFlow/commit/855da5889452534852d59b36cb870f72a0eb93a6))
+
 ## [1.52.1](https://github.com/S0lidByte/CineFlow/compare/v1.52.0...v1.52.1) (2026-11-21)
 
 
