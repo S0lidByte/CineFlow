@@ -322,6 +322,7 @@ class _Harness:
         self.publication_order = []
         self.admission_gate = None
         self.admission_entered = trio.Event()
+        self.background_permits = 0
         self.cache_result = None
         stream.parallel_prefetch_workers = workers
         stream._producer_claims = _ProducerClaims()
@@ -407,7 +408,11 @@ class _Harness:
             self.admission_entered.set()
             if self.admission_gate is not None:
                 await self.admission_gate.wait()
-            yield
+            self.background_permits += 1
+            try:
+                yield
+            finally:
+                self.background_permits -= 1
 
         return admission()
 
@@ -503,6 +508,56 @@ class _Harness:
         )
 
 
+@pytest.mark.parametrize(
+    "fragment_delay,retry_after", [(3.0, 10.2), (8.0, 7.2), (2.0, None)]
+)
+def test_primary_retries_timed_out_chunk_at_same_offset(fragment_delay, retry_after):
+    from contextlib import asynccontextmanager
+
+    from trio.testing import MockClock
+
+    async def run():
+        h = _Harness(workers=1)
+        attempted = []
+
+        @asynccontextmanager
+        async def connect(*, position):
+            attempted.append((position, trio.current_time()))
+            async with h.connection(position=position) as conn:
+                if len(attempted) == 1:
+
+                    async def trickle():
+                        for _ in range(4):
+                            await trio.sleep(fragment_delay)
+                            yield b"x"
+
+                    conn.reader = trickle()
+                yield conn
+
+        h.stream.connect = connect
+        h.stream.manage_connection = MediaStream.manage_connection.__get__(h.stream)
+        h.gates[1].set()
+        with trio.fail_after(14):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(h.stream.run, 4)
+                h.stream.recent_reads.current_read.value = SimpleNamespace(
+                    read_type="body_read", chunk_range=h.chunk_range(position=4)
+                )
+                await h.published[1].wait()
+                if retry_after is None:
+                    assert [position for position, _ in attempted] == [4]
+                    assert h.stored[4] == b"xxxx"
+                else:
+                    assert [position for position, _ in attempted] == [4, 4]
+                    assert attempted[1][1] - attempted[0][1] == pytest.approx(
+                        retry_after
+                    )
+                    assert h.stored[4] == b"\x04" * 4
+                await h.stream.close()
+
+    trio.run(run, clock=MockClock(autojump_threshold=0))
+
+
 @pytest.mark.parametrize("workers", [1, 2, 4])
 def test_run_total_body_bound_out_of_order_and_cleanup(workers):
     async def run():
@@ -556,6 +611,100 @@ def test_run_opens_parallel_response_while_cached_reader_finishes():
                 await h.stream.close()
             assert h.active == h.leases == 0
             assert not h.stream._producer_claims._owners
+
+    trio.run(run)
+
+
+@pytest.mark.parametrize("transient", [False, True])
+@pytest.mark.parametrize("during_admission", [False, True])
+def test_run_resumes_speculative_span_after_primary_serves_demand(
+    transient, during_admission
+):
+    from ordered_set import OrderedSet
+    from trio.testing import wait_all_tasks_blocked
+
+    from program.services.streaming.cache import CachePutResult
+
+    async def run():
+        h = _Harness(workers=2)
+        h.stream.adaptive_prefetch.calculate_window = lambda **_: 6
+        h.stream.chunker.get_prefetch_uncached = lambda **_: OrderedSet(
+            c for c in h.chunks[1:7] if not c.is_cached.value
+        )
+        h.start_read()
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(h.stream.run, 4)
+                await h.entered[1].wait()
+                await h.entered[4].wait()
+                if during_admission:
+                    h.admission_gate = trio.Event()
+                    h.admission_entered = trio.Event()
+                else:
+                    reservation = await h.stream._delivery_registry.register_pending(4)
+                h.gates[4].set()
+                await h.published[4].wait()
+                if during_admission:
+                    await h.admission_entered.wait()
+                    reservation = await h.stream._delivery_registry.register_pending(4)
+                    h.admission_gate.set()
+                await wait_all_tasks_blocked()
+                assert not h.entered[5].is_set()
+                assert h.active == 1
+                assert h.background_permits == 0
+
+                if transient:
+                    h.cache_result = CachePutResult.REFUSED_PHYSICAL_PRESSURE
+                h.gates[1].set()
+                await h.published[1].wait()
+                await wait_all_tasks_blocked()
+                assert h.entered[2].is_set()  # The primary is still filling its span.
+                assert h.entered[5].is_set()  # No new read event should be needed.
+                assert h.active == h.peak == 2
+                await h.stream._delivery_registry.release_reservation(reservation)
+                await h.stream.close()
+            assert h.active == h.leases == 0
+            assert not h.stream._producer_claims._owners
+
+    trio.run(run)
+
+
+def test_speculation_yields_if_demand_is_outside_its_primary_span():
+    async def run():
+        h = _Harness(workers=2)
+        demand = await h.stream._delivery_registry.register_pending(28)
+        primary_done = trio.Event()
+        with trio.fail_after(2):
+            await h.stream._fetch_speculative_span(
+                h.chunks[4:7], 0, h.chunks[1:4], primary_done
+            )
+        assert not primary_done.is_set()
+        assert not h.requests
+        assert h.stream._delivery_registry.get_entry(28) is demand
+
+    trio.run(run)
+
+
+def test_speculation_does_not_hold_batch_if_primary_leaves_demand_unresolved():
+    from trio.testing import wait_all_tasks_blocked
+
+    async def run():
+        h = _Harness(workers=2)
+        demand = await h.stream._delivery_registry.register_pending(4)
+        primary_done = trio.Event()
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(
+                    h.stream._fetch_speculative_span,
+                    h.chunks[4:7],
+                    0,
+                    h.chunks[1:4],
+                    primary_done,
+                )
+                await wait_all_tasks_blocked()
+                primary_done.set()
+        assert not h.requests
+        assert h.stream._delivery_registry.get_entry(4) is demand
 
     trio.run(run)
 

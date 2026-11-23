@@ -1,10 +1,15 @@
 from contextlib import ExitStack
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from program.program import Program
 from program.settings import settings_manager
+from program.settings.models import AppModel
+from routers.secure.settings import router as settings_router
 
 
 @pytest.fixture(autouse=True)
@@ -202,6 +207,64 @@ def test_initialize_services_remounts_vfs_when_downloaders_change():
 
     previous_filesystem.close.assert_called_once_with()
     assert program.services.filesystem is filesystem
+
+
+@pytest.mark.parametrize("tab", ["ops", "filesystem"])
+def test_settings_api_applies_frontend_tab_update_to_service_lifecycle(
+    tab: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Exercise the real settings API and diff dispatch without a live mount."""
+    fresh = AppModel()
+    monkeypatch.setenv("CINEFLOW_FORCE_ENV", "false")
+    monkeypatch.setattr(settings_manager, "settings", fresh)
+    monkeypatch.setattr(settings_manager, "settings_file", tmp_path / "settings.json")
+
+    program = Program()
+    previous_filesystem = MagicMock()
+    program.services = MagicMock(filesystem=previous_filesystem, downloader=MagicMock())
+    replacement_filesystem = _mock_service()
+    changes = []
+
+    def observe():
+        changes.append(settings_manager.last_changed_top_keys)
+        _run_initialize(
+            program=program,
+            downloader=_mock_service(),
+            filesystem=replacement_filesystem,
+        )
+
+    monkeypatch.setattr(settings_manager, "observers", [observe])
+    if tab == "ops":
+        # This models the initial POST; the frontend separately requests a restart.
+        sections = ("post_processing", "logging", "stream")
+        payload = fresh.model_dump(mode="json", include=set(sections))
+        payload["stream"]["parallel_prefetch_workers"] = 2
+        key, value = "stream.parallel_prefetch_workers", 2
+        expected_changes = frozenset({"stream"})
+    else:
+        sections = ("filesystem",)
+        payload = fresh.model_dump(mode="json", include=set(sections))
+        payload["filesystem"]["hot_cache_watermark_high_pct"] = 82.0
+        payload["filesystem"]["hot_cache_watermark_low_pct"] = 65.0
+        key, value = "filesystem.hot_cache_watermark_high_pct", 82.0
+        expected_changes = frozenset({"filesystem"})
+
+    app = FastAPI()
+    app.include_router(settings_router, prefix="/api/v1")
+    with TestClient(app) as client:
+        saved = client.post(f"/api/v1/settings/set/{','.join(sections)}", json=payload)
+        assert saved.status_code == 200, saved.text
+        readback = client.get(f"/api/v1/settings/get/{key}")
+        assert readback.status_code == 200, readback.text
+        assert readback.json()[key] == value
+
+    assert changes == [expected_changes]
+    if tab == "ops":
+        previous_filesystem.close.assert_not_called()
+        assert program.services.filesystem is previous_filesystem
+    else:
+        previous_filesystem.close.assert_called_once_with()
+        assert program.services.filesystem is replacement_filesystem
 
 
 def test_startup_waits_for_initial_filesystem_sync():

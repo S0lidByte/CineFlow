@@ -22,11 +22,13 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+import trio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from kink import di
 
 from program.services.streaming.cache import Cache, CacheConfig
+from program.services.streaming.http_pool import TrioStreamingHttpPool
 from program.services.streaming.media_stream import MediaStream
 from program.settings import settings_manager
 from program.settings.models import AppModel
@@ -38,7 +40,7 @@ client = TestClient(app)
 
 
 @pytest.fixture
-def clean_settings(tmp_path: Path):
+def clean_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Fixture providing clean settings and restoring original settings on teardown."""
     original_settings = settings_manager.settings
     original_cache = di[Cache] if Cache in di else None
@@ -62,6 +64,8 @@ def clean_settings(tmp_path: Path):
 
     fresh_settings = AppModel(api_key="TEST_API_KEY_EXACTLY_32_CHARS_LONG_!")
     settings_manager.settings = fresh_settings
+    monkeypatch.setattr(settings_manager, "settings_file", tmp_path / "settings.json")
+    monkeypatch.setenv("CINEFLOW_FORCE_ENV", "false")
 
     try:
         yield fresh_settings
@@ -162,6 +166,68 @@ def test_settings_propagation_and_runtime_media_stream_application(
 
         # Unknown-bitrate window calculation yields exactly 55
         assert stream.adaptive_prefetch.calculate_window() == 55
+
+
+def test_prefetch_worker_save_changes_new_streams_but_not_open_handles(clean_settings):
+    def open_handle(fh: int) -> MediaStream:
+        with patch("program.services.streaming.media_stream.Chunker"):
+            return MediaStream(
+                fh=fh,
+                file_size=100 * 1024 * 1024,
+                path="/media/movies/Test (2025)/Test.mkv",
+                original_filename="Test.mkv",
+                provider="realdebrid",
+                initial_url="https://example.com/test.mkv",
+                bitrate=None,
+                nursery=MagicMock(),
+                http_pool=MagicMock(),
+            )
+
+    already_open = open_handle(101)
+    assert already_open.session_statistics.parallel_prefetch_workers == 1
+
+    saved = client.post(
+        "/api/v1/settings/set/stream",
+        json={"stream": {"parallel_prefetch_workers": 2}},
+        headers={"x-api-key": clean_settings.api_key},
+    )
+    assert saved.status_code == 200, saved.text
+    newly_opened = open_handle(102)
+    assert already_open.parallel_prefetch_workers == 1
+    assert newly_opened.parallel_prefetch_workers == 2
+    assert newly_opened.session_statistics.parallel_prefetch_workers == 2
+
+
+@pytest.mark.parametrize("force_env,expected_workers", [("false", 4), ("true", 2)])
+def test_operations_form_save_then_startup_load_uses_effective_worker_count(
+    clean_settings, monkeypatch, force_env, expected_workers
+):
+    """An Operations save is followed by a restart, not just API read-back."""
+    monkeypatch.setenv("CINEFLOW_FORCE_ENV", force_env)
+    monkeypatch.setenv("RIVEN_FORCE_ENV", "true")
+    monkeypatch.setenv("CINEFLOW_STREAM_PARALLEL_PREFETCH_WORKERS", "2")
+    headers = {"x-api-key": clean_settings.api_key}
+    paths = "post_processing,logging,stream"
+    form = client.get(f"/api/v1/settings/get/{paths}", headers=headers)
+    assert form.status_code == 200, form.text
+    payload = form.json()
+    payload["stream"]["parallel_prefetch_workers"] = 4
+
+    saved = client.post(f"/api/v1/settings/set/{paths}", json=payload, headers=headers)
+    assert saved.status_code == 200, saved.text
+    assert settings_manager.settings.stream.parallel_prefetch_workers == 4
+
+    # Startup reloads the persisted file and applies environment precedence.
+    settings_manager.load()
+    saved_form = client.get(f"/api/v1/settings/get/{paths}", headers=headers)
+    assert saved_form.status_code == 200, saved_form.text
+    assert saved_form.json()["stream"]["parallel_prefetch_workers"] == expected_workers
+    pool = TrioStreamingHttpPool()
+    try:
+        # Verify the created HTTPX transport, not the pool's dynamic settings property.
+        assert pool.get_client()._transport._pool._http2 is False
+    finally:
+        trio.run(pool.teardown)
 
 
 def test_autotune_mode_schema_options():

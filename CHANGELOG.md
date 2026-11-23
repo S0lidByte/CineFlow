@@ -5,6 +5,13 @@
 ### Bug Fixes
 
 * **stream:** keep parallel prefetch running when a foreground reader is already served by the cache but has not released its reservation.
+* **stream:** resume background prefetch after the current forward batch satisfies an urgent read, without holding an HTTP permit while waiting.
+* **stream:** bound each primary HTTP chunk attempt by the configured chunk wait timeout, even when partial fragments keep arriving.
+* **telemetry:** report the stream's configured prefetch worker count before its first upstream response.
+
+### Diagnostics
+
+* **stream:** time a bounded provider read by item ID without exposing the saved link or refreshing it.
 
 ## [1.52.3](https://github.com/S0lidByte/CineFlow/compare/v1.52.2...v1.52.3) (2026-11-22)
 

@@ -1045,40 +1045,46 @@ class MediaStream:
         if done is not None:
             await done.wait()
 
-    def _has_uncached_foreground_demand(self) -> bool:
-        """Yield upstream capacity only to reads that still need provider bytes."""
+    def _uncached_foreground_starts(self) -> list[int]:
+        """Return the reader reservations that still need provider bytes."""
         # A successful cache write wakes the reader before it releases its
         # reservation. That cache-backed tail must not stop the speculative span.
-        return any(
-            not self.chunker.get_chunk_range(position=start).first_chunk.is_cached.value
+        return [
+            start
             for start in self._delivery_registry.get_pending_starts()
-        )
+            if not self.chunker.get_chunk_range(
+                position=start
+            ).first_chunk.is_cached.value
+        ]
 
-    async def _fetch_speculative_chunk(self, chunk: Chunk, generation: int) -> None:
-        """Fetch one exact bounded range, with independent response and cache-first handoff."""
+    async def _fetch_speculative_chunk(self, chunk: Chunk, generation: int) -> bool:
+        """Fetch one bounded range; return True only if foreground demand deferred it."""
         from .cache import CachePutResult
 
         if not self._transport_generation_live(generation) or chunk.is_cached.value:
-            return
+            return False
         acquired, claim = self._producer_claims.acquire(chunk.start)
         if not acquired:
-            return
+            return False
         try:
-            if chunk.is_cached.value or self._has_uncached_foreground_demand():
-                return
+            if chunk.is_cached.value:
+                return False
+            if self._uncached_foreground_starts():
+                return True
             # Reserve a body token before opening the independent HTTP response.
             # Speculative saturation is a soft yield, never a pool heal.
             pool = self._http_pool
             if pool is None:
-                return
+                return False
             try:
                 async with pool.admit("body", workload="background"):
                     if (
                         not self._transport_generation_live(generation)
                         or chunk.is_cached.value
-                        or self._has_uncached_foreground_demand()
                     ):
-                        return
+                        return False
+                    if self._uncached_foreground_starts():
+                        return True
                     lease = pool.acquire_lease(use_proxy=self._use_proxy_client)
                     try:
                         self._speculative_active += 1
@@ -1127,7 +1133,7 @@ class MediaStream:
                             if len(data) != chunk.size:
                                 raise ValueError("Truncated speculative response")
                         if not self._transport_generation_live(generation):
-                            return
+                            return False
                         result = await self._cache_chunk(
                             start=chunk.start,
                             data=bytes(data),
@@ -1138,7 +1144,7 @@ class MediaStream:
                             ),
                         )
                         if not self._transport_generation_live(generation):
-                            return
+                            return False
                         if result in (
                             CachePutResult.STORED_HOT,
                             CachePutResult.STORED_WARM,
@@ -1150,7 +1156,7 @@ class MediaStream:
                         with trio.CancelScope(shield=True):
                             await pool.release_lease(lease)
             except httpx.PoolTimeout:
-                return
+                return False
         except trio.Cancelled:
             raise
         except Exception as exc:
@@ -1164,18 +1170,52 @@ class MediaStream:
             )
         finally:
             self._producer_claims.release(chunk.start, claim)
+        return False
 
-    async def _fetch_speculative_span(self, span: list[Chunk], generation: int) -> None:
-        """Fetch a contiguous span of speculative chunks sequentially on a background worker."""
+    async def _fetch_speculative_span(
+        self,
+        span: list[Chunk],
+        generation: int,
+        primary_span: list[Chunk] | None = None,
+        primary_done: trio.Event | None = None,
+    ) -> None:
+        """Yield to foreground work, then resume if this batch can satisfy it."""
+        primary: dict[int, Chunk] | None = None
         for chunk in span:
-            if not self._transport_generation_live(generation):
-                break
-            if (
-                hasattr(self, "_delivery_registry")
-                and self._has_uncached_foreground_demand()
-            ):
-                break
-            await self._fetch_speculative_chunk(chunk, generation)
+            while self._transport_generation_live(generation):
+                pending = (
+                    self._uncached_foreground_starts()
+                    if hasattr(self, "_delivery_registry")
+                    else []
+                )
+                if not pending:
+                    deferred = await self._fetch_speculative_chunk(chunk, generation)
+                    if not deferred:
+                        break
+                    continue  # Demand arrived during pool admission; no permit is held.
+
+                if (
+                    primary_span is None
+                    or primary_done is None
+                    or primary_done.is_set()
+                ):
+                    return
+                if primary is None:
+                    primary = {c.start: c for c in primary_span}
+                if any(start not in primary for start in pending):
+                    # The play loop must leave this batch to dispatch that read.
+                    return
+                start = pending[0]
+                reservation = self._delivery_registry.get_entry(start)
+                if reservation is not None:
+                    primary_chunk = primary[start]
+                    await trio_util.wait_any(
+                        lambda: primary_chunk.is_cached.wait_value(True),
+                        reservation.ready.wait,
+                        primary_done.wait,
+                    )
+            else:
+                return
 
     def _partition_prefetch_spans(
         self, chunks: OrderedSet[Chunk] | list[Chunk], parallel_workers: int
@@ -1242,18 +1282,26 @@ class MediaStream:
             primary_span, spec_spans = self._partition_prefetch_spans(
                 chunks, self.parallel_prefetch_workers
             )
+            primary_done = trio.Event()
             with trio.CancelScope() as scope:
                 self._speculative_scope = scope
                 async with trio.open_nursery() as nursery:
                     for span in spec_spans:
                         nursery.start_soon(
-                            self._fetch_speculative_span, span, generation
+                            self._fetch_speculative_span,
+                            span,
+                            generation,
+                            primary_span,
+                            primary_done,
                         )
-                    await process_chunks(
-                        OrderedSet(primary_span),
-                        is_prefetch=True,
-                        prefetch_gen=generation,
-                    )
+                    try:
+                        await process_chunks(
+                            OrderedSet(primary_span),
+                            is_prefetch=True,
+                            prefetch_gen=generation,
+                        )
+                    finally:
+                        primary_done.set()
                     if not self._transport_generation_live(generation):
                         nursery.cancel_scope.cancel()
         finally:
@@ -1587,6 +1635,12 @@ class MediaStream:
                                                     7.0,
                                                     max(0.5, wait_sec - headroom),
                                                 )
+                                                # A trickle can keep resetting the idle timer
+                                                # without delivering a usable chunk. One body
+                                                # attempt must also respect the chunk wait budget.
+                                                chunk_deadline = (
+                                                    trio.current_time() + wait_sec
+                                                )
                                                 while len(chunk_buffer) < chunk.size:
                                                     if (
                                                         is_prefetch
@@ -1610,27 +1664,40 @@ class MediaStream:
                                                                     )
                                                                 )
                                                             return
-                                                    try:
-                                                        raw_part = getattr(
-                                                            connection,
-                                                            "pending_body",
-                                                            b"",
+                                                    raw_part = getattr(
+                                                        connection,
+                                                        "pending_body",
+                                                        b"",
+                                                    )
+                                                    if not raw_part:
+                                                        # Empty fragments are not byte progress.
+                                                        idle_deadline = (
+                                                            trio.current_time()
+                                                            + body_read_stall_timeout
                                                         )
-                                                        if not raw_part:
-                                                            # Empty fragments are not byte progress.
-                                                            with trio.fail_after(
-                                                                body_read_stall_timeout
-                                                            ):
+                                                        deadline = min(
+                                                            chunk_deadline,
+                                                            idle_deadline,
+                                                        )
+                                                        try:
+                                                            with trio.fail_at(deadline):
                                                                 while not raw_part:
                                                                     raw_part = await anext(
                                                                         connection.reader
                                                                     )
-                                                    except trio.TooSlowError as err:
-                                                        raise httpx.ReadTimeout(
-                                                            f"HTTP response-body read stalled for {body_read_stall_timeout:.1f}s"
-                                                        ) from err
-                                                    except StopAsyncIteration:
-                                                        break
+                                                        except trio.TooSlowError as err:
+                                                            if (
+                                                                deadline
+                                                                == chunk_deadline
+                                                            ):
+                                                                raise httpx.ReadTimeout(
+                                                                    f"HTTP response-body chunk did not complete within {wait_sec:.1f}s"
+                                                                ) from err
+                                                            raise httpx.ReadTimeout(
+                                                                f"HTTP response-body read stalled for {body_read_stall_timeout:.1f}s"
+                                                            ) from err
+                                                        except StopAsyncIteration:
+                                                            break
                                                     remaining = chunk.size - len(
                                                         chunk_buffer
                                                     )
