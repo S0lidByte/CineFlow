@@ -51,6 +51,8 @@ class StreamSessionTracker:
         quality_profile: str | None = None,
         media_resolution: str | None = None,
         media_bitrate_kbps: int | None = None,
+        *,
+        parallel_prefetch_workers: int = 1,
     ) -> None:
         self.stream_id = stream_id
         self.title = title
@@ -78,7 +80,7 @@ class StreamSessionTracker:
         self.peak_body_responses = 0
         self.speculative_bytes = 0
         self.speculative_failures = 0
-        self.parallel_prefetch_workers = 1
+        self.parallel_prefetch_workers = parallel_prefetch_workers
         self.is_active = True
         self.cdn_url_refreshed = False
         self._lock = threading.Lock()
@@ -466,6 +468,8 @@ class PlaybackTelemetryCollector:
         client_ip: str | None = None,
         client_user_agent: str | None = None,
         provider: str | None = None,
+        *,
+        parallel_prefetch_workers: int = 1,
     ) -> StreamSessionTracker:
         """Register commencement of a new media stream session."""
         with self._lock:
@@ -477,6 +481,7 @@ class PlaybackTelemetryCollector:
                 client_ip=client_ip,
                 client_user_agent=client_user_agent,
                 provider=provider,
+                parallel_prefetch_workers=parallel_prefetch_workers,
             )
             self._sessions[stream_id] = tracker
             self._add_event_locked(
@@ -514,6 +519,7 @@ class PlaybackTelemetryCollector:
         with self._lock:
             tracker = self._sessions.get(stream_id)
             if tracker:
+                workers = snapshot.get("parallel_prefetch_workers")
                 tracker.update_upstream_metrics(
                     upstream_bytes=int(snapshot.get("upstream_bytes", 0)),
                     upstream_transfer_seconds=float(
@@ -526,8 +532,8 @@ class PlaybackTelemetryCollector:
                     peak_body_responses=int(snapshot.get("peak_body_responses", 0)),
                     speculative_bytes=int(snapshot.get("speculative_bytes", 0)),
                     speculative_failures=int(snapshot.get("speculative_failures", 0)),
-                    parallel_prefetch_workers=int(
-                        snapshot.get("parallel_prefetch_workers", 1)
+                    parallel_prefetch_workers=(
+                        int(workers) if workers is not None else None
                     ),
                 )
 

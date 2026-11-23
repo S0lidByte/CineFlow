@@ -3081,7 +3081,7 @@ class RivenVFS(pyfuse3.Operations):
                 else None
             )
 
-            self._active_streams[stream_key] = MediaStream(
+            stream = MediaStream(
                 fh=fh,
                 file_size=file_size,
                 path=path,
@@ -3093,6 +3093,7 @@ class RivenVFS(pyfuse3.Operations):
                 http_pool=self.http_pool,
                 require_mount_http_pool=True,
             )
+            self._active_streams[stream_key] = stream
             self._active_stream_count = len(self._active_streams)
 
             try:
@@ -3104,6 +3105,7 @@ class RivenVFS(pyfuse3.Operations):
                     stream_id=f"{path}:{fh}",
                     title=Path(path).name,
                     provider=entry_info.provider,
+                    parallel_prefetch_workers=stream.parallel_prefetch_workers,
                 )
             except Exception:
                 pass

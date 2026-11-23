@@ -749,6 +749,56 @@ def test_vfs_get_stream_passes_http_pool(mock_vfs):
     trio.run(_run)
 
 
+@pytest.mark.parametrize("workers", [2, 4])
+def test_vfs_reports_worker_count_before_the_first_upstream_response(
+    mock_vfs, monkeypatch, workers
+):
+    from program.services.streaming import telemetry
+    from program.settings import settings_manager
+    from program.settings.models import StreamModel
+
+    with patch.object(telemetry.PlaybackTelemetryCollector, "_instance", None):
+        collector = telemetry.PlaybackTelemetryCollector()
+    monkeypatch.setattr(telemetry, "playback_telemetry_collector", collector)
+    monkeypatch.setattr(
+        settings_manager,
+        "settings",
+        settings_manager.settings.model_copy(
+            update={"stream": StreamModel(parallel_prefetch_workers=workers)}
+        ),
+    )
+    mock_vfs.http_pool = MagicMock()
+    mock_vfs.vfs_db.get_entry_by_original_filename = MagicMock(
+        return_value=types.SimpleNamespace(
+            url="https://cdn.example/file.mkv", provider="realdebrid", bitrate=None
+        )
+    )
+
+    async def _run():
+        async with trio.open_nursery() as nursery:
+            mock_vfs.stream_nursery = nursery
+            stream = await mock_vfs._get_stream(
+                path="/new-stream.mkv",
+                fh=11,
+                file_size=1024,
+                original_filename="new.mkv",
+            )
+            assert stream.parallel_prefetch_workers == workers
+            [metric] = collector.get_snapshot().active_streams
+            assert metric.active_body_responses == 0
+            assert metric.upstream_bytes == 0
+            assert metric.parallel_prefetch_workers == workers
+            collector.record_upstream_statistics(
+                metric.stream_id, {"upstream_bytes": 1024}
+            )
+            assert (
+                collector.get_snapshot().active_streams[0].parallel_prefetch_workers
+                == workers
+            )
+
+    trio.run(_run)
+
+
 def test_vfs_get_stream_rejects_missing_mount_http_pool(mock_vfs):
     """A VFS stream must not fall back to a global DI HTTP client."""
     mock_entry = MagicMock()
