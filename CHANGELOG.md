@@ -13,6 +13,13 @@
 
 * **stream:** time a bounded provider read by item ID without exposing the saved link or refreshing it.
 
+## [1.52.5](https://github.com/S0lidByte/CineFlow/compare/v1.52.4...v1.52.5) (2026-11-23)
+
+
+### Bug Fixes
+
+* **stream:** bound stalled chunk recovery and keep prefetch moving ([#386](https://github.com/S0lidByte/CineFlow/issues/386)) ([c11e613](https://github.com/S0lidByte/CineFlow/commit/c11e6132f2a3bbe6a383b557f39d66899db6b597))
+
 ## [1.52.3](https://github.com/S0lidByte/CineFlow/compare/v1.52.2...v1.52.3) (2026-11-22)
 
 
