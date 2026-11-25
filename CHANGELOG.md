@@ -26,6 +26,13 @@
 
 * **stream:** time a bounded provider read by item ID without exposing the saved link or refreshing it, honoring forced environment DSN overrides when no settings file exists.
 
+## [1.52.7](https://github.com/S0lidByte/CineFlow/compare/v1.52.6...v1.52.7) (2026-11-25)
+
+
+### Bug Fixes
+
+* **stream:** eliminate HTTP/2 single-TCP bottleneck, pre-warm cache RAM, and track upstream throughput ([#390](https://github.com/S0lidByte/CineFlow/issues/390)) ([83f697d](https://github.com/S0lidByte/CineFlow/commit/83f697db1888d182c881f1b834b580765ec7c181))
+
 ## [1.52.6](https://github.com/S0lidByte/CineFlow/compare/v1.52.5...v1.52.6) (2026-11-25)
 
 
