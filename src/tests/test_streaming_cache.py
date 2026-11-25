@@ -548,3 +548,87 @@ def test_cache_memory_chunks_lru_eviction(tmp_path: Path) -> None:
         assert k1 in cache._memory_chunks
 
     trio.run(_run)
+
+
+def test_cache_lru_eviction_shortfall_sets_failure_and_refuses_prefetch(
+    tmp_path: Path,
+) -> None:
+    """When candidates are exhausted before target deficit is cleared, eviction must fail and refuse prefetch."""
+    from program.services.streaming.cache import CachePutResult
+
+    # Set hard cap to 200 bytes
+    cache = _make_cache(tmp_path, max_size_bytes=200)
+
+    async def _run() -> None:
+        p1 = b"A" * 120
+        p2 = b"B" * 50
+        p3 = b"C" * 80
+
+        # Put p1 (120 bytes) and protect it with an active playback lease
+        await cache.put("movie.mkv", 0, p1, stream_id="active_stream_1")
+        # Put p2 (50 bytes) unprotected
+        await cache.put("movie.mkv", 120, p2)
+
+        # Cache currently has 170 bytes.
+        # Now attempt to put p3 (80 bytes) as prefetch.
+        # Projected size = 170 + 80 = 250 > 200 hard cap. Target = at least 50 bytes.
+        # Only p2 (50 bytes) can be evicted. After evicting p2, projected is still 200 (hard cap)
+        # or watermark target leaves a remaining deficit.
+        # Evicting p2 alone frees 50 bytes. If target requires more (to reach low watermark),
+        # candidates are exhausted while target remains > 0.
+        res = await cache.put(
+            "movie.mkv",
+            170,
+            p3,
+            admission="prefetch",
+        )
+        assert res is CachePutResult.STORED_WARM
+
+        # Prefetch eviction shortfall must be recorded and 120-byte leased entry kept
+        assert cache.eviction_refusals >= 1
+        assert cache.has("movie.mkv", 0, 119)
+
+    trio.run(_run)
+
+
+def test_cache_lru_eviction_shortfall_refuses_overflow_prefetch_and_skips_zero_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Shortfall refuses physical overflow past max_size_bytes; zero-target _evict_lru avoids scanning _index."""
+    from program.services.streaming.cache import CachePutResult
+
+    cache = _make_cache(tmp_path, max_size_bytes=200)
+
+    async def _run() -> None:
+        p1 = b"A" * 120
+        p2 = b"B" * 50
+        p3_overflow = b"C" * 81  # 120 + 81 = 201 > 200 hard cap
+
+        await cache.put("movie.mkv", 0, p1, stream_id="active_stream_1")
+        await cache.put("movie.mkv", 120, p2)
+
+        # Verify zero-target _evict_lru returns True without scanning protected status.
+        probe_calls = 0
+        orig_protected = cache._is_entry_protected
+
+        def tracking_protected(key, entry):
+            nonlocal probe_calls
+            probe_calls += 1
+            return orig_protected(key, entry)
+
+        monkeypatch.setattr(cache, "_is_entry_protected", tracking_protected)
+        assert await cache._evict_lru(0) is True
+        assert probe_calls == 0
+
+        res = await cache.put(
+            "movie.mkv",
+            170,
+            p3_overflow,
+            admission="prefetch",
+        )
+        assert res is CachePutResult.REFUSED_PHYSICAL_PRESSURE
+        assert cache.eviction_refusals >= 1
+        assert cache.has("movie.mkv", 0, 119)
+        assert not cache.has("movie.mkv", 170, 250)
+
+    trio.run(_run)

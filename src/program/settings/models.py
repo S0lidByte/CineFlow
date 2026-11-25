@@ -1502,7 +1502,12 @@ class AppModel(Observable):
         ),
     )
     tracemalloc: bool = Field(
-        default=False, description="Enable Python memory tracking (debug)"
+        default=False,
+        description=(
+            "Enable Python memory tracking (debug). Requires a backend restart: "
+            "saving this value does not start or stop the tracer in the running "
+            "process. Memory tracking adds allocation overhead."
+        ),
     )
     filesystem: FilesystemModel = Field(
         default_factory=lambda: FilesystemModel(),

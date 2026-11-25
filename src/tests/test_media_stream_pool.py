@@ -42,6 +42,66 @@ def test_resolve_async_client_uses_di_async_client():
         mock_di.__getitem__.assert_called()
 
 
+@pytest.mark.parametrize("use_proxy", [False, True])
+@pytest.mark.parametrize("first_timeout", [None, 15])
+def test_stream_connect_timeout_overrides_old_pool_without_mutating_other_handles(
+    use_proxy, first_timeout
+):
+    """A reused client must not pin new handles to its mount-time timeout."""
+    observed = []
+
+    async def respond(request):
+        observed.append(request.extensions["timeout"])
+        return httpx.Response(
+            206, headers={"Content-Range": "bytes 0-10/1000"}, content=b"x" * 11
+        )
+
+    @asynccontextmanager
+    async def admit(kind, *, workload):
+        yield
+
+    async def run():
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(respond), timeout=5
+        ) as client:
+            pool = MagicMock()
+            pool.admit = admit
+            pool.generation = 7
+            pool.acquire_lease.return_value = SimpleNamespace(
+                client=client, generation=7
+            )
+            pool.release_lease = AsyncMock()
+            handles = []
+            for timeout in (first_timeout, 60):
+                stream = _bare_stream(use_proxy=use_proxy, http_pool=pool)
+                stream.target_url = SimpleNamespace(value="https://example.test/file")
+                stream.file_metadata.file_size = 1000
+                if timeout is not None:
+                    stream.config = SimpleNamespace(connect_timeout_seconds=timeout)
+                handles.append(stream)
+
+            for stream in (handles[0], handles[1], handles[0]):
+                async with stream.establish_connection(start=0, end=10) as response:
+                    assert await response.aread() == b"x" * 11
+
+            assert [item["connect"] for item in observed] == [
+                first_timeout or 5,
+                60,
+                first_timeout or 5,
+            ]
+            assert all(item["read"] == 30 for item in observed)
+            assert all(item["write"] == 10 for item in observed)
+            assert all(item["pool"] == 5 for item in observed)
+            assert client.timeout.connect == 5
+            assert pool.release_lease.await_count == 3
+            assert all(
+                call.kwargs["use_proxy"] == use_proxy
+                for call in pool.acquire_lease.call_args_list
+            )
+
+    trio.run(run)
+
+
 def test_force_aclose_active_response_closes_httpx_response():
     stream = _bare_stream()
     response = MagicMock()

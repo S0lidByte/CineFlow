@@ -1645,40 +1645,56 @@ class Cache:
                     except Exception:
                         pass
 
-                with self._thread_lock:
-                    while target > 0 and self._index:
-                        # In two-tier mode, warm retention is independent: hot
-                        # entries are not warm-budget victims, even when the hot
-                        # tier is under pressure.
-                        victim_key: str | None = None
-                        if self.cfg.two_tier:
-                            for k, entry in self._index.items():
-                                if getattr(
-                                    entry, "tier", None
-                                ) == "warm" and not self._is_entry_protected(k, entry):
-                                    victim_key = k
-                                    break
-                        else:
-                            for k, entry in self._index.items():
-                                if not self._is_entry_protected(k, entry):
-                                    victim_key = k
-                                    break
+                if target <= 0:
+                    return True
 
-                        if victim_key is None:
-                            # ALL entries in cache are currently protected by active playback leases/readers.
-                            # ACTIVE PLAYBACK DATA > CACHE RETENTION: Refuse eviction to prevent buffer drops.
-                            self.eviction_refusals += 1
-                            eviction_succeeded = False
-                            logger.warning(
-                                "Cache LRU eviction refused: all {} entries ({:.1f} MB) are protected by active playback leases/readers. Target was {} bytes.",
-                                len(self._index),
-                                self._total_bytes / (1024 * 1024),
-                                target,
-                            )
+                with self._thread_lock:
+                    # O(N) single pass: collect all unprotected candidates in LRU order.
+                    # This avoids the O(N²) re-scan that occurs when most entries are
+                    # protected by active playback leases (BUG-7).
+                    if self.cfg.two_tier:
+                        candidates = [
+                            (k, entry)
+                            for k, entry in self._index.items()
+                            if getattr(entry, "tier", None) == "warm"
+                            and not self._is_entry_protected(k, entry)
+                        ]
+                    else:
+                        candidates = [
+                            (k, entry)
+                            for k, entry in self._index.items()
+                            if not self._is_entry_protected(k, entry)
+                        ]
+
+                    if not candidates and target > 0:
+                        # ALL entries in cache are currently protected by active playback leases/readers.
+                        # ACTIVE PLAYBACK DATA > CACHE RETENTION: Refuse eviction to prevent buffer drops.
+                        self.eviction_refusals += 1
+                        eviction_succeeded = False
+                        logger.warning(
+                            "Cache LRU eviction refused: all {} entries ({:.1f} MB) are protected by active playback leases/readers. Target was {} bytes.",
+                            len(self._index),
+                            self._total_bytes / (1024 * 1024),
+                            target,
+                        )
+
+                    for victim_key, victim_entry in candidates:
+                        if target <= 0:
                             break
 
-                        victim_entry = self._index.get(victim_key)
-                        if victim_entry is None:
+                        # Re-check protection status: a lease may have been acquired
+                        # between pre-collection and eviction (still under _thread_lock,
+                        # so this is a same-lock re-validation, not a race).
+                        if self._is_entry_protected(victim_key, victim_entry):
+                            continue
+
+                        if victim_key not in self._index:
+                            # Concurrently evicted
+                            continue
+
+                        current = self._index.get(victim_key)
+                        if current is None or current is not victim_entry:
+                            # Corrupted or replaced index entry during eviction
                             logger.error(
                                 "Cache index inconsistency during eviction: "
                                 "victim_key={}, victim_entry={}, "
@@ -1717,6 +1733,18 @@ class Cache:
                             self._hot_bytes -= victim_entry.size
                         target -= victim_entry.size
                         evicted += 1
+
+                    if target > 0 and eviction_succeeded:
+                        # Unprotected candidates were exhausted before satisfying the eviction target.
+                        # Remaining entries are protected by active playback leases/readers (BUG-POST-1).
+                        self.eviction_refusals += 1
+                        eviction_succeeded = False
+                        logger.warning(
+                            "Cache LRU eviction shortfall: evicted {} entries, but target deficit of {} bytes remains (remaining {} entries protected).",
+                            evicted,
+                            target,
+                            len(self._index),
+                        )
         finally:
             if to_unlink:
                 with trio.CancelScope(shield=True):

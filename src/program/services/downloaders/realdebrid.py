@@ -635,7 +635,7 @@ class RealDebridDownloader(DownloaderBase):
                     # Use the torrent link directly as download_url - VFS will handle unrestricting
                     if file_id in files:
                         files[file_id].download_url = torrent_link
-                        logger.debug(f"Added torrent link for file {file_data.path}")
+                        logger.trace("Added torrent link for file {}", file_data.path)
                     else:
                         logger.warning(f"File key {file_id} not found in files dict")
 

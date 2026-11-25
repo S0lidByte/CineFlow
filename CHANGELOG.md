@@ -4,14 +4,27 @@
 
 ### Bug Fixes
 
+* **cache:** detect LRU eviction shortfall when unprotected candidates cannot satisfy the byte deficit so prefetch writes under physical pressure are refused, and short-circuit zero-target eviction scans before locking the index.
+* **vfs:** skip concurrently unlinked child entries across both `getattr` (`ENOENT`) and synchronized `readdir_reply` validation under `_tree_lock`.
+* **stream:** interrupt a parallel prefetch batch when a foreground reservation lies outside its assigned chunks, draining unrelated speculative transfers and forcing a clean reconnect if the primary response was already read without advancing `current_read_position`.
+
+* **stream:** apply each handle's configured connection timeout to primary and speculative HTTP requests, so reused mount-scoped clients do not retain an older setting; preserve existing handles and other transport timeouts.
+
+* **realdebrid:** move per-file link correlation logs to TRACE; retain the per-torrent DEBUG summary to avoid flooding synchronous console logging during large pack polling.
+
 * **stream:** keep parallel prefetch running when a foreground reader is already served by the cache but has not released its reservation.
 * **stream:** resume background prefetch after the current forward batch satisfies an urgent read, without holding an HTTP permit while waiting.
 * **stream:** bound each primary HTTP chunk attempt by the configured chunk wait timeout, even when partial fragments keep arriving.
+* **stream:** apply the chunk wait timeout to speculative response bodies so a slow trickle cannot keep a prefetch worker occupied indefinitely.
 * **telemetry:** report the stream's configured prefetch worker count before its first upstream response.
 
 ### Diagnostics
 
-* **stream:** time a bounded provider read by item ID without exposing the saved link or refreshing it.
+* **settings:** document that tracemalloc changes require a backend restart; saving the value alone does not stop an active tracer.
+
+* **stream:** include effective prefetch workers and chunk wait timeout in each stream initialization trace to distinguish open-handle settings from later UI saves.
+
+* **stream:** time a bounded provider read by item ID without exposing the saved link or refreshing it, honoring forced environment DSN overrides when no settings file exists.
 
 ## [1.52.5](https://github.com/S0lidByte/CineFlow/compare/v1.52.4...v1.52.5) (2026-11-23)
 

@@ -228,6 +228,129 @@ def test_readdir_empty_directory(mock_vfs):
     trio.run(_run)
 
 
+def test_readdir_skips_concurrently_unlinked_child_without_enoent(mock_vfs):
+    """readdir must skip entries that raise ENOENT during getattr without failing the listing (BUG-POST-2)."""
+
+    async def _run() -> None:
+        fh = pyfuse3.FileHandleT(300)
+        dir_node = VFSDirectory(
+            name="test_dir",
+            inode=pyfuse3.InodeT(300),
+            parent=mock_vfs._root,
+        )
+        child_deleted = VFSFile(
+            name="deleted.mkv",
+            inode=pyfuse3.InodeT(301),
+            parent=dir_node,
+            original_filename="deleted.mkv",
+            file_size=1000,
+            created_at="2020-01-01T00:00:00",
+            updated_at="2020-01-01T00:00:00",
+            entry_type="file",
+        )
+        child_active = VFSFile(
+            name="active.mkv",
+            inode=pyfuse3.InodeT(302),
+            parent=dir_node,
+            original_filename="active.mkv",
+            file_size=2000,
+            created_at="2020-01-01T00:00:00",
+            updated_at="2020-01-01T00:00:00",
+            entry_type="file",
+        )
+        dir_node.children["deleted.mkv"] = child_deleted
+        dir_node.children["active.mkv"] = child_active
+        mock_vfs._inode_to_node[300] = dir_node
+        mock_vfs._inode_to_node[302] = child_active
+        # Node 301 is omitted from _inode_to_node, so getattr(301) will raise FUSEError(ENOENT)
+
+        emitted_names: list[bytes] = []
+
+        with patch(
+            "pyfuse3.readdir_reply",
+            side_effect=lambda token, name, attrs, offset: (
+                emitted_names.append(name) or True
+            ),
+        ):
+            await mock_vfs.readdir(fh, 0, MagicMock())
+
+        # Assert active.mkv and dot entries were emitted, while deleted.mkv was skipped
+        assert b"active.mkv" in emitted_names
+        assert b"." in emitted_names
+        assert b".." in emitted_names
+        assert b"deleted.mkv" not in emitted_names
+
+    trio.run(_run)
+
+
+def test_readdir_skips_child_unlinked_between_getattr_and_reply(mock_vfs):
+    """readdir must skip a child unlinked after getattr returns without recording lookup_counts."""
+
+    async def _run() -> None:
+        fh = pyfuse3.FileHandleT(305)
+        dir_node = VFSDirectory(
+            name="race_dir",
+            inode=pyfuse3.InodeT(305),
+            parent=mock_vfs._root,
+        )
+        child_raced = VFSFile(
+            name="raced.mkv",
+            inode=pyfuse3.InodeT(306),
+            parent=dir_node,
+            original_filename="raced.mkv",
+            file_size=1000,
+            created_at="2020-01-01T00:00:00",
+            updated_at="2020-01-01T00:00:00",
+            entry_type="file",
+        )
+        child_kept = VFSFile(
+            name="kept.mkv",
+            inode=pyfuse3.InodeT(307),
+            parent=dir_node,
+            original_filename="kept.mkv",
+            file_size=2000,
+            created_at="2020-01-01T00:00:00",
+            updated_at="2020-01-01T00:00:00",
+            entry_type="file",
+        )
+        dir_node.children["raced.mkv"] = child_raced
+        dir_node.children["kept.mkv"] = child_kept
+        mock_vfs._inode_to_node[305] = dir_node
+        mock_vfs._inode_to_node[306] = child_raced
+        mock_vfs._inode_to_node[307] = child_kept
+
+        orig_getattr = mock_vfs.getattr
+
+        async def getattr_with_concurrent_unlink(inode, ctx=None):
+            attrs = await orig_getattr(inode, ctx)
+            if inode == 306:
+                mock_vfs._inode_to_node.pop(306, None)
+            return attrs
+
+        emitted_names: list[bytes] = []
+        with (
+            patch.object(
+                mock_vfs, "getattr", side_effect=getattr_with_concurrent_unlink
+            ),
+            patch(
+                "pyfuse3.readdir_reply",
+                side_effect=lambda token, name, attrs, offset: (
+                    emitted_names.append(name) or True
+                ),
+            ),
+        ):
+            await mock_vfs.readdir(fh, 0, MagicMock())
+
+        assert b"." in emitted_names
+        assert b".." in emitted_names
+        assert b"kept.mkv" in emitted_names
+        assert b"raced.mkv" not in emitted_names
+        assert 306 not in mock_vfs._lookup_counts
+        assert mock_vfs._lookup_counts[307] == 1
+
+    trio.run(_run)
+
+
 def test_stream_timeout_concurrency(mock_vfs):
     """_monitor_stream_timeouts and release() must not race on _active_streams."""
 
