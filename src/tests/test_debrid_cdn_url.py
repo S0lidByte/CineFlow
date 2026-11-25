@@ -418,3 +418,43 @@ def test_is_dns_failure_matches_common_messages():
     assert _is_dns_failure(Exception("[Errno -2] Name does not resolve")) is True
     assert _is_dns_failure(Exception("getaddrinfo failed")) is True
     assert _is_dns_failure(Exception("connection refused")) is False
+
+
+def test_validate_reuses_pooled_client_sends_range_and_uses_positive_ttl_cache():
+    """Real-client validate() sends Range: bytes=0-0, reuses HTTP/1.1 pooled client, and honors 15s TTL cache."""
+    import program.utils.debrid_cdn_url as cdn_mod
+
+    seen_requests: list[tuple[str, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_requests.append((str(request.url), request.headers.get("Range")))
+        return httpx.Response(206, content=b"x")
+
+    transport = httpx.MockTransport(handler)
+    pooled_client = httpx.Client(http2=False, transport=transport)
+    cdn_mod.clear_persistent_validate_failure_state()
+    cdn = _cdn_with_url("https://cdn.example.test/d/POOL1/movie.mkv")
+
+    with cdn_mod._validation_clients_lock:
+        prev_client = cdn_mod._validation_clients.get(None)
+        cdn_mod._validation_clients[None] = pooled_client
+
+    try:
+        assert cdn.validate() == "https://cdn.example.test/d/POOL1/movie.mkv"
+        assert cdn.validate() == "https://cdn.example.test/d/POOL1/movie.mkv"
+        assert seen_requests == [
+            ("https://cdn.example.test/d/POOL1/movie.mkv", "bytes=0-0")
+        ]
+
+        cdn_mod.clear_persistent_validate_failure_state()
+        assert cdn.validate() == "https://cdn.example.test/d/POOL1/movie.mkv"
+        assert len(seen_requests) == 2
+        assert pooled_client.is_closed is False
+    finally:
+        cdn_mod.clear_persistent_validate_failure_state()
+        with cdn_mod._validation_clients_lock:
+            if prev_client is None:
+                cdn_mod._validation_clients.pop(None, None)
+            else:
+                cdn_mod._validation_clients[None] = prev_client
+        pooled_client.close()

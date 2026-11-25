@@ -85,8 +85,11 @@ class StreamSessionTracker:
         self.cdn_url_refreshed = False
         self._lock = threading.Lock()
 
-        # Rolling window: deque of (timestamp, byte_count) for throughput calculation
+        # Rolling windows: deques of (timestamp, byte_count) for throughput calculation
         self._window: collections.deque[tuple[float, int]] = collections.deque()
+        self._upstream_window: collections.deque[tuple[float, int]] = (
+            collections.deque()
+        )
         self._window_duration = 5.0  # 5-second window
 
     def update_attribution(
@@ -226,6 +229,17 @@ class StreamSessionTracker:
             self._window.append((now_mono, nbytes))
             self._prune_window(now_mono)
 
+    def record_upstream_delta(self, nbytes: int) -> None:
+        """Record incremental upstream CDN bytes received over the rolling window."""
+        if nbytes <= 0:
+            return
+        now_mono = time.monotonic()
+        with self._lock:
+            self.upstream_bytes += nbytes
+            self.last_read_at = datetime.now(UTC)
+            self._upstream_window.append((now_mono, nbytes))
+            self._prune_window_deque(self._upstream_window, now_mono)
+
     def update_upstream_metrics(
         self,
         *,
@@ -239,9 +253,14 @@ class StreamSessionTracker:
         parallel_prefetch_workers: int | None = None,
     ) -> None:
         """Update upstream transport accounting counters."""
+        now_mono = time.monotonic()
         with self._lock:
             if upstream_bytes is not None:
+                delta = upstream_bytes - self.upstream_bytes
                 self.upstream_bytes = upstream_bytes
+                if delta > 0:
+                    self._upstream_window.append((now_mono, delta))
+                    self._prune_window_deque(self._upstream_window, now_mono)
             if upstream_transfer_seconds is not None:
                 self.upstream_transfer_seconds = upstream_transfer_seconds
             if total_session_connections is not None:
@@ -267,20 +286,31 @@ class StreamSessionTracker:
         with self._lock:
             self.is_active = False
 
-    def _prune_window(self, now_mono: float) -> None:
+    def _prune_window_deque(
+        self, window: collections.deque[tuple[float, int]], now_mono: float
+    ) -> None:
         cutoff = now_mono - self._window_duration
-        while self._window and self._window[0][0] < cutoff:
-            self._window.popleft()
+        while window and window[0][0] < cutoff:
+            window.popleft()
+
+    def _prune_window(self, now_mono: float) -> None:
+        self._prune_window_deque(self._window, now_mono)
+
+    def _compute_window_throughput_mbps_locked(
+        self, window: collections.deque[tuple[float, int]], now_mono: float
+    ) -> float:
+        """Calculate throughput in MB/s over a rolling window without re-locking."""
+        self._prune_window_deque(window, now_mono)
+        if not window:
+            return 0.0
+        total_bytes = sum(b for _, b in window)
+        time_span = max(0.5, now_mono - window[0][0])
+        mb_transferred = total_bytes / (1024 * 1024)
+        return round(mb_transferred / time_span, 2)
 
     def _get_current_throughput_mbps_locked(self, now_mono: float) -> float:
         """Calculate throughput in MB/s over rolling window without re-locking."""
-        self._prune_window(now_mono)
-        if not self._window:
-            return 0.0
-        total_bytes = sum(b for _, b in self._window)
-        time_span = max(0.5, now_mono - self._window[0][0])
-        mb_transferred = total_bytes / (1024 * 1024)
-        return round(mb_transferred / time_span, 2)
+        return self._compute_window_throughput_mbps_locked(self._window, now_mono)
 
     def get_current_throughput_mbps(self) -> float:
         """Calculate throughput in MB/s over rolling window."""
@@ -297,6 +327,9 @@ class StreamSessionTracker:
                     (self.bytes_from_cache / self.bytes_transferred) * 100.0, 1
                 )
             throughput = self._get_current_throughput_mbps_locked(now_mono)
+            upstream_throughput = self._compute_window_throughput_mbps_locked(
+                self._upstream_window, now_mono
+            )
             badge = self._format_session_badge_locked(throughput, cache_rate)
             return StreamSessionMetric(
                 stream_id=self.stream_id,
@@ -316,6 +349,7 @@ class StreamSessionTracker:
                 speculative_failures=self.speculative_failures,
                 parallel_prefetch_workers=self.parallel_prefetch_workers,
                 current_throughput_mbps=throughput,
+                upstream_throughput_mbps=upstream_throughput,
                 started_at=self.started_at,
                 last_read_at=self.last_read_at,
                 is_active=self.is_active,
@@ -511,6 +545,13 @@ class PlaybackTelemetryCollector:
             tracker = self._sessions.get(stream_id)
             if tracker:
                 tracker.record_read(nbytes, from_cache=from_cache)
+
+    def record_upstream_delta(self, stream_id: str, nbytes: int) -> None:
+        """Record incremental upstream CDN bytes received for a direct HTTP stream."""
+        with self._lock:
+            tracker = self._sessions.get(stream_id)
+            if tracker:
+                tracker.record_upstream_delta(nbytes)
 
     def record_upstream_statistics(
         self, stream_id: str, snapshot: dict[str, int | float]
@@ -768,6 +809,7 @@ class PlaybackTelemetryCollector:
             self._prune_plex_playbacks_locked()
             active_list: list[StreamSessionMetric] = []
             total_active_throughput = 0.0
+            total_upstream_throughput = 0.0
 
             # Prune completed or ancient inactive sessions older than 1 hour
             now_dt = datetime.now(UTC)
@@ -785,6 +827,7 @@ class PlaybackTelemetryCollector:
                 if metric.is_active:
                     active_list.append(metric)
                     total_active_throughput += metric.current_throughput_mbps
+                    total_upstream_throughput += metric.upstream_throughput_mbps
 
             total_chunks = self._total_cache_hits + self._total_cache_misses
             aggregate_hit_rate = 0.0
@@ -802,6 +845,9 @@ class PlaybackTelemetryCollector:
                 total_chunk_requests=total_chunks,
                 aggregate_cache_hit_rate_pct=aggregate_hit_rate,
                 current_total_throughput_mbps=round(total_active_throughput, 2),
+                current_total_upstream_throughput_mbps=round(
+                    total_upstream_throughput, 2
+                ),
                 cached_chunks_in_memory=self._cached_chunks_in_memory,
                 cached_chunks_on_disk=self._cached_chunks_on_disk,
                 active_pool_connections=self._active_pool_connections,

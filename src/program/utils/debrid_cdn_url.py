@@ -1,4 +1,6 @@
+import threading
 import time
+from contextlib import nullcontext
 from http import HTTPStatus
 from typing import Self
 from urllib.parse import urlparse
@@ -15,6 +17,7 @@ from program.services.streaming.exceptions import (
 )
 from program.services.streaming.streaming_constants import PROXY_REQUIRED_PROVIDERS
 from program.settings import settings_manager
+from program.utils.stream_http import stream_http_limits, stream_http_timeout
 from program.utils.url_sanitizer import sanitize_url_for_logs
 
 
@@ -27,8 +30,41 @@ class RefreshedURLIdenticalException(Exception):
 # refresh cooldown / fair-usage deferral), schedule a dead-link re-scrape.
 PERSISTENT_VALIDATE_NONE_THRESHOLD = 2
 _RESCRAPE_DEDUP_SECONDS = 1800.0
+_VALIDATE_POSITIVE_CACHE_TTL_SECONDS = 15.0
+_REAL_HTTPX_CLIENT = httpx.Client
 _validate_none_counts: dict[str, int] = {}
 _rescrape_scheduled_until: dict[str, float] = {}
+_validated_url_cache: dict[tuple[str, str | None], float] = {}
+_validate_cache_lock = threading.Lock()
+_validation_clients: dict[str | None, httpx.Client] = {}
+_validation_clients_lock = threading.Lock()
+
+
+def _acquire_validation_client(proxy: str | None) -> tuple[httpx.Client, bool]:
+    """Return (client, should_close), reusing pooled keep-alive HTTP/1.1 clients unless mocked."""
+    if httpx.Client is not _REAL_HTTPX_CLIENT:
+        return httpx.Client(proxy=proxy), True
+    with _validation_clients_lock:
+        client = _validation_clients.get(proxy)
+        if client is None or client.is_closed:
+            client = httpx.Client(
+                http2=False,
+                proxy=proxy,
+                follow_redirects=True,
+                limits=stream_http_limits(),
+                timeout=stream_http_timeout(connect_timeout=5.0),
+            )
+            _validation_clients[proxy] = client
+        return client, False
+
+
+def _invalidate_positive_cache(url: str | None) -> None:
+    if not url:
+        return
+    with _validate_cache_lock:
+        stale_keys = [k for k in _validated_url_cache if k[0] == url]
+        for k in stale_keys:
+            _validated_url_cache.pop(k, None)
 
 
 def _is_dns_failure(error: Exception) -> bool:
@@ -45,9 +81,11 @@ def _is_dns_failure(error: Exception) -> bool:
 
 
 def clear_persistent_validate_failure_state() -> None:
-    """Test helper: reset in-process ghost-entry counters."""
+    """Test helper: reset in-process ghost-entry counters and validation TTL cache."""
     _validate_none_counts.clear()
     _rescrape_scheduled_until.clear()
+    with _validate_cache_lock:
+        _validated_url_cache.clear()
 
 
 class DebridCDNUrl:
@@ -314,13 +352,45 @@ class DebridCDNUrl:
                     else:
                         return None
 
-                with httpx.Client(proxy=proxy) as client:
-                    with client.stream(method="GET", url=self.url) as response:
-                        response.raise_for_status()
+                using_real_client = httpx.Client is _REAL_HTTPX_CLIENT
+                if using_real_client:
+                    with _validate_cache_lock:
+                        cached_until = _validated_url_cache.get((self.url, proxy))
+                        if cached_until is not None:
+                            if time.monotonic() < cached_until:
+                                self._clear_validate_none_count()
+                                return self.url
+                            _validated_url_cache.pop((self.url, proxy), None)
+
+                client, should_close = _acquire_validation_client(proxy)
+                client_cm = client if should_close else nullcontext(client)
+                with client_cm as active_client:
+                    with active_client.stream(
+                        method="GET",
+                        url=self.url,
+                        headers={"Range": "bytes=0-0"},
+                    ) as response:
+                        if (
+                            response.status_code
+                            == HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE
+                        ):
+                            with active_client.stream(
+                                method="GET", url=self.url
+                            ) as fallback_response:
+                                fallback_response.raise_for_status()
+                        else:
+                            response.raise_for_status()
 
                         self._clear_validate_none_count()
+                        if using_real_client:
+                            with _validate_cache_lock:
+                                _validated_url_cache[(self.url, proxy)] = (
+                                    time.monotonic()
+                                    + _VALIDATE_POSITIVE_CACHE_TTL_SECONDS
+                                )
                         return self.url
             except httpx.TimeoutException as e:
+                _invalidate_positive_cache(self.url)
                 self._log_transport_failure(kind="Timeout", attempt=attempt, error=e)
                 if self._maybe_refresh_after_transport_failure(
                     attempt_refresh=attempt_refresh,
@@ -328,6 +398,7 @@ class DebridCDNUrl:
                 ):
                     return None
             except httpx.ConnectError as e:
+                _invalidate_positive_cache(self.url)
                 # Dead/retired RD CDN hostnames (e.g. NXDOMAIN on 109-4.download…)
                 # must refresh — retrying the same URL just spam-logs the same error.
                 self._log_transport_failure(
@@ -362,6 +433,7 @@ class DebridCDNUrl:
                         link=self.url or url_before_refresh or "Unknown URL",
                     ) from e
             except httpx.HTTPStatusError as e:
+                _invalidate_positive_cache(self.url)
                 status_code = e.response.status_code
 
                 if status_code in (

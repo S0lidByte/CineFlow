@@ -279,3 +279,71 @@ class TestStreamEndpointHTTP416AndRanges:
             assert resp.status_code == 416
             assert resp.headers.get("content-range") == "bytes */5000"
             assert resp.headers.get("accept-ranges") == "bytes"
+
+    def test_build_forward_headers_sets_identity_encoding_and_range(self):
+        req = _make_request({})
+        assert _build_forward_headers(req) == {"Accept-Encoding": "identity"}
+        assert _build_forward_headers(req, "bytes=0-1023") == {
+            "Accept-Encoding": "identity",
+            "Range": "bytes=0-1023",
+        }
+
+    @pytest.mark.asyncio
+    async def test_stream_file_uses_large_chunk_size_and_records_telemetry(self):
+        """stream_file forwards 256 KiB chunk_size when supported and emits live telemetry."""
+        from program.services.streaming.telemetry import playback_telemetry_collector
+
+        playback_telemetry_collector._sessions.clear()
+        playback_telemetry_collector._events.clear()
+
+        observed_chunk_sizes: list[int | None] = []
+        req = _make_request({"Range": "bytes=0-1023"})
+        file_size = 4096
+
+        mock_upstream_resp = MagicMock()
+        mock_upstream_resp.status_code = 206
+        mock_upstream_resp.headers = {
+            "content-type": "video/mp4",
+            "content-range": f"bytes 0-1023/{file_size}",
+            "content-length": "1024",
+            "accept-ranges": "bytes",
+        }
+        mock_upstream_resp.is_closed = False
+
+        async def sized_bytes(chunk_size: int | None = None):
+            observed_chunk_sizes.append(chunk_size)
+            yield b"z" * 1024
+
+        mock_upstream_resp.aiter_bytes = sized_bytes
+        mock_upstream_resp.aclose = AsyncMock()
+
+        mock_client = MagicMock()
+        mock_client.build_request = MagicMock(return_value=MagicMock())
+        mock_client.send = AsyncMock(return_value=mock_upstream_resp)
+
+        with (
+            patch(
+                "routers.secure.stream._get_media_info",
+                return_value=(
+                    "http://upstream/video.mp4",
+                    "realdebrid",
+                    "video.mp4",
+                    file_size,
+                ),
+            ),
+            patch("routers.secure.stream._get_client", return_value=mock_client),
+        ):
+            resp = await stream_file(1, req)
+            assert isinstance(resp, StreamingResponse)
+            chunks = []
+            async for chunk in resp.body_iterator:
+                chunks.append(chunk if isinstance(chunk, bytes) else bytes(chunk))
+            assert b"".join(chunks) == b"z" * 1024
+            assert observed_chunk_sizes == [262_144]
+
+            snap = playback_telemetry_collector.get_snapshot()
+            completed = [
+                e for e in snap.recent_events if e.event_type == "STREAM_COMPLETE"
+            ]
+            assert completed
+            assert completed[0].details.get("bytes_transferred") == 1024

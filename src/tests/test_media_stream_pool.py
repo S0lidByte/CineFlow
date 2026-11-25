@@ -343,3 +343,115 @@ def test_trio_streaming_http_pool_teardown_shielded_under_cancellation():
             assert c.is_closed
 
     trio.run(_run)
+
+
+def test_sequential_non_plex_body_stream_promotes_to_foreground():
+    """Established sequential non-Plex playback promotes body requests to foreground workload."""
+    from types import SimpleNamespace
+
+    from program.services.streaming.config import Config
+    from program.services.streaming.media_stream import MediaStream, _iter_raw_chunks
+    from program.services.streaming.telemetry import playback_telemetry_collector
+
+    seen_workloads: list[str] = []
+    playback_telemetry_collector._plex_playbacks.clear()
+
+    file_size = 2_000_000
+
+    def fake_stream(*, method: str, url: str, headers: Any = None, **_kwargs: Any):
+        rng = (headers or {}).get("Range", "bytes=0-")
+        spec = rng.removeprefix("bytes=")
+        s_str, e_str = spec.split("-", 1)
+        s = int(s_str)
+        e = int(e_str) if e_str else file_size - 1
+        resp = MagicMock()
+        resp.is_closed = False
+        if s == 0 and not e_str:
+            resp.status_code = 200
+            resp.headers = {"Content-Length": str(file_size)}
+        else:
+            resp.status_code = 206
+            resp.headers = {
+                "Content-Range": f"bytes {s}-{e}/{file_size}",
+                "Content-Length": str(e - s + 1),
+            }
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=resp)
+        cm.__aexit__ = AsyncMock(return_value=None)
+        return cm
+
+    fake_client = MagicMock()
+    fake_client.stream = fake_stream
+
+    @asynccontextmanager
+    async def fake_admit(kind: str, workload: Any = "neutral"):
+        w = workload() if callable(workload) else workload
+        seen_workloads.append(f"{kind}:{w}")
+        yield
+
+    mock_pool = MagicMock()
+    mock_pool.generation = 1
+    mock_pool.admit = fake_admit
+    mock_pool.acquire_lease = MagicMock(
+        return_value=SimpleNamespace(generation=1, client=fake_client)
+    )
+    mock_pool.release_lease = AsyncMock()
+    mock_pool.heal_on_pool_timeout = AsyncMock(return_value=True)
+
+    stream = _bare_stream(http_pool=mock_pool)
+    stream.config = Config(
+        chunk_size=1048576,
+        activity_timeout_seconds=10,
+        chunk_wait_timeout_seconds=5,
+        connect_timeout_seconds=5,
+    )
+    stream.file_metadata = SimpleNamespace(
+        path="/movies/non_plex_movie.mkv",
+        original_filename="non_plex_movie.mkv",
+        file_size=file_size,
+    )
+    stream.target_url = SimpleNamespace(value="https://cdn.example.test/non_plex.mkv")
+    stream.stream_id = None
+    stream._consumer_end = 1024
+    stream._set_recovery_state = MagicMock()
+    stream._clear_recovery_state = MagicMock()
+    stream.session_statistics = SimpleNamespace(
+        bytes_transferred=0,
+        body_read_count=0,
+        total_session_connections=0,
+        publish=lambda: None,
+    )
+
+    async def _run() -> None:
+        # Unestablished stream (0 transferred) remains neutral
+        async with stream.establish_connection(start=0, end=None):
+            pass
+        # Established non-Plex sequential playback promotes to foreground
+        stream.session_statistics.bytes_transferred = 1024 * 1024
+        stream.session_statistics.body_read_count = 1
+        async with stream.establish_connection(start=1048576, end=None):
+            pass
+
+        # Discrete scan remains neutral even when body playback is active
+        async with stream.establish_connection(start=0, end=65535):
+            pass
+
+    trio.run(_run)
+    assert seen_workloads == ["body:neutral", "body:foreground", "scan:neutral"]
+
+    # Also verify _iter_raw_chunks forwards 256 KiB chunk_size when accepted
+    seen_chunk_sizes: list[int | None] = []
+
+    class RealSigResponse:
+        async def aiter_raw(self, chunk_size: int | None = None):
+            seen_chunk_sizes.append(chunk_size)
+            yield b"ok"
+
+    async def _collect() -> bytes:
+        out = bytearray()
+        async for part in _iter_raw_chunks(RealSigResponse()):
+            out.extend(part)
+        return bytes(out)
+
+    assert trio.run(_collect) == b"ok"
+    assert seen_chunk_sizes == [262_144]

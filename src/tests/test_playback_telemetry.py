@@ -180,3 +180,42 @@ def test_playback_telemetry_redaction():
     assert cdn_refresh_event.details["token"] == "[REDACTED]"
     assert "secrettoken12345" not in cdn_refresh_event.details["url"]
     assert "[REDACTED]" in cdn_refresh_event.details["url"]
+
+
+def test_stream_session_tracker_upstream_throughput_rolling_window():
+    collector = PlaybackTelemetryCollector()
+    collector._sessions.clear()
+    collector._events.clear()
+
+    collector.register_stream_start(
+        stream_id="stream_upstream_1",
+        title="Blade Runner 2049 (2017)",
+        media_item_id=77,
+        provider="realdebrid",
+    )
+
+    eight_mb = 8 * 1024 * 1024
+    collector.record_upstream_delta("stream_upstream_1", eight_mb)
+    snap1 = collector.get_snapshot()
+    assert snap1.active_streams[0].upstream_throughput_mbps > 0.0
+    assert (
+        snap1.aggregate.current_total_upstream_throughput_mbps
+        == snap1.active_streams[0].upstream_throughput_mbps
+    )
+
+    collector.register_stream_start(
+        stream_id="stream_upstream_2",
+        title="Arrival (2016)",
+        media_item_id=78,
+        provider="realdebrid",
+    )
+    collector.record_upstream_statistics(
+        "stream_upstream_2",
+        {"upstream_bytes": 4 * 1024 * 1024, "upstream_transfer_seconds": 0.4},
+    )
+    snap2 = collector.get_snapshot()
+    rates = {s.stream_id: s.upstream_throughput_mbps for s in snap2.active_streams}
+    assert rates["stream_upstream_2"] > 0.0
+    assert snap2.aggregate.current_total_upstream_throughput_mbps == round(
+        rates["stream_upstream_1"] + rates["stream_upstream_2"], 2
+    )

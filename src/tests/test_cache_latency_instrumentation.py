@@ -16,6 +16,10 @@ def test_limiter_queue_is_not_physical_read_time(tmp_path):
         await cache.put("movie", 0, b"x" * 1024)
         assert puts[0].payload_write_s > 0
         assert puts[0].meta_write_s > 0
+        # Evict RAM pre-warm copy so cache.get() exercises physical disk read + _read_limiter wait
+        with cache._thread_lock:
+            cache._memory_chunks.clear()
+            cache._memory_chunks_bytes = 0
         cache._read_limiter.total_tokens = 1
         await cache._read_limiter.acquire()
         async with trio.open_nursery() as nursery:
@@ -39,6 +43,9 @@ def test_cancelled_queued_reader_releases_telemetry(tmp_path):
     async def exercise():
         cache = Cache(CacheConfig(cache_dir=tmp_path))
         await cache.put("movie", 0, b"x")
+        with cache._thread_lock:
+            cache._memory_chunks.clear()
+            cache._memory_chunks_bytes = 0
         cache._read_limiter.total_tokens = 1
         await cache._read_limiter.acquire()
         async with trio.open_nursery() as nursery:

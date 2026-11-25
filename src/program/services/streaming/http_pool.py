@@ -123,20 +123,15 @@ class TrioStreamingHttpPool:
     def http2(self) -> bool:
         """Whether HTTP/2 transport multiplexing is active.
 
-        In HTTP/2, all requests to the same hostname are multiplexed onto a single TCP socket,
-        forcing parallel prefetch workers to share one TCP congestion window and causing chunk contention
-        on non-Cloudflare CDNs. When parallel_prefetch_workers > 1, HTTP/1.1 is enforced to isolate
-        each worker onto its own independent TCP connection and congestion window.
+        HTTP/2 defaults to disabled (``False``) so every HTTP stream/range
+        request and parallel prefetch worker uses an independent HTTP/1.1 TCP
+        connection rather than funneling high-bitrate playback, seeks, and
+        concurrent reads through a single shared TCP congestion window.
+        Callers that explicitly pass ``http2=True`` can still opt in.
         """
         if self._http2_configured is not None:
             return self._http2_configured
-        try:
-            from program.settings import settings_manager
-
-            workers = int(settings_manager.settings.stream.parallel_prefetch_workers)
-            return bool(workers <= 1)
-        except Exception:
-            return True
+        return False
 
     def register_foreground_pressure_callback(
         self, callback: Callable[[], bool] | None

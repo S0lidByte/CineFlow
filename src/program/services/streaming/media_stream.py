@@ -1,6 +1,7 @@
+import inspect
 import re
 import threading
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -575,6 +576,26 @@ if TYPE_CHECKING:
     from pyfuse3 import FileHandleT
 else:
     FileHandleT = Any
+
+
+_STREAM_READ_CHUNK_SIZE = 262_144
+
+
+def _iter_raw_chunks(
+    response: Any, chunk_size: int = _STREAM_READ_CHUNK_SIZE
+) -> AsyncIterator[bytes]:
+    """Iterate response body with a larger buffer when response.aiter_raw supports chunk_size."""
+    aiter_raw = response.aiter_raw
+    try:
+        params = inspect.signature(aiter_raw).parameters
+        accepts_chunk_size = "chunk_size" in params or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+    except (TypeError, ValueError):
+        accepts_chunk_size = False
+    if accepts_chunk_size:
+        return aiter_raw(chunk_size=chunk_size)
+    return aiter_raw()
 
 
 class MediaStream:
@@ -1183,7 +1204,7 @@ class MediaStream:
                             with trio.fail_after(
                                 self.config.chunk_wait_timeout_seconds
                             ):
-                                async for part in response.aiter_raw():
+                                async for part in _iter_raw_chunks(response):
                                     data.extend(part)
                                     if len(data) > chunk.size:
                                         raise ValueError(
@@ -2411,7 +2432,7 @@ class MediaStream:
                 response=response,
                 start_position=chunk_aligned_start,
                 current_read_position=chunk_aligned_start,
-                reader=response.aiter_raw(),
+                reader=_iter_raw_chunks(response),
             )
             self._active_stream_connection = stream_connection
 
@@ -3012,6 +3033,8 @@ class MediaStream:
                 if playback_telemetry_collector.is_media_foreground(
                     self.file_metadata.path
                 ):
+                    return "foreground"
+                if request_kind == "body" and self._is_foreground_eligible():
                     return "foreground"
             except Exception:
                 pass
