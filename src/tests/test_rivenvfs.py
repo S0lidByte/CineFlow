@@ -1329,10 +1329,8 @@ def test_full_sync_removed_open_directory_survives_until_release(mock_vfs):
 def test_apply_fuse_sysctl_tuning_writes_bdi_and_matching_connection(
     tmp_path, monkeypatch
 ):
-    """FIX-1: Post-mount sysfs tuning sets read_ahead_kb and queue depths for mount."""
+    """FIX-1: Post-mount sysfs tuning uses mountinfo (never stats FUSE mount) and tunes only matching conn."""
     import os
-    from pathlib import Path
-    from types import SimpleNamespace
 
     from program.services.filesystem.vfs.rivenvfs import _apply_fuse_sysctl_tuning
 
@@ -1360,26 +1358,144 @@ def test_apply_fuse_sysctl_tuning_writes_bdi_and_matching_connection(
     (target_conn / "congestion_threshold").write_text("9\n")
     (other_conn / "max_background").write_text("12\n")
 
+    escaped_mount = str(os.path.normpath(os.path.abspath(str(mount_dir)))).replace(
+        " ", "\\040"
+    )
+    mountinfo = tmp_path / "mountinfo"
+    mountinfo.write_text(
+        f"142 35 0:42 / {escaped_mount} rw,relatime shared:1 - fuse.rivenvfs rivenvfs rw\n",
+        encoding="utf-8",
+    )
+
     real_stat = os.stat
 
-    def _mock_stat(path, *args, **kwargs):
-        st = real_stat(path, *args, **kwargs)
-        if path == mount_dir or str(path) == str(mount_dir):
-            return SimpleNamespace(st_dev=42, st_mode=st.st_mode)
-        return st
+    def _forbid_mount_stat(path, *args, **kwargs):
+        if os.path.normpath(str(path)) == os.path.normpath(str(mount_dir)):
+            raise AssertionError("os.stat(mountpoint) must never be called pre-loop")
+        return real_stat(path, *args, **kwargs)
 
-    monkeypatch.setattr(os, "stat", _mock_stat)
-    monkeypatch.setattr(os, "major", lambda dev: 0, raising=False)
-    monkeypatch.setattr(os, "minor", lambda dev: int(dev), raising=False)
+    monkeypatch.setattr(os, "stat", _forbid_mount_stat)
 
-    assert Path(mount_dir).exists()
     _apply_fuse_sysctl_tuning(
         mount_dir,
         sysfs_root=sysfs_root,
         bdi_root=_FakeBdiRoot(),  # type: ignore[arg-type]
+        mountinfo_path=mountinfo,
     )
 
     assert ra_file.read_text().strip() == "1024"
     assert (target_conn / "max_background").read_text().strip() == "64"
     assert (target_conn / "congestion_threshold").read_text().strip() == "48"
     assert (other_conn / "max_background").read_text().strip() == "12"
+
+
+def test_apply_fuse_sysctl_tuning_skips_unknown_connection_and_contains_oserror(
+    tmp_path,
+):
+    """FIX-1: Unidentified mounts skip tuning instead of modifying other mounts; OSError never escapes."""
+    from pathlib import Path
+
+    from program.services.filesystem.vfs.rivenvfs import _apply_fuse_sysctl_tuning
+
+    mount_dir = tmp_path / "mnt"
+    mount_dir.mkdir()
+
+    sysfs_root = tmp_path / "fuse_connections"
+    other_conn = sysfs_root / "99"
+    other_conn.mkdir(parents=True)
+    (other_conn / "max_background").write_text("12\n")
+
+    # Case 1: mountinfo lacks entry -> must NOT touch conn 99
+    empty_mountinfo = tmp_path / "mountinfo_empty"
+    empty_mountinfo.write_text("", encoding="utf-8")
+    _apply_fuse_sysctl_tuning(
+        mount_dir,
+        sysfs_root=sysfs_root,
+        bdi_root=tmp_path / "missing_bdi",
+        mountinfo_path=empty_mountinfo,
+    )
+    assert (other_conn / "max_background").read_text().strip() == "12"
+
+    # Case 2: mountinfo resolves conn 42, but conn 42 does not exist -> must NOT touch conn 99
+    mountinfo_42 = tmp_path / "mountinfo_42"
+    mountinfo_42.write_text(
+        f"142 35 0:42 / {mount_dir} rw - fuse.rivenvfs rivenvfs rw\n",
+        encoding="utf-8",
+    )
+    _apply_fuse_sysctl_tuning(
+        mount_dir,
+        sysfs_root=sysfs_root,
+        bdi_root=tmp_path / "missing_bdi",
+        mountinfo_path=mountinfo_42,
+    )
+    assert (other_conn / "max_background").read_text().strip() == "12"
+
+    # Case 3: sysfs probes raise PermissionError -> must return silently without raising
+    class _RestrictedPath:
+        def exists(self) -> bool:
+            raise PermissionError("restricted sysfs")
+
+        def __truediv__(self, _name: str):
+            return self
+
+        def is_dir(self) -> bool:
+            raise PermissionError("restricted sysfs")
+
+    _apply_fuse_sysctl_tuning(
+        mount_dir,
+        sysfs_root=_RestrictedPath(),  # type: ignore[arg-type]
+        bdi_root=_RestrictedPath(),  # type: ignore[arg-type]
+        mountinfo_path=mountinfo_42,
+    )
+    assert isinstance(Path(mountinfo_42), Path)
+
+
+def test_mountpoint_lifecycle_defers_sysctl_until_pyfuse3_main_starts(
+    mock_vfs, monkeypatch
+):
+    """FIX-1: Tuning must only run after pyfuse3.main() starts serving FUSE requests."""
+    import program.services.filesystem.vfs.rivenvfs as vfs_mod
+
+    events: list[str] = []
+    main_started = trio.Event()
+    tuning_done = trio.Event()
+    received_mountpoint: str | None = None
+    trio_token: trio.lowlevel.TrioToken | None = None
+
+    async def fake_main() -> None:
+        events.append("main_start")
+        main_started.set()
+        await trio.sleep_forever()
+
+    def _record_tuning(mountpoint: str) -> None:
+        nonlocal received_mountpoint
+        assert (
+            main_started.is_set()
+        ), "post-mount tuning ran before pyfuse3.main started"
+        received_mountpoint = mountpoint
+        events.append("tuning")
+        tuning_done.set()
+
+    def fake_apply_sysctl(mountpoint: str) -> None:
+        assert trio_token is not None
+        trio.from_thread.run_sync(_record_tuning, mountpoint, trio_token=trio_token)
+
+    monkeypatch.setattr(mock_vfs, "_prepare_mountpoint", lambda _m: None)
+    monkeypatch.setattr(mock_vfs, "_cleanup_mountpoint", lambda _m: None)
+    monkeypatch.setattr(
+        vfs_mod.settings_manager.settings.downloaders, "proxy_url", None
+    )
+    monkeypatch.setattr(vfs_mod.pyfuse3, "init", lambda *a, **kw: events.append("init"))
+    monkeypatch.setattr(vfs_mod.pyfuse3, "main", fake_main)
+    monkeypatch.setattr(vfs_mod, "_apply_fuse_sysctl_tuning", fake_apply_sysctl)
+
+    async def _run() -> None:
+        nonlocal trio_token
+        trio_token = trio.lowlevel.current_trio_token()
+        async with mock_vfs.mountpoint_lifecycle():
+            with trio.fail_after(2.0):
+                await tuning_done.wait()
+
+    trio.run(_run)
+    assert events == ["init", "main_start", "tuning"]
+    assert received_mountpoint == mock_vfs._mountpoint

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import errno
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -133,86 +134,152 @@ class CachedDirectoryEntry(TypedDict):
     is_directory: bool
 
 
+_MOUNTINFO_ESCAPE_RE = re.compile(r"\\([0-7]{3})")
+
+
+def _unescape_mountinfo_path(raw: str) -> str:
+    """Decode octal escape sequences (e.g. ``\\040``) in ``/proc/self/mountinfo``."""
+    return _MOUNTINFO_ESCAPE_RE.sub(lambda m: chr(int(m.group(1), 8)), raw)
+
+
+def _resolve_mount_device_ids(
+    mountpoint: str | Path,
+    *,
+    mountinfo_path: Path = Path("/proc/self/mountinfo"),
+) -> tuple[int, int] | None:
+    """Resolve ``(major, minor)`` for ``mountpoint`` from ``/proc/self/mountinfo``.
+
+    Reads procfs directly without touching ``mountpoint`` (no ``os.stat`` or
+    ``Path.resolve`` on the FUSE root), preventing pre-loop FUSE deadlocks.
+    """
+    abs_path = os.path.normpath(os.path.abspath(str(mountpoint)))
+    targets = {abs_path}
+    try:
+        parent_real = os.path.realpath(os.path.dirname(abs_path))
+        targets.add(
+            os.path.normpath(os.path.join(parent_real, os.path.basename(abs_path)))
+        )
+    except OSError:
+        pass
+
+    try:
+        content = mountinfo_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.debug(f"FUSE sysctl tuning: could not read {mountinfo_path}: {exc}")
+        return None
+
+    matched: tuple[int, int] | None = None
+    for line in content.splitlines():
+        left, sep, right = line.partition(" - ")
+        if not sep:
+            continue
+        left_fields = left.split()
+        right_fields = right.split()
+        if len(left_fields) < 5 or not right_fields:
+            continue
+        fs_type = right_fields[0]
+        if not (fs_type == "fuse" or fs_type.startswith("fuse.")):
+            continue
+        mount_path = os.path.normpath(_unescape_mountinfo_path(left_fields[4]))
+        if mount_path not in targets:
+            continue
+        dev_id = left_fields[2]
+        if ":" not in dev_id:
+            continue
+        major_s, minor_s = dev_id.split(":", 1)
+        try:
+            matched = (int(major_s), int(minor_s))
+        except ValueError:
+            continue
+    return matched
+
+
 def _apply_fuse_sysctl_tuning(
     mountpoint: str | Path | None = None,
     *,
     sysfs_root: Path = Path("/sys/fs/fuse/connections"),
     bdi_root: Path = Path("/sys/class/bdi"),
+    mountinfo_path: Path = Path("/proc/self/mountinfo"),
 ) -> None:
     """Apply FUSE kernel queue / readahead tuning post-mount via sysfs.
 
-    pyfuse3 passes mount options to ``libfuse3``; numeric connection-tuning
-    options (``max_readahead``, ``max_background``, ``congestion_threshold``)
-    are rejected at mount time by ``fuse_session_new``, forcing fallback to
-    baseline mount options where the Linux kernel defaults to
-    ``read_ahead_kb = 128`` (128 KiB) and ``max_background = 12``.
-
-    Writing post-mount to:
+    Resolves the mount's ``major:minor`` device identity solely via
+    ``/proc/self/mountinfo`` (never ``os.stat(mountpoint)``) and applies:
     1. ``/sys/class/bdi/<major>:<minor>/read_ahead_kb = 1024`` (1 MiB kernel
        sequential readahead)
     2. ``/sys/fs/fuse/connections/<minor>/max_background = 64`` and
        ``congestion_threshold = 48``
 
-    restores 1 MiB coalesced sequential FUSE reads and wide background queueing.
-    Safe on non-Linux hosts and unprivileged/read-only sysfs containers;
-    unwritable or absent sysfs paths are logged at DEBUG level and ignored.
+    Skips unrelated FUSE connections if the mount's connection cannot be
+    identified, and contains all ``OSError`` failures at DEBUG level so
+    optional sysfs tuning never blocks VFS mount readiness.
     """
-    dev_major: int | None = None
-    dev_minor: int | None = None
-    if mountpoint is not None:
-        try:
-            st_dev = os.stat(mountpoint).st_dev
-            major_fn = getattr(os, "major", None)
-            minor_fn = getattr(os, "minor", None)
-            if callable(major_fn) and callable(minor_fn):
-                dev_major = int(major_fn(st_dev))  # type: ignore[arg-type]
-                dev_minor = int(minor_fn(st_dev))  # type: ignore[arg-type]
-        except OSError as exc:
-            logger.debug(f"FUSE sysctl tuning: could not stat {mountpoint}: {exc}")
+    dev_ids = (
+        _resolve_mount_device_ids(mountpoint, mountinfo_path=mountinfo_path)
+        if mountpoint is not None
+        else None
+    )
+    if dev_ids is None:
+        logger.debug(
+            f"FUSE sysctl tuning skipped: mount device identity unavailable for {mountpoint!r}"
+        )
+        return
 
+    dev_major, dev_minor = dev_ids
     applied: list[str] = []
     skipped: list[str] = []
 
-    if dev_major is not None and dev_minor is not None and bdi_root.exists():
-        bdi_id = f"{dev_major}:{dev_minor}"
-        ra_path = bdi_root / bdi_id / "read_ahead_kb"
-        if ra_path.exists():
+    try:
+        if bdi_root.exists():
+            bdi_id = f"{dev_major}:{dev_minor}"
+            ra_path = bdi_root / bdi_id / "read_ahead_kb"
             try:
-                ra_path.write_text("1024\n")
-                applied.append(f"bdi/{bdi_id}/read_ahead_kb=1024")
-            except Exception as exc:
+                if ra_path.exists():
+                    ra_path.write_text("1024\n")
+                    applied.append(f"bdi/{bdi_id}/read_ahead_kb=1024")
+                else:
+                    skipped.append(f"bdi/{bdi_id}/read_ahead_kb")
+            except OSError as exc:
                 logger.debug(f"FUSE sysctl tuning: could not write {ra_path}: {exc}")
                 skipped.append(f"bdi/{bdi_id}/read_ahead_kb")
-        else:
-            skipped.append(f"bdi/{bdi_id}/read_ahead_kb")
+    except OSError as exc:
+        logger.debug(f"FUSE sysctl tuning: could not probe {bdi_root}: {exc}")
 
-    if sysfs_root.exists():
-        tuning: dict[str, str] = {
-            "max_background": "64",
-            "congestion_threshold": "48",
-        }
-        conn_dirs: list[Path] = []
-        if dev_minor is not None and (sysfs_root / str(dev_minor)).is_dir():
-            conn_dirs = [sysfs_root / str(dev_minor)]
-        else:
-            conn_dirs = [d for d in sysfs_root.iterdir() if d.is_dir()]
+    try:
+        if sysfs_root.exists():
+            conn_dir = sysfs_root / str(dev_minor)
+            try:
+                is_conn_dir = conn_dir.is_dir()
+            except OSError as exc:
+                logger.debug(f"FUSE sysctl tuning: could not inspect {conn_dir}: {exc}")
+                is_conn_dir = False
 
-        for conn_dir in conn_dirs:
-            for knob, value in tuning.items():
-                knob_path = conn_dir / knob
-                if not knob_path.exists():
-                    skipped.append(f"{conn_dir.name}/{knob}")
-                    continue
-                try:
-                    knob_path.write_text(value + "\n")
-                    applied.append(f"{conn_dir.name}/{knob}={value}")
-                except Exception as exc:
-                    logger.debug(
-                        f"FUSE sysctl tuning: could not write {knob_path}: {exc}"
-                    )
-                    skipped.append(f"{conn_dir.name}/{knob}")
-    else:
-        logger.debug(f"FUSE sysctl tuning: {sysfs_root} not found")
+            if not is_conn_dir:
+                logger.debug(
+                    f"FUSE sysctl tuning: connection {conn_dir} not found; skipping"
+                )
+            else:
+                tuning: dict[str, str] = {
+                    "max_background": "64",
+                    "congestion_threshold": "48",
+                }
+                for knob, value in tuning.items():
+                    knob_path = conn_dir / knob
+                    try:
+                        if not knob_path.exists():
+                            skipped.append(f"{conn_dir.name}/{knob}")
+                            continue
+                        knob_path.write_text(value + "\n")
+                        applied.append(f"{conn_dir.name}/{knob}={value}")
+                    except OSError as exc:
+                        logger.debug(
+                            f"FUSE sysctl tuning: could not write {knob_path}: {exc}"
+                        )
+                        skipped.append(f"{conn_dir.name}/{knob}")
+        else:
+            logger.debug(f"FUSE sysctl tuning: {sysfs_root} not found")
+    except OSError as exc:
+        logger.debug(f"FUSE sysctl tuning: could not probe {sysfs_root}: {exc}")
 
     if applied:
         logger.log(
@@ -580,7 +647,6 @@ class RivenVFS(pyfuse3.Operations):
 
             try:
                 pyfuse3.init(self, self._mountpoint, fuse_options)
-                _apply_fuse_sysctl_tuning(self._mountpoint)
             except RuntimeError:
                 # Older kernels may not recognise the tuning options.  Retry with the
                 # minimal option set so the mount still succeeds.
@@ -591,11 +657,6 @@ class RivenVFS(pyfuse3.Operations):
                 fuse_options_fallback = set(pyfuse3.default_options)
                 fuse_options_fallback |= {"fsname=rivenvfs", "allow_other"}
                 pyfuse3.init(self, self._mountpoint, fuse_options_fallback)
-                # PERF-1b: Even when extended mount options are rejected, apply
-                # kernel queue / readahead tuning via bdi/read_ahead_kb and
-                # /sys/fs/fuse/connections post-mount so sequential streaming can
-                # coalesce FUSE reads into 1 MiB blocks instead of 128 KiB ops.
-                _apply_fuse_sysctl_tuning(self._mountpoint)
 
             self.mounted = True
             self._set_state(VFSState.MOUNTED)
@@ -610,6 +671,9 @@ class RivenVFS(pyfuse3.Operations):
                 async with trio_util.run_and_cancelling(self._monitor_stream_timeouts):
                     async with trio.open_nursery() as nursery:
                         self.stream_nursery = nursery
+                        # Defer sysfs/bdi tuning until pyfuse3.main() is running so
+                        # FUSE_INIT finishes first and the mount never blocks pre-loop.
+                        nursery.start_soon(self._apply_post_mount_tuning)
 
                         from program.services.streaming.http_pool import (
                             TrioStreamingHttpPool,
@@ -648,6 +712,11 @@ class RivenVFS(pyfuse3.Operations):
             self.mounted = False
             if not self._stop_event.is_set():
                 self._set_state(VFSState.FAILED)
+
+    async def _apply_post_mount_tuning(self) -> None:
+        """Apply FUSE sysfs/BDI tuning once ``pyfuse3.main()`` is serving requests."""
+        await trio.sleep(0.1)
+        await trio.to_thread.run_sync(_apply_fuse_sysctl_tuning, self._mountpoint)
 
     async def _shed_stalled_streams(self) -> None:
         """Close timed-out or zero-progress streams to free httpx pool slots."""

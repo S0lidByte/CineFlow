@@ -113,3 +113,90 @@ def test_cache_trim_invalidates_disk_usage_ttl_and_release_hot_capacity_nonblock
         assert cache._hot_reserved_bytes == 0
 
     trio.run(_run)
+
+
+def test_cache_disk_usage_reclaim_reconciled_and_hot_puts_do_not_drain_warm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FIX-3: Eviction credits reclaimed warm bytes so hot/warm puts do not repeatedly drain warm cache."""
+    import shutil
+    from types import SimpleNamespace
+
+    kib = 1024
+    mib = 1024 * 1024
+    warm_dir = tmp_path / "warm"
+    hot_dir = tmp_path / "hot"
+    calls = 0
+
+    cache = Cache(
+        CacheConfig(
+            cache_dir=warm_dir,
+            hot_dir=hot_dir,
+            max_size_bytes=10 * mib,
+            hot_max_size_bytes=512,
+            warm_min_free_mb=0,
+            metrics_enabled=False,
+        )
+    )
+
+    async def _run() -> None:
+        # Seed two 250 KiB warm chunks (hot_max=512 -> written to warm tier).
+        await cache.put("movie.mkv", 0, b"a" * (250 * kib))
+        await cache.put("movie.mkv", 250 * kib, b"b" * (250 * kib))
+        assert cache.has("movie.mkv", 0, 250 * kib - 1)
+        assert cache.has("movie.mkv", 250 * kib, 500 * kib - 1)
+
+        # Enable 1 MiB min-free guard while OS initially reports 800 KiB free (224 KiB deficit).
+        def low_free(_path: Path | str) -> SimpleNamespace:
+            nonlocal calls
+            calls += 1
+            return SimpleNamespace(free=800 * kib)
+
+        monkeypatch.setattr(shutil, "disk_usage", low_free)
+        cache.cfg.warm_min_free_mb = 1
+        # Expand hot cap so subsequent 128-byte writes stay on hot tier.
+        cache.cfg.hot_max_size_bytes = 1 * mib
+
+        # Hot put #1 triggers _evict_lru(0): evicts ONE 250 KiB chunk to close 224 KiB deficit,
+        # reconciling cached free space to 800 + 250 = 1050 KiB >= 1 MiB.
+        await cache.put("movie.mkv", 500 * kib, b"h" * 128)
+        assert not cache.has("movie.mkv", 0, 250 * kib - 1)
+        assert cache.has("movie.mkv", 250 * kib, 500 * kib - 1)
+
+        # Hot puts #2 and #3 within TTL see reconciled 1050 KiB >= 1 MiB and must NOT drain chunk #2.
+        await cache.put("movie.mkv", 500 * kib + 128, b"i" * 128)
+        await cache.put("movie.mkv", 500 * kib + 256, b"j" * 128)
+        assert calls == 1
+        assert cache.has("movie.mkv", 250 * kib, 500 * kib - 1)
+
+    trio.run(_run)
+
+
+def test_cache_disk_usage_concurrent_expiry_coalesced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FIX-3: Concurrent puts arriving on an expired sample coalesce to one disk_usage refresh."""
+    import shutil
+    import time
+    from types import SimpleNamespace
+
+    calls = 0
+
+    def slow_usage(_path: Path | str) -> SimpleNamespace:
+        nonlocal calls
+        calls += 1
+        time.sleep(0.05)
+        return SimpleNamespace(free=500 * 1024 * 1024)
+
+    monkeypatch.setattr(shutil, "disk_usage", slow_usage)
+    cache = _make_cache(tmp_path, max_size_bytes=10 * 1024 * 1024)
+    cache.cfg.warm_min_free_mb = 1
+
+    async def _run() -> None:
+        async with trio.open_nursery() as nursery:
+            for i in range(5):
+                nursery.start_soon(cache.put, f"title_{i}.mkv", 0, b"x" * 1024)
+
+        assert calls == 1
+
+    trio.run(_run)

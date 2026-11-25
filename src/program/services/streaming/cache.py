@@ -401,6 +401,7 @@ class Cache:
         # the min-free guard effective without starving concurrent FUSE/stream tasks.
         self._disk_usage_cache: tuple[float, int] = (0.0, 0)  # (timestamp, free_bytes)
         self._DISK_USAGE_TTL_SECONDS: float = 5.0
+        self._disk_usage_lock = trio.Lock()
 
         # In-memory chunk payload cache (MRU/LRU of recently accessed chunk bytes).
         # Eliminates redundant disk I/O and threadpool hops when FUSE slices a chunk into 128 KiB blocks.
@@ -1530,6 +1531,7 @@ class Cache:
                         # Demoted chunks must NOT be pushed to the head of the LRU queue,
                         # which caused active playback chunks to be immediately evicted.
                         self._hot_bytes = max(0, self._hot_bytes - current.size)
+                        self._adjust_cached_disk_free_locked(-current.size)
                         published = True
 
             if published:
@@ -1625,6 +1627,47 @@ class Cache:
                     lambda keys=keys: self._unlink_cache_files(keys, tiers=tiers)
                 )
 
+    def _adjust_cached_disk_free_locked(self, delta_free_bytes: int) -> None:
+        """Reconcile cached warm free-space estimate after local writes/reclaims.
+
+        Caller holds ``_thread_lock``. Preserves invalidated ``(0.0, 0)`` state
+        and reconciles an active sample so sequential puts do not over-evict
+        from a stale shortfall or let separate hot writes re-evict warm data.
+        """
+        if delta_free_bytes == 0:
+            return
+        cached_ts, cached_free = self._disk_usage_cache
+        if cached_ts > 0.0:
+            self._disk_usage_cache = (cached_ts, max(0, cached_free + delta_free_bytes))
+
+    async def _get_warm_free_bytes_cached(self) -> int | None:
+        """Return cached warm ``cache_dir`` free bytes, coalescing TTL refreshes."""
+        now_mono = time.monotonic()
+        with self._thread_lock:
+            cached_ts, cached_free = self._disk_usage_cache
+        if cached_ts > 0.0 and (now_mono - cached_ts) < self._DISK_USAGE_TTL_SECONDS:
+            return cached_free
+
+        async with self._disk_usage_lock:
+            now_mono = time.monotonic()
+            with self._thread_lock:
+                cached_ts, cached_free = self._disk_usage_cache
+            if (
+                cached_ts > 0.0
+                and (now_mono - cached_ts) < self._DISK_USAGE_TTL_SECONDS
+            ):
+                return cached_free
+            try:
+                usage = await trio.to_thread.run_sync(
+                    shutil.disk_usage, self.cfg.cache_dir
+                )
+                free_bytes = int(usage.free)
+                with self._thread_lock:
+                    self._disk_usage_cache = (time.monotonic(), free_bytes)
+                return free_bytes
+            except Exception:
+                return None
+
     async def _evict_lru(
         self,
         need_bytes: int = 0,
@@ -1646,19 +1689,7 @@ class Cache:
 
         prefetched_free_bytes: int | None = None
         if self.cfg.warm_min_free_mb > 0:
-            now_mono = time.monotonic()
-            cached_ts, cached_free = self._disk_usage_cache
-            if now_mono - cached_ts < self._DISK_USAGE_TTL_SECONDS:
-                prefetched_free_bytes = cached_free
-            else:
-                try:
-                    usage = await trio.to_thread.run_sync(
-                        shutil.disk_usage, self.cfg.cache_dir
-                    )
-                    prefetched_free_bytes = int(usage.free)
-                    self._disk_usage_cache = (time.monotonic(), prefetched_free_bytes)
-                except Exception:
-                    prefetched_free_bytes = None
+            prefetched_free_bytes = await self._get_warm_free_bytes_cached()
 
         try:
             async with self.locks():
@@ -1685,6 +1716,7 @@ class Cache:
                 if target <= 0:
                     return True
 
+                reclaimed_warm_bytes = 0
                 with self._thread_lock:
                     # O(N) single pass: collect all unprotected candidates in LRU order.
                     # This avoids the O(N²) re-scan that occurs when most entries are
@@ -1768,8 +1800,13 @@ class Cache:
                         self._total_bytes -= victim_entry.size
                         if victim_entry.tier == "hot":
                             self._hot_bytes -= victim_entry.size
+                        else:
+                            reclaimed_warm_bytes += victim_entry.size
                         target -= victim_entry.size
                         evicted += 1
+
+                    if reclaimed_warm_bytes > 0:
+                        self._adjust_cached_disk_free_locked(reclaimed_warm_bytes)
 
                     if target > 0 and eviction_succeeded:
                         # Unprotected candidates were exhausted before satisfying the eviction target.
@@ -1842,6 +1879,8 @@ class Cache:
                         self._total_bytes -= cache_entry.size
                         if cache_entry.tier == "hot":
                             self._hot_bytes -= cache_entry.size
+                        else:
+                            self._adjust_cached_disk_free_locked(cache_entry.size)
                     to_unlink.append(k)
                     tiers[k] = cache_entry.tier
                     evicted_entries.append((cache_entry.cache_key, cache_entry.start))
@@ -2510,6 +2549,9 @@ class Cache:
                         self._total_bytes += need
                         if write_tier == "hot":
                             self._hot_bytes += need
+                        prev_warm = prev.size if (prev and prev.tier == "warm") else 0
+                        new_warm = need if write_tier == "warm" else 0
+                        self._adjust_cached_disk_free_locked(prev_warm - new_warm)
                         if (
                             self._memory_chunks_max_bytes > 0
                             and need <= self._memory_chunks_max_bytes
@@ -2596,7 +2638,8 @@ class Cache:
         # fresh free-space from the OS rather than a potentially stale cached value.
         # (The TTL guard in _evict_lru is an optimisation for rapid put() hot paths,
         # not for deliberate administrative trim calls.)
-        self._disk_usage_cache = (0.0, 0)
+        with self._thread_lock:
+            self._disk_usage_cache = (0.0, 0)
         # Primary policy-based trimming
         if self.cfg.two_tier:
             await self._ensure_hot_capacity(0)
