@@ -22,6 +22,7 @@ from program.settings import settings_manager
 from program.utils import benchmark
 from program.utils.async_client import AsyncClient
 from program.utils.proxy_client import ProxyClient
+from program.utils.stream_http import stream_http_timeout
 
 from .chunker import Chunk, Chunker, ChunkRange
 from .config import Config
@@ -638,6 +639,7 @@ class MediaStream:
         self._speculative_failures = 0
         self._speculative_scope: trio.CancelScope | None = None
         self._speculative_done: trio.Event | None = None
+        self._speculative_inflight_chunks: set[tuple[int, int]] = set()
         # Per-failed-URL transport recovery budget: allows re-arming after progression on new URL
         self._last_recovered_url: str | None = None
         self._bytes_transferred_at_last_recovery: int = 0
@@ -739,6 +741,8 @@ class MediaStream:
         self._trace_stream(
             f"Initialized stream with chunk size {self.config.chunk_size / (1024 * 1024):.2f} MB. "
             f"prefetch_chunks={self.config.prefetch_chunks}, "
+            f"parallel_prefetch_workers={self.parallel_prefetch_workers}, "
+            f"chunk_wait_timeout_seconds={self.config.chunk_wait_timeout_seconds}, "
             f"read_ahead={self.config.prefetch_chunks * self.config.chunk_size / (1024 * 1024):.0f} MB, "
             f"file_size={self.file_metadata.file_size} bytes",
         )
@@ -798,14 +802,23 @@ class MediaStream:
             cached_bytes = 0
             in_flight_bytes = 0
             inflight = getattr(self, "_inflight_chunk", None)
+            empty_spec: set[tuple[int, int]] = set()
+            speculative: set[tuple[int, int]] = getattr(
+                self, "_speculative_inflight_chunks", empty_spec
+            )
+            cur_gen = manager.current_generation
             for chunk in window.chunks:
                 remaining = chunk.end - max(position, chunk.start) + 1
                 if chunk.is_cached.value:
                     cached_bytes += remaining
-                elif inflight == (manager.current_generation, chunk.start):
-                    # Only the chunk actually being fetched, never reader reservations.
+                elif (cur_gen, chunk.start) in speculative or inflight == (
+                    cur_gen,
+                    chunk.start,
+                ):
+                    # Count all in-flight chunks (primary + speculative workers).
+                    # Speculative workers may cover non-contiguous chunks; keep scanning
+                    # but stop at the first uncovered gap after both sets.
                     in_flight_bytes += remaining
-                    break
                 else:
                     break
             manager.record_runway(
@@ -1091,10 +1104,16 @@ class MediaStream:
                         self._speculative_peak = max(
                             self._speculative_peak, self._speculative_active
                         )
+                        spec_chunks = getattr(
+                            self, "_speculative_inflight_chunks", None
+                        )
+                        if spec_chunks is not None:
+                            spec_chunks.add((generation, chunk.start))
                         url = self.target_url.value
                         req_context = lease.client.stream(
                             "GET",
                             url,
+                            timeout=self._request_http_timeout(),
                             headers={
                                 "Accept-Encoding": "identity",
                                 "Range": format_range_header(chunk.start, chunk.end),
@@ -1124,12 +1143,15 @@ class MediaStream:
                             if length is not None and int(length) != chunk.size:
                                 raise ValueError("Speculative Content-Length mismatch")
                             data = bytearray()
-                            async for part in response.aiter_raw():
-                                data.extend(part)
-                                if len(data) > chunk.size:
-                                    raise ValueError(
-                                        "Speculative response exceeds requested chunk"
-                                    )
+                            with trio.fail_after(
+                                self.config.chunk_wait_timeout_seconds
+                            ):
+                                async for part in response.aiter_raw():
+                                    data.extend(part)
+                                    if len(data) > chunk.size:
+                                        raise ValueError(
+                                            "Speculative response exceeds requested chunk"
+                                        )
                             if len(data) != chunk.size:
                                 raise ValueError("Truncated speculative response")
                         if not self._transport_generation_live(generation):
@@ -1153,6 +1175,11 @@ class MediaStream:
                         self._speculative_bytes += len(data)
                     finally:
                         self._speculative_active -= 1
+                        spec_chunks = getattr(
+                            self, "_speculative_inflight_chunks", None
+                        )
+                        if spec_chunks is not None:
+                            spec_chunks.discard((generation, chunk.start))
                         with trio.CancelScope(shield=True):
                             await pool.release_lease(lease)
             except httpx.PoolTimeout:
@@ -1283,7 +1310,28 @@ class MediaStream:
                 chunks, self.parallel_prefetch_workers
             )
             primary_done = trio.Event()
-            with trio.CancelScope() as scope:
+            batch_starts = {getattr(chunk, "start", chunk) for chunk in chunks}
+
+            async def wait_for_unowned_demand() -> None:
+                recent_reads = getattr(self, "recent_reads", None)
+                if recent_reads is None:
+                    await trio.sleep_forever()
+                else:
+                    await recent_reads.current_read.wait_value(
+                        lambda read: (
+                            read is not None
+                            and any(
+                                start not in batch_starts
+                                for start in self._uncached_foreground_starts()
+                            )
+                        )
+                    )
+
+            # The nursery is a batch barrier. Demand outside this batch has no
+            # producer here, so waiting for an unrelated speculative body would
+            # stall playback until that body's timeout. Drain its owners first,
+            # then let the main loop dispatch the queued foreground read.
+            async with trio_util.move_on_when(wait_for_unowned_demand) as scope:
                 self._speculative_scope = scope
                 async with trio.open_nursery() as nursery:
                     for span in spec_spans:
@@ -1838,6 +1886,7 @@ class MediaStream:
                                         < first_pending.start
                                     ):
                                         connection.seek(chunk_range=pending_range)
+                                        self._protect_consumer(first_pending.start)
                                         break
                                     if (
                                         first_pending.start
@@ -1898,6 +1947,9 @@ class MediaStream:
                                             connection.seek(
                                                 chunk_range=read.chunk_range
                                             )
+                                            self._protect_consumer(
+                                                read.chunk_range.position
+                                            )
 
                                             break
 
@@ -1925,6 +1977,9 @@ class MediaStream:
                                             connection.seek(
                                                 chunk_range=read.chunk_range
                                             )
+                                            self._protect_consumer(
+                                                read.chunk_range.position
+                                            )
 
                                             break
 
@@ -1948,6 +2003,7 @@ class MediaStream:
                                             < first_pending.start
                                         ):
                                             connection.seek(chunk_range=pending_range)
+                                            self._protect_consumer(first_pending.start)
                                             break
                                         if (
                                             first_pending.start
@@ -2301,6 +2357,9 @@ class MediaStream:
                 yield stream_connection
             finally:
                 self._inflight_chunk = None
+                spec_chunks = getattr(self, "_speculative_inflight_chunks", None)
+                if spec_chunks is not None:
+                    spec_chunks.clear()
                 if self._active_stream_connection is stream_connection:
                     self._active_stream_connection = None
 
@@ -2310,6 +2369,9 @@ class MediaStream:
         # Fence even an idle/cache-only stream before any further refill.
         self.is_killed.value = True
         self._inflight_chunk = None
+        spec_chunks = getattr(self, "_speculative_inflight_chunks", None)
+        if spec_chunks is not None:
+            spec_chunks.clear()
         self._producer_claims.wake_all()
         await self._stop_speculative_workers()
         self._set_recovery_state(StreamRecoveryPhase.IDLE)
@@ -2821,6 +2883,13 @@ class MediaStream:
             should_cache=False,
         )
 
+    def _request_http_timeout(self) -> httpx.Timeout:
+        """Apply this handle's connection budget without mutating pooled clients."""
+        config = getattr(self, "config", None)
+        return stream_http_timeout(
+            connect_timeout=getattr(config, "connect_timeout_seconds", None)
+        )
+
     @asynccontextmanager
     async def establish_connection(
         self,
@@ -2940,6 +3009,7 @@ class MediaStream:
                     async with client.stream(
                         method="GET",
                         url=request_url,
+                        timeout=self._request_http_timeout(),
                         headers=headers,
                         extensions=extensions,
                     ) as stream:

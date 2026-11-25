@@ -2342,7 +2342,7 @@ class RivenVFS(pyfuse3.Operations):
     ) -> None:
         """Read directory entries."""
         try:
-            # Build directory listing
+            # Build directory listing under lock (no awaits inside)
             with self._tree_lock:
                 node = self._inode_to_node.get(fh)
                 parent_inode = (
@@ -2356,20 +2356,30 @@ class RivenVFS(pyfuse3.Operations):
                 for child_node in node.children.values():
                     items.append((child_node.name.encode("utf-8"), child_node.inode))
 
-                # Send directory entries starting from offset
-                for idx in range(start_id, len(items)):
-                    name_bytes, child_ino = items[idx]
+            # Send directory entries outside the lock — getattr acquires _tree_lock
+            # briefly itself; holding it here across 500+ async checkpoints blocks
+            # concurrent _sync_full and other VFS operations for seconds (BUG-1).
+            for idx in range(start_id, len(items)):
+                name_bytes, child_ino = items[idx]
 
-                    if child_ino:
+                if child_ino:
+                    try:
                         attrs = await self.getattr(child_ino)
-                    else:
-                        attrs = pyfuse3.EntryAttributes()
+                    except pyfuse3.FUSEError as err:
+                        if err.errno == errno.ENOENT:
+                            # Child entry was concurrently unlinked between snapshot and getattr.
+                            # Skip this entry so the rest of the directory can still be read (BUG-POST-2).
+                            continue
+                        raise
+                else:
+                    attrs = pyfuse3.EntryAttributes()
 
-                    if not pyfuse3.readdir_reply(
-                        token, pyfuse3.FileNameT(name_bytes), attrs, idx + 1
-                    ):
-                        break
-                    if name_bytes not in (b".", b".."):
+                if not pyfuse3.readdir_reply(
+                    token, pyfuse3.FileNameT(name_bytes), attrs, idx + 1
+                ):
+                    break
+                if name_bytes not in (b".", b".."):
+                    with self._tree_lock:
                         self._lookup_counts[child_ino] = (
                             self._lookup_counts.get(child_ino, 0) + 1
                         )

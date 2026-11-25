@@ -54,14 +54,14 @@ class ChunkCacheNotifier:
             if emitter is not None:
                 emitter.value = False
         else:
-            # Fallback scan across emitters matching cache_key
-            for (ck, _), emitter in list(self.emitters.items()):
+            # Fallback: _start_to_index evicted the (cache_key, start) mapping so we
+            # cannot pinpoint the exact emitter index.  Conservatively reset every
+            # emitter for this cache_key that is currently True.  The Chunk.is_cached
+            # property will authoritatively re-set any false negatives on next access
+            # via Cache.has(), so this only causes a transient re-fetch check, never a stall.
+            for (ck, _idx), emitter in list(self.emitters.items()):
                 if ck == cache_key and emitter.value:
-                    from .cache import Cache
-
-                    if Cache in di:
-                        # Authoritative reconciliation happens on property access
-                        pass
+                    emitter.value = False
 
     def clear_emitter(self, *, chunk: "Chunk") -> None:
         """Clear the emitter for a specific chunk."""

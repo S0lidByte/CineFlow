@@ -134,10 +134,17 @@ def test_speculative_invalid_range_releases_claim_without_cache_publish() -> Non
         (b"abcd", "bytes 4-7/9", "4", False),
     ],
 )
+@pytest.mark.parametrize("trickle", [False, True])
 def test_speculative_exact_range_and_payload_integrity(
-    payload: bytes, content_range: str, content_length: str | None, valid: bool
+    payload: bytes,
+    content_range: str,
+    content_length: str | None,
+    valid: bool,
+    trickle: bool,
 ) -> None:
     from contextlib import asynccontextmanager
+
+    from trio.testing import MockClock
 
     from program.services.streaming.cache import CachePutResult
     from program.services.streaming.session_statistics import SessionStatistics
@@ -150,6 +157,11 @@ def test_speculative_exact_range_and_payload_integrity(
             return None
 
         async def aiter_raw(self):
+            if trickle:
+                for byte in payload:
+                    await trio.sleep(0.6)
+                    yield bytes([byte])
+                return
             yield payload
 
     if content_length is not None:
@@ -170,8 +182,10 @@ def test_speculative_exact_range_and_payload_integrity(
             return SimpleNamespace(client=SimpleNamespace(stream=self.stream))
 
         @asynccontextmanager
-        async def stream(self, method, url, *, headers):
+        async def stream(self, method, url, *, headers, timeout):
             self.headers = headers
+            assert timeout.connect == 17
+            assert timeout.read == 30
             yield Response()
 
         async def release_lease(self, lease):
@@ -179,6 +193,9 @@ def test_speculative_exact_range_and_payload_integrity(
 
     async def run():
         stream = MediaStream.__new__(MediaStream)
+        stream.config = SimpleNamespace(
+            chunk_wait_timeout_seconds=1, connect_timeout_seconds=17
+        )
         stream._producer_claims = _ProducerClaims()
         stream._delivery_registry = SimpleNamespace(
             get_pending_starts=lambda: [], has_pending=lambda _: False
@@ -212,8 +229,8 @@ def test_speculative_exact_range_and_payload_integrity(
         assert pool.released == 1
         assert stream._producer_claims._owners == {}
         assert stream._speculative_active == 0
-        assert stream._speculative_failures == (0 if valid else 1)
-        if valid:
+        assert stream._speculative_failures == (0 if valid and not trickle else 1)
+        if valid and not trickle:
             stream._cache_chunk.assert_awaited_once_with(
                 start=4, data=b"abcd", admission="prefetch"
             )
@@ -234,11 +251,13 @@ def test_speculative_exact_range_and_payload_integrity(
                 if (content_length is None and content_range == "bytes 4-7/8")
                 else 0
             )
+            if trickle:
+                expected_bytes = int(valid or expected_bytes > 0)
             assert stream.session_statistics.upstream_bytes == expected_bytes
             assert stream.session_statistics.speculative_bytes == expected_bytes
             assert stream._speculative_bytes == 0
 
-    trio.run(run)
+    trio.run(run, clock=MockClock(autojump_threshold=0))
 
 
 def test_parallel_batch_bounds_workers_and_waits_for_cancellation() -> None:
@@ -353,8 +372,9 @@ class _Harness:
         stream.session_statistics = SessionStatistics()
         stream.adaptive_prefetch = SimpleNamespace(
             current_generation=0,
-            should_abort_prefetch=lambda g: g
-            != stream.adaptive_prefetch.current_generation,
+            should_abort_prefetch=lambda g: (
+                g != stream.adaptive_prefetch.current_generation
+            ),
             record_provider_fetch=MagicMock(),
             calculate_window=lambda **_: workers,
             should_prefetch_now=lambda: True,
@@ -424,7 +444,7 @@ class _Harness:
         await trio.lowlevel.checkpoint()
         self.leases -= 1
 
-    def response(self, method, url, *, headers):
+    def response(self, method, url, *, headers, timeout):
         from contextlib import asynccontextmanager
 
         @asynccontextmanager
@@ -974,6 +994,55 @@ def test_run_abandoned_worker_requeues_and_foreground_delivers():
             assert h.stream._producer_claims._owners == {}
 
     trio.run(run)
+
+
+@pytest.mark.parametrize("workers", [2, 4])
+@pytest.mark.parametrize("primary_finishes", [False, True])
+def test_stalled_speculation_does_not_block_demand_outside_batch(
+    workers, primary_finishes
+):
+    """Unrelated playback demand must not wait for a speculative HTTP timeout."""
+    from ordered_set import OrderedSet
+    from trio.testing import MockClock
+
+    async def run():
+        h = _Harness(workers)
+        h.start_read()
+        batch_done = trio.Event()
+        demand_start = (workers + 1) * 4
+
+        async def primary(chunks, **kwargs):
+            if not primary_finishes:
+                await trio.sleep_forever()
+            for chunk in chunks:
+                chunk.emit_cache_signal()
+
+        async def batch():
+            await h.stream._parallel_prefetch(
+                OrderedSet(h.chunks[1 : workers + 1]), 0, primary
+            )
+            batch_done.set()
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(batch)
+            for index in range(2, workers + 1):
+                await h.entered[index].wait()  # These bodies never return bytes.
+            await h.stream._delivery_registry.register_pending(demand_start)
+            h.stream._consumer_end = demand_start + 3
+            h.stream.recent_reads.current_read.value = SimpleNamespace(
+                read_type="body_read", chunk_range=h.chunk_range(position=demand_start)
+            )
+            with trio.move_on_after(1) as deadline:
+                await batch_done.wait()
+            nursery.cancel_scope.cancel()
+        assert not deadline.cancelled_caught
+        assert not h.stored  # Cancelled speculative bytes were not published.
+        assert h.active == h.leases == h.background_permits == 0
+        assert h.stream._producer_claims._owners == {}
+        assert h.stream._delivery_registry.has_pending(demand_start)
+        assert h.stream._speculative_scope is h.stream._speculative_done is None
+
+    trio.run(run, clock=MockClock(autojump_threshold=0))
 
 
 def test_foreground_claim_prevents_speculative_duplicate():

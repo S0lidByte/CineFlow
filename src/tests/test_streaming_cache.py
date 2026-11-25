@@ -548,3 +548,44 @@ def test_cache_memory_chunks_lru_eviction(tmp_path: Path) -> None:
         assert k1 in cache._memory_chunks
 
     trio.run(_run)
+
+
+def test_cache_lru_eviction_shortfall_sets_failure_and_refuses_prefetch(
+    tmp_path: Path,
+) -> None:
+    """When candidates are exhausted before target deficit is cleared, eviction must fail and refuse prefetch."""
+    from program.services.streaming.cache import CachePutResult
+
+    # Set hard cap to 200 bytes
+    cache = _make_cache(tmp_path, max_size_bytes=200)
+
+    async def _run() -> None:
+        p1 = b"A" * 120
+        p2 = b"B" * 50
+        p3 = b"C" * 80
+
+        # Put p1 (120 bytes) and protect it with an active playback lease
+        await cache.put("movie.mkv", 0, p1, stream_id="active_stream_1")
+        # Put p2 (50 bytes) unprotected
+        await cache.put("movie.mkv", 120, p2)
+
+        # Cache currently has 170 bytes.
+        # Now attempt to put p3 (80 bytes) as prefetch.
+        # Projected size = 170 + 80 = 250 > 200 hard cap. Target = at least 50 bytes.
+        # Only p2 (50 bytes) can be evicted. After evicting p2, projected is still 200 (hard cap)
+        # or watermark target leaves a remaining deficit.
+        # Evicting p2 alone frees 50 bytes. If target requires more (to reach low watermark),
+        # candidates are exhausted while target remains > 0.
+        res = await cache.put(
+            "movie.mkv",
+            170,
+            p3,
+            admission="prefetch",
+        )
+
+        # Prefetch must be refused or eviction failure recorded
+        assert cache.eviction_refusals >= 1
+        # p1 (active playback) must NOT have been evicted
+        assert cache.has("movie.mkv", 0, 119)
+
+    trio.run(_run)
