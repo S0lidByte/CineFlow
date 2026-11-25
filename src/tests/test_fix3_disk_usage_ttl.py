@@ -200,3 +200,71 @@ def test_cache_disk_usage_concurrent_expiry_coalesced(
         assert calls == 1
 
     trio.run(_run)
+
+
+def test_cache_disk_usage_concurrent_shortfall_evicts_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FIX-3: Concurrent callers sampling the same shortfall before locking evict once."""
+    import shutil
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    kib = 1024
+    mib = 1024 * 1024
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "warm",
+            hot_dir=tmp_path / "hot",
+            max_size_bytes=10 * mib,
+            hot_max_size_bytes=512,
+            warm_min_free_mb=0,
+            metrics_enabled=False,
+        )
+    )
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, b"a" * (250 * kib))
+        await cache.put("movie.mkv", 250 * kib, b"b" * (250 * kib))
+
+        calls = 0
+
+        def low_free(_path: Path | str) -> SimpleNamespace:
+            nonlocal calls
+            calls += 1
+            return SimpleNamespace(free=800 * kib)
+
+        monkeypatch.setattr(shutil, "disk_usage", low_free)
+        cache.cfg.warm_min_free_mb = 1
+        cache.cfg.hot_max_size_bytes = 1 * mib
+
+        # Force both callers to complete _get_warm_free_bytes_cached() before acquiring locks().
+        orig_locks = cache.locks
+        arrivals = 0
+        both_sampled = trio.Event()
+
+        @asynccontextmanager
+        async def synced_locks():
+            nonlocal arrivals
+            arrivals += 1
+            if arrivals == 2:
+                both_sampled.set()
+            await both_sampled.wait()
+            async with orig_locks():
+                yield
+
+        monkeypatch.setattr(cache, "locks", synced_locks)
+
+        with trio.fail_after(2.0):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(cache._evict_lru, 0)
+                nursery.start_soon(cache._evict_lru, 0)
+
+        # Follow with real hot-tier put on separate hot_dir; still no extra warm eviction.
+        await cache.put("movie.mkv", 500 * kib, b"h" * 128)
+
+        assert calls == 1
+        assert not cache.has("movie.mkv", 0, 250 * kib - 1)
+        assert cache.has("movie.mkv", 250 * kib, 500 * kib - 1)
+
+    trio.run(_run)

@@ -1695,6 +1695,7 @@ class Cache:
             async with self.locks():
                 with self._thread_lock:
                     warm_bytes = max(0, self._total_bytes - self._hot_bytes)
+                    cached_ts, cached_free = self._disk_usage_cache
                 projected = warm_bytes + need_bytes
                 hard_cap = self.cfg.max_size_bytes
                 warm_high_pct, warm_low_pct = self._effective_warm_watermarks()
@@ -1707,11 +1708,15 @@ class Cache:
                 if projected > hard_cap:
                     target = max(target, projected - hard_cap)
 
-                # Check minimum free disk space constraint (sampled above outside lock)
+                # Check minimum free disk space constraint (sampled above outside lock,
+                # then reconciled with any concurrent in-lock adjustment before deciding).
                 if self.cfg.warm_min_free_mb > 0 and prefetched_free_bytes is not None:
+                    effective_free_bytes = (
+                        cached_free if cached_ts > 0.0 else prefetched_free_bytes
+                    )
                     min_free_bytes = self.cfg.warm_min_free_mb * 1024 * 1024
-                    if prefetched_free_bytes < min_free_bytes:
-                        target = max(target, min_free_bytes - prefetched_free_bytes)
+                    if effective_free_bytes < min_free_bytes:
+                        target = max(target, min_free_bytes - effective_free_bytes)
 
                 if target <= 0:
                     return True
