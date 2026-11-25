@@ -1324,3 +1324,62 @@ def test_full_sync_removed_open_directory_survives_until_release(mock_vfs):
     trio.run(mock_vfs.releasedir, handle)
     assert child.inode not in mock_vfs._inode_to_node
     assert directory.inode not in mock_vfs._inode_to_node
+
+
+def test_apply_fuse_sysctl_tuning_writes_bdi_and_matching_connection(
+    tmp_path, monkeypatch
+):
+    """FIX-1: Post-mount sysfs tuning sets read_ahead_kb and queue depths for mount."""
+    import os
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from program.services.filesystem.vfs.rivenvfs import _apply_fuse_sysctl_tuning
+
+    mount_dir = tmp_path / "mnt"
+    mount_dir.mkdir()
+    bdi_dir = tmp_path / "bdi" / "0_42"
+    bdi_dir.mkdir(parents=True)
+    ra_file = bdi_dir / "read_ahead_kb"
+    ra_file.write_text("128\n")
+
+    class _FakeBdiRoot:
+        def exists(self) -> bool:
+            return True
+
+        def __truediv__(self, name: str):
+            assert name == "0:42"
+            return bdi_dir
+
+    sysfs_root = tmp_path / "fuse_connections"
+    target_conn = sysfs_root / "42"
+    other_conn = sysfs_root / "99"
+    target_conn.mkdir(parents=True)
+    other_conn.mkdir(parents=True)
+    (target_conn / "max_background").write_text("12\n")
+    (target_conn / "congestion_threshold").write_text("9\n")
+    (other_conn / "max_background").write_text("12\n")
+
+    real_stat = os.stat
+
+    def _mock_stat(path, *args, **kwargs):
+        st = real_stat(path, *args, **kwargs)
+        if path == mount_dir or str(path) == str(mount_dir):
+            return SimpleNamespace(st_dev=42, st_mode=st.st_mode)
+        return st
+
+    monkeypatch.setattr(os, "stat", _mock_stat)
+    monkeypatch.setattr(os, "major", lambda dev: 0, raising=False)
+    monkeypatch.setattr(os, "minor", lambda dev: int(dev), raising=False)
+
+    assert Path(mount_dir).exists()
+    _apply_fuse_sysctl_tuning(
+        mount_dir,
+        sysfs_root=sysfs_root,
+        bdi_root=_FakeBdiRoot(),  # type: ignore[arg-type]
+    )
+
+    assert ra_file.read_text().strip() == "1024"
+    assert (target_conn / "max_background").read_text().strip() == "64"
+    assert (target_conn / "congestion_threshold").read_text().strip() == "48"
+    assert (other_conn / "max_background").read_text().strip() == "12"

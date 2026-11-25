@@ -133,6 +133,100 @@ class CachedDirectoryEntry(TypedDict):
     is_directory: bool
 
 
+def _apply_fuse_sysctl_tuning(
+    mountpoint: str | Path | None = None,
+    *,
+    sysfs_root: Path = Path("/sys/fs/fuse/connections"),
+    bdi_root: Path = Path("/sys/class/bdi"),
+) -> None:
+    """Apply FUSE kernel queue / readahead tuning post-mount via sysfs.
+
+    pyfuse3 passes mount options to ``libfuse3``; numeric connection-tuning
+    options (``max_readahead``, ``max_background``, ``congestion_threshold``)
+    are rejected at mount time by ``fuse_session_new``, forcing fallback to
+    baseline mount options where the Linux kernel defaults to
+    ``read_ahead_kb = 128`` (128 KiB) and ``max_background = 12``.
+
+    Writing post-mount to:
+    1. ``/sys/class/bdi/<major>:<minor>/read_ahead_kb = 1024`` (1 MiB kernel
+       sequential readahead)
+    2. ``/sys/fs/fuse/connections/<minor>/max_background = 64`` and
+       ``congestion_threshold = 48``
+
+    restores 1 MiB coalesced sequential FUSE reads and wide background queueing.
+    Safe on non-Linux hosts and unprivileged/read-only sysfs containers;
+    unwritable or absent sysfs paths are logged at DEBUG level and ignored.
+    """
+    dev_major: int | None = None
+    dev_minor: int | None = None
+    if mountpoint is not None:
+        try:
+            st_dev = os.stat(mountpoint).st_dev
+            major_fn = getattr(os, "major", None)
+            minor_fn = getattr(os, "minor", None)
+            if callable(major_fn) and callable(minor_fn):
+                dev_major = int(major_fn(st_dev))  # type: ignore[arg-type]
+                dev_minor = int(minor_fn(st_dev))  # type: ignore[arg-type]
+        except OSError as exc:
+            logger.debug(f"FUSE sysctl tuning: could not stat {mountpoint}: {exc}")
+
+    applied: list[str] = []
+    skipped: list[str] = []
+
+    if dev_major is not None and dev_minor is not None and bdi_root.exists():
+        bdi_id = f"{dev_major}:{dev_minor}"
+        ra_path = bdi_root / bdi_id / "read_ahead_kb"
+        if ra_path.exists():
+            try:
+                ra_path.write_text("1024\n")
+                applied.append(f"bdi/{bdi_id}/read_ahead_kb=1024")
+            except Exception as exc:
+                logger.debug(f"FUSE sysctl tuning: could not write {ra_path}: {exc}")
+                skipped.append(f"bdi/{bdi_id}/read_ahead_kb")
+        else:
+            skipped.append(f"bdi/{bdi_id}/read_ahead_kb")
+
+    if sysfs_root.exists():
+        tuning: dict[str, str] = {
+            "max_background": "64",
+            "congestion_threshold": "48",
+        }
+        conn_dirs: list[Path] = []
+        if dev_minor is not None and (sysfs_root / str(dev_minor)).is_dir():
+            conn_dirs = [sysfs_root / str(dev_minor)]
+        else:
+            conn_dirs = [d for d in sysfs_root.iterdir() if d.is_dir()]
+
+        for conn_dir in conn_dirs:
+            for knob, value in tuning.items():
+                knob_path = conn_dir / knob
+                if not knob_path.exists():
+                    skipped.append(f"{conn_dir.name}/{knob}")
+                    continue
+                try:
+                    knob_path.write_text(value + "\n")
+                    applied.append(f"{conn_dir.name}/{knob}={value}")
+                except Exception as exc:
+                    logger.debug(
+                        f"FUSE sysctl tuning: could not write {knob_path}: {exc}"
+                    )
+                    skipped.append(f"{conn_dir.name}/{knob}")
+    else:
+        logger.debug(f"FUSE sysctl tuning: {sysfs_root} not found")
+
+    if applied:
+        logger.log(
+            "VFS",
+            f"FUSE sysctl tuning applied: {', '.join(applied)}"
+            + (f" (skipped: {', '.join(skipped)})" if skipped else ""),
+        )
+    else:
+        logger.debug(
+            "FUSE sysctl tuning: no knobs written"
+            + (f" (skipped: {', '.join(skipped)})" if skipped else "")
+        )
+
+
 def _serialize_tree_update[R, **P](
     method: Callable[Concatenate[RivenVFS, P], R],
 ) -> Callable[Concatenate[RivenVFS, P], R]:
@@ -192,20 +286,28 @@ class RivenVFS(pyfuse3.Operations):
                 str(cache_dir if cache_dir.exists() else cache_dir.parent)
             )
             free_bytes = int(usage.free)
+            total_bytes = int(usage.total)
         except Exception:
             free_bytes = 0
+            total_bytes = 0
 
         from program.services.streaming.cache_sizing import (
             is_tmpfs_path,
+            measure_directory_bytes,
             resolve_cache_max_bytes,
         )
 
         tmpfs_cap_bytes = max(0, int(self.fs.tmpfs_cache_max_mb)) * 1024 * 1024
+        existing_bytes = (
+            0 if is_tmpfs_path(cache_dir) else measure_directory_bytes(cache_dir)
+        )
 
         sizing = resolve_cache_max_bytes(
             cache_dir,
             size_mb,
             free_bytes=free_bytes,
+            total_bytes=total_bytes,
+            existing_bytes=existing_bytes,
             tmpfs_hard_cap_bytes=tmpfs_cap_bytes,
         )
 
@@ -478,6 +580,7 @@ class RivenVFS(pyfuse3.Operations):
 
             try:
                 pyfuse3.init(self, self._mountpoint, fuse_options)
+                _apply_fuse_sysctl_tuning(self._mountpoint)
             except RuntimeError:
                 # Older kernels may not recognise the tuning options.  Retry with the
                 # minimal option set so the mount still succeeds.
@@ -488,6 +591,11 @@ class RivenVFS(pyfuse3.Operations):
                 fuse_options_fallback = set(pyfuse3.default_options)
                 fuse_options_fallback |= {"fsname=rivenvfs", "allow_other"}
                 pyfuse3.init(self, self._mountpoint, fuse_options_fallback)
+                # PERF-1b: Even when extended mount options are rejected, apply
+                # kernel queue / readahead tuning via bdi/read_ahead_kb and
+                # /sys/fs/fuse/connections post-mount so sequential streaming can
+                # coalesce FUSE reads into 1 MiB blocks instead of 128 KiB ops.
+                _apply_fuse_sysctl_tuning(self._mountpoint)
 
             self.mounted = True
             self._set_state(VFSState.MOUNTED)

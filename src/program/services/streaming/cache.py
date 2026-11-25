@@ -395,6 +395,13 @@ class Cache:
         # Count of refused evictions when all candidates are protected
         self.eviction_refusals: int = 0
 
+        # FIX-3: TTL cache for shutil.disk_usage() inside _evict_lru.
+        # Under heavy disk I/O wait, statfs(2) can stall for tens/hundreds of ms;
+        # checking once every 5s off the event loop and outside _index_lock keeps
+        # the min-free guard effective without starving concurrent FUSE/stream tasks.
+        self._disk_usage_cache: tuple[float, int] = (0.0, 0)  # (timestamp, free_bytes)
+        self._DISK_USAGE_TTL_SECONDS: float = 5.0
+
         # In-memory chunk payload cache (MRU/LRU of recently accessed chunk bytes).
         # Eliminates redundant disk I/O and threadpool hops when FUSE slices a chunk into 128 KiB blocks.
         self._memory_chunks = OrderedDict[str, bytes]()
@@ -1589,11 +1596,11 @@ class Cache:
             return False
 
     async def _release_hot_capacity(self, reserved_bytes: int) -> None:
-        """Release a pending hot-tier reservation and wake blocked writers."""
-        async with self._hot_write_lock:
-            self._hot_reserved_bytes = max(0, self._hot_reserved_bytes - reserved_bytes)
-            self._hot_capacity_changed.set()
-            self._hot_capacity_changed = trio.Event()
+        """Release a pending hot-tier reservation without queueing behind demotion I/O."""
+        await trio.lowlevel.checkpoint()
+        self._hot_reserved_bytes = max(0, self._hot_reserved_bytes - reserved_bytes)
+        self._hot_capacity_changed.set()
+        self._hot_capacity_changed = trio.Event()
 
     async def _unlink_evicted_files(
         self,
@@ -1637,6 +1644,22 @@ class Cache:
         evicted_entries: list[tuple[str, int]] = []
         eviction_succeeded = True
 
+        prefetched_free_bytes: int | None = None
+        if self.cfg.warm_min_free_mb > 0:
+            now_mono = time.monotonic()
+            cached_ts, cached_free = self._disk_usage_cache
+            if now_mono - cached_ts < self._DISK_USAGE_TTL_SECONDS:
+                prefetched_free_bytes = cached_free
+            else:
+                try:
+                    usage = await trio.to_thread.run_sync(
+                        shutil.disk_usage, self.cfg.cache_dir
+                    )
+                    prefetched_free_bytes = int(usage.free)
+                    self._disk_usage_cache = (time.monotonic(), prefetched_free_bytes)
+                except Exception:
+                    prefetched_free_bytes = None
+
         try:
             async with self.locks():
                 with self._thread_lock:
@@ -1653,15 +1676,11 @@ class Cache:
                 if projected > hard_cap:
                     target = max(target, projected - hard_cap)
 
-                # Check minimum free disk space constraint
-                if self.cfg.warm_min_free_mb > 0:
-                    try:
-                        free_bytes = shutil.disk_usage(self.cfg.cache_dir).free
-                        min_free_bytes = self.cfg.warm_min_free_mb * 1024 * 1024
-                        if free_bytes < min_free_bytes:
-                            target = max(target, min_free_bytes - free_bytes)
-                    except Exception:
-                        pass
+                # Check minimum free disk space constraint (sampled above outside lock)
+                if self.cfg.warm_min_free_mb > 0 and prefetched_free_bytes is not None:
+                    min_free_bytes = self.cfg.warm_min_free_mb * 1024 * 1024
+                    if prefetched_free_bytes < min_free_bytes:
+                        target = max(target, min_free_bytes - prefetched_free_bytes)
 
                 if target <= 0:
                     return True
@@ -1980,8 +1999,12 @@ class Cache:
                     # age out on the LRU pass.
                     if random.random() < 0.1:
                         lock_acquire = time.time()
+                        lru_started = time.perf_counter()
                         async with self.locks():
-                            lock_wait_s += time.time() - lock_acquire
+                            waited = time.time() - lock_acquire
+                            lock_wait_s += waited
+                            if timing is not None:
+                                timing.index_lock_wait_s += waited
                             with self._thread_lock:
                                 if chunk_key in self._index:
                                     cache_entry = self._index[chunk_key]
@@ -1997,6 +2020,8 @@ class Cache:
                                             size=cache_entry.size,
                                             tier=cache_entry.tier,
                                         )
+                        if timing is not None:
+                            timing.lru_update_s += time.perf_counter() - lru_started
 
                     self._metrics.record_hit(needed_len)
 
@@ -2112,7 +2137,12 @@ class Cache:
                 if len(result_data) == needed_len:
                     # Probabilistic LRU: same 10% policy as fast path.
                     if random.random() < 0.1:
+                        lru_started = time.perf_counter()
+                        lock_acquire = time.perf_counter()
                         async with self.locks():
+                            waited = time.perf_counter() - lock_acquire
+                            if timing is not None:
+                                timing.index_lock_wait_s += waited
                             with self._thread_lock:
                                 now = time.time()
 
@@ -2130,6 +2160,8 @@ class Cache:
                                                 size=cache_entry.size,
                                                 tier=cache_entry.tier,
                                             )
+                        if timing is not None:
+                            timing.lru_update_s += time.perf_counter() - lru_started
 
                     self._metrics.record_hit(needed_len)
 
@@ -2560,6 +2592,11 @@ class Cache:
         return has_valid_file
 
     async def trim(self) -> None:
+        # Invalidate the TTL-cached disk_usage so an explicit trim() always reads
+        # fresh free-space from the OS rather than a potentially stale cached value.
+        # (The TTL guard in _evict_lru is an optimisation for rapid put() hot paths,
+        # not for deliberate administrative trim calls.)
+        self._disk_usage_cache = (0.0, 0)
         # Primary policy-based trimming
         if self.cfg.two_tier:
             await self._ensure_hot_capacity(0)
