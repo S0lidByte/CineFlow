@@ -8,6 +8,7 @@ SIGKILL'd by the Linux OOM killer (bare ``Killed``, no Python traceback).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -101,11 +102,44 @@ def get_cgroup_memory_limit() -> int | None:
     return None
 
 
+def measure_directory_bytes(path: Path) -> int:
+    """Return total byte size of cached files under ``path``.
+
+    Walks at most two directory levels (``cache_dir/<fanout>/<file>``) using
+    ``os.scandir`` so startup sizing stays sub-millisecond and safe against
+    symlink loops or transient I/O errors.
+    """
+    total = 0
+    try:
+        if not path.is_dir():
+            return 0
+        with os.scandir(path) as top_entries:
+            for entry in top_entries:
+                try:
+                    if entry.is_file(follow_symlinks=False):
+                        total += entry.stat(follow_symlinks=False).st_size
+                    elif entry.is_dir(follow_symlinks=False):
+                        with os.scandir(entry.path) as sub_entries:
+                            for sub in sub_entries:
+                                try:
+                                    if sub.is_file(follow_symlinks=False):
+                                        total += sub.stat(follow_symlinks=False).st_size
+                                except OSError:
+                                    continue
+                except OSError:
+                    continue
+    except OSError:
+        return total
+    return total
+
+
 def resolve_cache_max_bytes(
     cache_dir: Path,
     configured_mb: int,
     *,
     free_bytes: int | None = None,
+    total_bytes: int | None = None,
+    existing_bytes: int = 0,
     tmpfs: bool | None = None,
     tmpfs_hard_cap_bytes: int = TMPFS_CACHE_HARD_CAP_BYTES,
 ) -> CacheSizeResolution:
@@ -118,6 +152,15 @@ def resolve_cache_max_bytes(
         configured_mb: ``filesystem.cache_max_size_mb`` setting.
         free_bytes: Optional free-space override (tests); otherwise callers
             should pass ``shutil.disk_usage(...).free``.
+        total_bytes: Optional total-partition-size override (tests); callers
+            should pass ``shutil.disk_usage(...).total`` as an upper bound so
+            cache never claims more than ``DISK_FREE_FRACTION`` of a dedicated
+            partition.
+        existing_bytes: Bytes already stored in ``cache_dir``. Because
+            ``free_bytes`` excludes existing cache files, adding
+            ``existing_bytes`` prevents shrinking ``max_size_bytes`` below
+            on-disk cache occupancy while still preserving ``1 - DISK_FREE_FRACTION``
+            free partition headroom against ENOSPC on shared disks.
         tmpfs: Optional override for tmpfs detection (tests).
         tmpfs_hard_cap_bytes: Absolute max when on tmpfs (default 1 GiB).
 
@@ -128,6 +171,8 @@ def resolve_cache_max_bytes(
     configured_bytes = max(0, int(configured_mb)) * 1024 * 1024
     has_free_space_measurement = free_bytes is not None
     free = int(free_bytes) if has_free_space_measurement else 0
+    total = max(0, int(total_bytes)) if total_bytes is not None else 0
+    existing = max(0, int(existing_bytes))
     on_tmpfs = is_tmpfs_path(cache_dir) if tmpfs is None else bool(tmpfs)
 
     effective = configured_bytes
@@ -184,14 +229,33 @@ def resolve_cache_max_bytes(
                 "Raise filesystem.tmpfs_cache_max_mb (and container shm/mem limits) "
                 "for a larger RAM cache, or move cache_dir off tmpfs onto disk."
             )
-    elif has_free_space_measurement and configured_bytes > int(
-        free * DISK_FREE_FRACTION
-    ):
-        effective = int(free * DISK_FREE_FRACTION)
-        reason = (
-            f"cache_max_size_mb clamped to available space: "
-            f"{effective // (1024 * 1024)} MB"
+    elif has_free_space_measurement:
+        # Compute allocatable disk headroom:
+        # ``free`` excludes files already stored in ``cache_dir``. Adding
+        # ``existing`` prevents shrinking max_size_bytes below current on-disk
+        # cache occupancy (which otherwise causes an eviction storm on every put),
+        # while still preserving ``1 - DISK_FREE_FRACTION`` free space on shared
+        # partitions and respecting ``total * DISK_FREE_FRACTION`` when total is set.
+        headroom_cap = existing + int(free * DISK_FREE_FRACTION)
+        disk_cap = (
+            min(int(total * DISK_FREE_FRACTION), headroom_cap)
+            if total > 0
+            else headroom_cap
         )
+        if configured_bytes > disk_cap:
+            effective = disk_cap
+            if existing > 0:
+                reason = (
+                    f"cache_max_size_mb clamped to {effective // (1024 * 1024)} MB "
+                    f"(existing={existing // (1024 * 1024)} MB + "
+                    f"{int(DISK_FREE_FRACTION * 100)}% of "
+                    f"{free // (1024 * 1024)} MB free)"
+                )
+            else:
+                reason = (
+                    f"cache_max_size_mb clamped to available space: "
+                    f"{effective // (1024 * 1024)} MB"
+                )
 
     return CacheSizeResolution(
         effective_max_bytes=effective,

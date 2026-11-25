@@ -395,6 +395,14 @@ class Cache:
         # Count of refused evictions when all candidates are protected
         self.eviction_refusals: int = 0
 
+        # FIX-3: TTL cache for shutil.disk_usage() inside _evict_lru.
+        # Under heavy disk I/O wait, statfs(2) can stall for tens/hundreds of ms;
+        # checking once every 5s off the event loop and outside _index_lock keeps
+        # the min-free guard effective without starving concurrent FUSE/stream tasks.
+        self._disk_usage_cache: tuple[float, int] = (0.0, 0)  # (timestamp, free_bytes)
+        self._DISK_USAGE_TTL_SECONDS: float = 5.0
+        self._disk_usage_lock = trio.Lock()
+
         # In-memory chunk payload cache (MRU/LRU of recently accessed chunk bytes).
         # Eliminates redundant disk I/O and threadpool hops when FUSE slices a chunk into 128 KiB blocks.
         self._memory_chunks = OrderedDict[str, bytes]()
@@ -1523,6 +1531,7 @@ class Cache:
                         # Demoted chunks must NOT be pushed to the head of the LRU queue,
                         # which caused active playback chunks to be immediately evicted.
                         self._hot_bytes = max(0, self._hot_bytes - current.size)
+                        self._adjust_cached_disk_free_locked(-current.size)
                         published = True
 
             if published:
@@ -1589,11 +1598,11 @@ class Cache:
             return False
 
     async def _release_hot_capacity(self, reserved_bytes: int) -> None:
-        """Release a pending hot-tier reservation and wake blocked writers."""
-        async with self._hot_write_lock:
-            self._hot_reserved_bytes = max(0, self._hot_reserved_bytes - reserved_bytes)
-            self._hot_capacity_changed.set()
-            self._hot_capacity_changed = trio.Event()
+        """Release a pending hot-tier reservation without queueing behind demotion I/O."""
+        await trio.lowlevel.checkpoint()
+        self._hot_reserved_bytes = max(0, self._hot_reserved_bytes - reserved_bytes)
+        self._hot_capacity_changed.set()
+        self._hot_capacity_changed = trio.Event()
 
     async def _unlink_evicted_files(
         self,
@@ -1618,6 +1627,47 @@ class Cache:
                     lambda keys=keys: self._unlink_cache_files(keys, tiers=tiers)
                 )
 
+    def _adjust_cached_disk_free_locked(self, delta_free_bytes: int) -> None:
+        """Reconcile cached warm free-space estimate after local writes/reclaims.
+
+        Caller holds ``_thread_lock``. Preserves invalidated ``(0.0, 0)`` state
+        and reconciles an active sample so sequential puts do not over-evict
+        from a stale shortfall or let separate hot writes re-evict warm data.
+        """
+        if delta_free_bytes == 0:
+            return
+        cached_ts, cached_free = self._disk_usage_cache
+        if cached_ts > 0.0:
+            self._disk_usage_cache = (cached_ts, max(0, cached_free + delta_free_bytes))
+
+    async def _get_warm_free_bytes_cached(self) -> int | None:
+        """Return cached warm ``cache_dir`` free bytes, coalescing TTL refreshes."""
+        now_mono = time.monotonic()
+        with self._thread_lock:
+            cached_ts, cached_free = self._disk_usage_cache
+        if cached_ts > 0.0 and (now_mono - cached_ts) < self._DISK_USAGE_TTL_SECONDS:
+            return cached_free
+
+        async with self._disk_usage_lock:
+            now_mono = time.monotonic()
+            with self._thread_lock:
+                cached_ts, cached_free = self._disk_usage_cache
+            if (
+                cached_ts > 0.0
+                and (now_mono - cached_ts) < self._DISK_USAGE_TTL_SECONDS
+            ):
+                return cached_free
+            try:
+                usage = await trio.to_thread.run_sync(
+                    shutil.disk_usage, self.cfg.cache_dir
+                )
+                free_bytes = int(usage.free)
+                with self._thread_lock:
+                    self._disk_usage_cache = (time.monotonic(), free_bytes)
+                return free_bytes
+            except Exception:
+                return None
+
     async def _evict_lru(
         self,
         need_bytes: int = 0,
@@ -1637,10 +1687,15 @@ class Cache:
         evicted_entries: list[tuple[str, int]] = []
         eviction_succeeded = True
 
+        prefetched_free_bytes: int | None = None
+        if self.cfg.warm_min_free_mb > 0:
+            prefetched_free_bytes = await self._get_warm_free_bytes_cached()
+
         try:
             async with self.locks():
                 with self._thread_lock:
                     warm_bytes = max(0, self._total_bytes - self._hot_bytes)
+                    cached_ts, cached_free = self._disk_usage_cache
                 projected = warm_bytes + need_bytes
                 hard_cap = self.cfg.max_size_bytes
                 warm_high_pct, warm_low_pct = self._effective_warm_watermarks()
@@ -1653,19 +1708,20 @@ class Cache:
                 if projected > hard_cap:
                     target = max(target, projected - hard_cap)
 
-                # Check minimum free disk space constraint
-                if self.cfg.warm_min_free_mb > 0:
-                    try:
-                        free_bytes = shutil.disk_usage(self.cfg.cache_dir).free
-                        min_free_bytes = self.cfg.warm_min_free_mb * 1024 * 1024
-                        if free_bytes < min_free_bytes:
-                            target = max(target, min_free_bytes - free_bytes)
-                    except Exception:
-                        pass
+                # Check minimum free disk space constraint (sampled above outside lock,
+                # then reconciled with any concurrent in-lock adjustment before deciding).
+                if self.cfg.warm_min_free_mb > 0 and prefetched_free_bytes is not None:
+                    effective_free_bytes = (
+                        cached_free if cached_ts > 0.0 else prefetched_free_bytes
+                    )
+                    min_free_bytes = self.cfg.warm_min_free_mb * 1024 * 1024
+                    if effective_free_bytes < min_free_bytes:
+                        target = max(target, min_free_bytes - effective_free_bytes)
 
                 if target <= 0:
                     return True
 
+                reclaimed_warm_bytes = 0
                 with self._thread_lock:
                     # O(N) single pass: collect all unprotected candidates in LRU order.
                     # This avoids the O(N²) re-scan that occurs when most entries are
@@ -1749,8 +1805,13 @@ class Cache:
                         self._total_bytes -= victim_entry.size
                         if victim_entry.tier == "hot":
                             self._hot_bytes -= victim_entry.size
+                        else:
+                            reclaimed_warm_bytes += victim_entry.size
                         target -= victim_entry.size
                         evicted += 1
+
+                    if reclaimed_warm_bytes > 0:
+                        self._adjust_cached_disk_free_locked(reclaimed_warm_bytes)
 
                     if target > 0 and eviction_succeeded:
                         # Unprotected candidates were exhausted before satisfying the eviction target.
@@ -1823,6 +1884,8 @@ class Cache:
                         self._total_bytes -= cache_entry.size
                         if cache_entry.tier == "hot":
                             self._hot_bytes -= cache_entry.size
+                        else:
+                            self._adjust_cached_disk_free_locked(cache_entry.size)
                     to_unlink.append(k)
                     tiers[k] = cache_entry.tier
                     evicted_entries.append((cache_entry.cache_key, cache_entry.start))
@@ -1980,8 +2043,12 @@ class Cache:
                     # age out on the LRU pass.
                     if random.random() < 0.1:
                         lock_acquire = time.time()
+                        lru_started = time.perf_counter()
                         async with self.locks():
-                            lock_wait_s += time.time() - lock_acquire
+                            waited = time.time() - lock_acquire
+                            lock_wait_s += waited
+                            if timing is not None:
+                                timing.index_lock_wait_s += waited
                             with self._thread_lock:
                                 if chunk_key in self._index:
                                     cache_entry = self._index[chunk_key]
@@ -1997,6 +2064,8 @@ class Cache:
                                             size=cache_entry.size,
                                             tier=cache_entry.tier,
                                         )
+                        if timing is not None:
+                            timing.lru_update_s += time.perf_counter() - lru_started
 
                     self._metrics.record_hit(needed_len)
 
@@ -2112,7 +2181,12 @@ class Cache:
                 if len(result_data) == needed_len:
                     # Probabilistic LRU: same 10% policy as fast path.
                     if random.random() < 0.1:
+                        lru_started = time.perf_counter()
+                        lock_acquire = time.perf_counter()
                         async with self.locks():
+                            waited = time.perf_counter() - lock_acquire
+                            if timing is not None:
+                                timing.index_lock_wait_s += waited
                             with self._thread_lock:
                                 now = time.time()
 
@@ -2130,6 +2204,8 @@ class Cache:
                                                 size=cache_entry.size,
                                                 tier=cache_entry.tier,
                                             )
+                        if timing is not None:
+                            timing.lru_update_s += time.perf_counter() - lru_started
 
                     self._metrics.record_hit(needed_len)
 
@@ -2478,6 +2554,9 @@ class Cache:
                         self._total_bytes += need
                         if write_tier == "hot":
                             self._hot_bytes += need
+                        prev_warm = prev.size if (prev and prev.tier == "warm") else 0
+                        new_warm = need if write_tier == "warm" else 0
+                        self._adjust_cached_disk_free_locked(prev_warm - new_warm)
                         if (
                             self._memory_chunks_max_bytes > 0
                             and need <= self._memory_chunks_max_bytes
@@ -2560,6 +2639,12 @@ class Cache:
         return has_valid_file
 
     async def trim(self) -> None:
+        # Invalidate the TTL-cached disk_usage so an explicit trim() always reads
+        # fresh free-space from the OS rather than a potentially stale cached value.
+        # (The TTL guard in _evict_lru is an optimisation for rapid put() hot paths,
+        # not for deliberate administrative trim calls.)
+        with self._thread_lock:
+            self._disk_usage_cache = (0.0, 0)
         # Primary policy-based trimming
         if self.cfg.two_tier:
             await self._ensure_hot_capacity(0)
