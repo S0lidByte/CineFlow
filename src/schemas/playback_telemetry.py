@@ -70,6 +70,11 @@ class StreamSessionMetric(BaseModel):
         ge=0.0,
         description="Instantaneous network transfer rate in megabytes per second (MB/s) over rolling window",
     )
+    upstream_throughput_mbps: float = Field(
+        0.0,
+        ge=0.0,
+        description="Instantaneous upstream CDN download throughput in megabytes per second (MB/s) over rolling window",
+    )
     started_at: datetime = Field(
         ..., description="Timestamp when stream session commenced"
     )
@@ -156,6 +161,11 @@ class AggregatePlaybackMetrics(BaseModel):
         0.0,
         ge=0.0,
         description="Total aggregate network transfer throughput across all active streams (MB/s)",
+    )
+    current_total_upstream_throughput_mbps: float = Field(
+        0.0,
+        ge=0.0,
+        description="Total aggregate upstream CDN download throughput across all active streams (MB/s)",
     )
     cached_chunks_in_memory: int = Field(
         0, ge=0, description="Current number of chunks in memory LRU cache"

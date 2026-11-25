@@ -1,3 +1,4 @@
+import functools
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
@@ -90,6 +91,7 @@ async def observe_response(
             elif hasattr(response, "aiter_raw"):
                 original_aiter_raw = response.aiter_raw
 
+                @functools.wraps(original_aiter_raw)
                 def wrapped_aiter_raw(
                     *args: Any, **kwargs: Any
                 ) -> AsyncIterator[bytes]:

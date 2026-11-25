@@ -38,7 +38,7 @@ class AsyncClient(httpx.AsyncClient):
             connect_timeout = None
 
         super().__init__(
-            http2=True,
+            http2=False,
             follow_redirects=True,
             limits=stream_http_limits(),
             timeout=stream_http_timeout(connect_timeout=connect_timeout),

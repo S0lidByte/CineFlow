@@ -1,11 +1,13 @@
 import asyncio
+import inspect
 import json
 import logging
 import math
 import mimetypes
 import re
 import subprocess
-from collections.abc import Mapping
+import uuid
+from collections.abc import AsyncIterator, Mapping
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -298,14 +300,34 @@ def _normalize_range_header(
             return f"bytes={start}-{end}", (start, end), False
 
 
+_STREAM_READ_CHUNK_SIZE = 262_144
+
+
 def _build_forward_headers(
     request: Request, normalized_range: str | None = None
 ) -> dict[str, str]:
     """Build headers to forward to upstream."""
-    headers: dict[str, str] = {}
+    headers: dict[str, str] = {"Accept-Encoding": "identity"}
     if normalized_range:
         headers["Range"] = normalized_range
     return headers
+
+
+def _iter_bytes_chunks(
+    response: Any, chunk_size: int = _STREAM_READ_CHUNK_SIZE
+) -> AsyncIterator[bytes]:
+    """Iterate response body with a larger buffer when aiter_bytes accepts chunk_size."""
+    aiter_bytes = response.aiter_bytes
+    try:
+        params = inspect.signature(aiter_bytes).parameters
+        accepts_chunk_size = "chunk_size" in params or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+    except (TypeError, ValueError):
+        accepts_chunk_size = False
+    if accepts_chunk_size:
+        return aiter_bytes(chunk_size=chunk_size)
+    return aiter_bytes()
 
 
 def sanitize_header_value(value: str) -> str:
@@ -477,23 +499,58 @@ async def stream_file(
             except ValueError:
                 pass
 
+        stream_id = f"http:{item_id}:{uuid.uuid4().hex[:12]}"
+        stream_title = filename or f"Item {item_id}"
+        client_ip = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent")
+
         async def stream_iterator():
+            from program.services.streaming.telemetry import (
+                playback_telemetry_collector,
+            )
+
+            playback_telemetry_collector.register_stream_start(
+                stream_id=stream_id,
+                title=stream_title,
+                media_item_id=item_id,
+                client_ip=client_ip,
+                client_user_agent=user_agent,
+                provider=provider or None,
+            )
             bytes_yielded = 0
             try:
-                async for chunk in upstream_response.aiter_bytes():
+                async for chunk in _iter_bytes_chunks(upstream_response):
+                    out_chunk = chunk
+                    done = False
                     if max_bytes is not None:
                         remaining = max_bytes - bytes_yielded
                         if remaining <= 0:
                             break
                         if len(chunk) > remaining:
-                            yield chunk[:remaining]
-                            bytes_yielded += remaining
-                            break
-                    yield chunk
-                    bytes_yielded += len(chunk)
+                            out_chunk = chunk[:remaining]
+                            done = True
+                    nbytes = len(out_chunk)
+                    bytes_yielded += nbytes
+                    playback_telemetry_collector.record_stream_read(
+                        stream_id=stream_id, nbytes=nbytes, from_cache=False
+                    )
+                    playback_telemetry_collector.record_upstream_delta(
+                        stream_id=stream_id, nbytes=nbytes
+                    )
+                    yield out_chunk
+                    if done:
+                        break
             except Exception as e:
                 logger.error(f"Error during streaming: {e}")
+                playback_telemetry_collector.record_stream_error(
+                    stream_id=stream_id, title=stream_title, error_msg=str(e)
+                )
             finally:
+                playback_telemetry_collector.register_stream_complete(
+                    stream_id=stream_id,
+                    title=stream_title,
+                    details={"bytes_transferred": bytes_yielded},
+                )
                 await upstream_response.aclose()
 
         return StreamingResponse(
@@ -692,10 +749,29 @@ async def get_hls_segment(
             if data:
                 chunks.append(bytes(data)[:max_bytes])
 
+    stream_id = f"hls:{item_id}:seg-{seq}:{uuid.uuid4().hex[:8]}"
+    stream_title = (
+        media_info[2] if len(media_info) >= 3 else None
+    ) or f"HLS Item {item_id}"
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    provider = media_info[1] if len(media_info) >= 2 else None
+
     async def stream_output():
+        from program.services.streaming.telemetry import playback_telemetry_collector
+
+        playback_telemetry_collector.register_stream_start(
+            stream_id=stream_id,
+            title=stream_title,
+            media_item_id=item_id,
+            client_ip=client_ip,
+            client_user_agent=user_agent,
+            provider=provider or None,
+        )
         stderr_chunks: list[bytes] = []
         stderr_task: asyncio.Task[None] | None = None
         completed_cleanly = False
+        bytes_yielded = 0
         try:
             if not process.stdout or not process.stderr:
                 return
@@ -703,9 +779,17 @@ async def get_hls_segment(
                 _drain_stderr(process.stderr, stderr_chunks)
             )
             while True:
-                chunk = await process.stdout.read(32 * 1024)
+                chunk = await process.stdout.read(_STREAM_READ_CHUNK_SIZE)
                 if not chunk:
                     break
+                nbytes = len(chunk)
+                bytes_yielded += nbytes
+                playback_telemetry_collector.record_stream_read(
+                    stream_id=stream_id, nbytes=nbytes, from_cache=False
+                )
+                playback_telemetry_collector.record_upstream_delta(
+                    stream_id=stream_id, nbytes=nbytes
+                )
                 yield chunk
             await stderr_task
             completed_cleanly = True
@@ -717,6 +801,11 @@ async def get_hls_segment(
                 except asyncio.CancelledError:
                     pass
             await _cleanup_ffmpeg_process(process)
+            playback_telemetry_collector.register_stream_complete(
+                stream_id=stream_id,
+                title=stream_title,
+                details={"bytes_transferred": bytes_yielded},
+            )
             if (
                 completed_cleanly
                 and process.returncode

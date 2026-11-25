@@ -598,6 +598,24 @@ class Cache:
         finally:
             temporary.unlink(missing_ok=True)
 
+    def _write_chunk_and_metadata(
+        self,
+        path: Path,
+        data: bytes,
+        key: str,
+        cache_key: str,
+        start: int,
+        tier: Literal["hot", "warm"],
+    ) -> tuple[float, float]:
+        """Persist payload bytes and metadata sidecar in one worker thread hop."""
+        payload_started = time.perf_counter()
+        self._write_file_bytes(path, data)
+        payload_s = time.perf_counter() - payload_started
+        meta_started = time.perf_counter()
+        self._write_metadata(key, cache_key, start, tier=tier)
+        meta_s = time.perf_counter() - meta_started
+        return payload_s, meta_s
+
     @staticmethod
     def _is_cache_payload_file(root: Path, path: Path) -> bool:
         """Only identify payloads written in Riven's SHA-1 fanout layout."""
@@ -2405,19 +2423,18 @@ class Cache:
                 fp = self._file_for(k, tier=write_tier)
 
                 try:
-                    write_started = time.perf_counter()
-                    await trio.to_thread.run_sync(self._write_file_bytes, fp, data)
-                    if timing is not None:
-                        timing.payload_write_s = time.perf_counter() - write_started
-                    # Write metadata after successful data write (also disk I/O)
-                    meta_started = time.perf_counter()
-                    await trio.to_thread.run_sync(
-                        lambda: self._write_metadata(
-                            k, cache_key, start, tier=write_tier
-                        )
+                    payload_s, meta_s = await trio.to_thread.run_sync(
+                        self._write_chunk_and_metadata,
+                        fp,
+                        data,
+                        k,
+                        cache_key,
+                        start,
+                        write_tier,
                     )
                     if timing is not None:
-                        timing.meta_write_s = time.perf_counter() - meta_started
+                        timing.payload_write_s = payload_s
+                        timing.meta_write_s = meta_s
                 except Exception as e:
                     logger.warning(f"Disk cache write failed: {e}")
                     return CachePutResult.REFUSED_PHYSICAL_PRESSURE
@@ -2461,6 +2478,11 @@ class Cache:
                         self._total_bytes += need
                         if write_tier == "hot":
                             self._hot_bytes += need
+                        if (
+                            self._memory_chunks_max_bytes > 0
+                            and need <= self._memory_chunks_max_bytes
+                        ):
+                            self._store_memory_chunk_locked(k, bytes(data))
                         self._metrics.record_bytes_written(need)
                     if timing is not None:
                         timing.index_publish_s = time.perf_counter() - publish_started
@@ -2529,10 +2551,13 @@ class Cache:
         # Check complete payload visibility outside the lock. Existence alone
         # is insufficient while recovering old non-atomic writes or external
         # cache damage; readers must never classify a truncated chunk as ready.
-        return any(
+        has_valid_file = any(
             self._file_has_size(self._file_for(found_key, tier=probe_tier), entry_size)
             for probe_tier in self._tier_probe_order(tier)
         )
+        if not has_valid_file:
+            self._evict_memory_chunk(found_key)
+        return has_valid_file
 
     async def trim(self) -> None:
         # Primary policy-based trimming

@@ -605,19 +605,19 @@ def test_trio_streaming_http_pool_drain_and_teardown():
 def test_trio_streaming_http_pool_http2_transport_isolation_by_workers(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Parallel prefetch workers > 1 enforces HTTP/1.1 transport isolation to prevent single-socket CDN throttling."""
+    """Default HTTP/1.1 transport isolates streams and prefetch workers onto separate TCP sockets."""
     from program.settings import settings_manager
 
-    # Case 1: single worker (default) -> HTTP/2 multiplexing enabled
+    # Case 1: single worker (default) -> HTTP/1.1 enabled to avoid single-TCP congestion stalls
     monkeypatch.setattr(
         settings_manager.settings.stream, "parallel_prefetch_workers", 1
     )
     pool_single = http_pool.TrioStreamingHttpPool()
     try:
-        assert pool_single.http2 is True
+        assert pool_single.http2 is False
         client = pool_single.get_client()
         assert (
-            getattr(getattr(client._transport, "_pool", None), "_http2", None) is True
+            getattr(getattr(client._transport, "_pool", None), "_http2", None) is False
         )
     finally:
         trio.run(pool_single.teardown)

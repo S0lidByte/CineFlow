@@ -29,7 +29,7 @@ class ProxyClient(httpx.AsyncClient):
             connect_timeout = None
 
         super().__init__(
-            http2=True,
+            http2=False,
             follow_redirects=True,
             proxy=proxy_url,
             limits=stream_http_limits(),

@@ -401,7 +401,7 @@ def test_cache_concurrent_titles_use_different_shards(tmp_path: Path) -> None:
 def test_cache_get_disk_io_off_trio_thread(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """File reads must go through trio.to_thread so the FUSE loop stays free."""
+    """Disk writes and cold RAM-miss reads must go through trio.to_thread so FUSE stays free."""
     cache = _make_cache(tmp_path)
     payload = b"thread-offload-payload"
     calls: list[str] = []
@@ -415,11 +415,22 @@ def test_cache_get_disk_io_off_trio_thread(
 
     async def _run() -> None:
         await cache.put("movie.mkv", 0, payload)
-        got = await cache.get("movie.mkv", 0, len(payload) - 1)
-        assert got == payload
+        # put() pre-warms RAM so an immediate get() skips disk read altogether
+        got_hot = await cache.get("movie.mkv", 0, len(payload) - 1)
+        assert got_hot == payload
+        assert not any(
+            c in calls for c in ("_read_file_slice", "_read_file_slice_timed")
+        )
+
+        # Evict from RAM to verify cold disk read still runs off the Trio event loop
+        with cache._thread_lock:
+            cache._memory_chunks.clear()
+            cache._memory_chunks_bytes = 0
+        got_cold = await cache.get("movie.mkv", 0, len(payload) - 1)
+        assert got_cold == payload
 
     trio.run(_run)
-    assert "_write_file_bytes" in calls
+    assert calls.count("_write_chunk_and_metadata") == 1
     assert any(c in calls for c in ("_read_file_slice", "_read_file_slice_timed"))
 
 
@@ -473,7 +484,7 @@ def test_cache_eviction_handles_index_inconsistency_deterministically(
 def test_cache_in_memory_slice_acceleration_eliminates_disk_io(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Subsequent slice reads within a cached chunk must be served from memory with 0 disk I/O."""
+    """put() warms RAM for 0-read hot hits, and cold disk reads warm RAM for subsequent slices."""
     cache = _make_cache(tmp_path)
     chunk_payload = b"X" * (1024 * 1024)  # 1 MiB chunk
     disk_reads: list[str] = []
@@ -490,10 +501,20 @@ def test_cache_in_memory_slice_acceleration_eliminates_disk_io(
     async def _run() -> None:
         await cache.put("movie.mkv", 0, chunk_payload)
 
-        # First slice: 128 KiB from offset 0 -> triggers 1 physical chunk read into memory
+        # put() pre-warmed _memory_chunks -> immediate FUSE reads require 0 disk reads
         slice_0 = await cache.get("movie.mkv", 0, 131071)
         assert slice_0 == chunk_payload[:131072]
-        assert len(disk_reads) == 1, "first slice must read full chunk from disk"
+        assert len(disk_reads) == 0
+
+        # Simulate RAM cache cold state (e.g. LRU RAM eviction or restart)
+        with cache._thread_lock:
+            cache._memory_chunks.clear()
+            cache._memory_chunks_bytes = 0
+
+        # First cold slice: triggers 1 physical chunk read into memory
+        slice_cold = await cache.get("movie.mkv", 0, 131071)
+        assert slice_cold == chunk_payload[:131072]
+        assert len(disk_reads) == 1, "first cold slice must read full chunk from disk"
 
         # Second slice: 128 KiB from offset 131072 -> served directly from in-memory chunk
         slice_1 = await cache.get("movie.mkv", 131072, 262143)
@@ -630,5 +651,36 @@ def test_cache_lru_eviction_shortfall_refuses_overflow_prefetch_and_skips_zero_t
         assert cache.eviction_refusals >= 1
         assert cache.has("movie.mkv", 0, 119)
         assert not cache.has("movie.mkv", 170, 250)
+
+    trio.run(_run)
+
+
+def test_cache_put_prewarms_in_memory_chunk_and_combines_disk_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """put() writes payload and metadata in one thread hop and pre-warms _memory_chunks."""
+    cache = _make_cache(tmp_path)
+    payload = b"P" * (256 * 1024)
+    thread_calls: list[str] = []
+    real_to_thread = trio.to_thread.run_sync
+
+    async def tracking_to_thread(fn, *args, **kwargs):
+        thread_calls.append(getattr(fn, "__name__", str(fn)))
+        return await real_to_thread(fn, *args, **kwargs)
+
+    monkeypatch.setattr(trio.to_thread, "run_sync", tracking_to_thread)
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, payload)
+        assert thread_calls.count("_write_chunk_and_metadata") == 1
+        assert "_write_metadata" not in thread_calls
+
+        k = cache._key("movie.mkv", 0)
+        assert k in cache._memory_chunks
+
+        thread_calls.clear()
+        got = await cache.get("movie.mkv", 0, len(payload) - 1)
+        assert got == payload
+        assert thread_calls == []
 
     trio.run(_run)
