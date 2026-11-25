@@ -1645,6 +1645,9 @@ class Cache:
                     except Exception:
                         pass
 
+                if target <= 0:
+                    return True
+
                 with self._thread_lock:
                     # O(N) single pass: collect all unprotected candidates in LRU order.
                     # This avoids the O(N²) re-scan that occurs when most entries are

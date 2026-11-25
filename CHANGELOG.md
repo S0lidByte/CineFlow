@@ -4,9 +4,9 @@
 
 ### Bug Fixes
 
-* **cache:** detect LRU eviction shortfall when unprotected candidates cannot satisfy the byte deficit, ensuring eviction failure is recorded and prefetch writes under physical capacity pressure are properly refused.
-* **vfs:** catch and skip transiently unlinked child directory entries raising ENOENT during readdir getattr, preventing directory listings from failing prematurely.
-* **stream:** interrupt a parallel prefetch batch when a foreground reservation lies outside its assigned chunks, draining unrelated speculative transfers before dispatching the urgent read.
+* **cache:** detect LRU eviction shortfall when unprotected candidates cannot satisfy the byte deficit so prefetch writes under physical pressure are refused, and short-circuit zero-target eviction scans before locking the index.
+* **vfs:** skip concurrently unlinked child entries across both `getattr` (`ENOENT`) and synchronized `readdir_reply` validation under `_tree_lock`.
+* **stream:** interrupt a parallel prefetch batch when a foreground reservation lies outside its assigned chunks, draining unrelated speculative transfers and forcing a clean reconnect if the primary response was already read without advancing `current_read_position`.
 
 * **stream:** apply each handle's configured connection timeout to primary and speculative HTTP requests, so reused mount-scoped clients do not retain an older setting; preserve existing handles and other transport timeouts.
 
@@ -24,7 +24,7 @@
 
 * **stream:** include effective prefetch workers and chunk wait timeout in each stream initialization trace to distinguish open-handle settings from later UI saves.
 
-* **stream:** time a bounded provider read by item ID without exposing the saved link or refreshing it.
+* **stream:** time a bounded provider read by item ID without exposing the saved link or refreshing it, honoring forced environment DSN overrides when no settings file exists.
 
 ## [1.52.5](https://github.com/S0lidByte/CineFlow/compare/v1.52.4...v1.52.5) (2026-11-23)
 

@@ -1269,3 +1269,89 @@ def test_parallel_prefetch_reopens_at_first_gap_when_a_chunk_becomes_cached():
         assert h.stream._producer_claims._owners == {}
 
     trio.run(run)
+
+
+def test_interrupted_primary_cache_put_reconnects_instead_of_reusing_misaligned_socket():
+    """Cancellation during _cache_chunk after consuming socket bytes must reconnect the primary response."""
+    from contextlib import asynccontextmanager
+
+    from ordered_set import OrderedSet
+    from trio.testing import wait_all_tasks_blocked
+
+    from program.services.streaming.stream_connection import StreamConnection
+
+    async def run():
+        h = _Harness(workers=2)
+        h.stream.adaptive_prefetch.calculate_window = lambda **_: 3
+        h.stream.chunker.get_prefetch_uncached = lambda **_: OrderedSet(h.chunks[1:4])
+
+        wire_positions: list[int] = []
+        cache_entered = trio.Event()
+        allow_cache = trio.Event()
+        reconnect_opened = trio.Event()
+
+        @asynccontextmanager
+        async def connection(*, position):
+            conn_idx = len(wire_positions)
+            wire_positions.append(position)
+
+            async def raw():
+                cursor = position
+                while cursor < 32:
+                    yield bytes([cursor]) * 4
+                    cursor += 4
+
+            import trio_util
+
+            conn = SimpleNamespace(
+                current_read_position=position,
+                start_position=position,
+                seek_required=trio_util.AsyncBool(False),
+                seek_range=None,
+                response=SimpleNamespace(
+                    request=SimpleNamespace(url=h.stream.target_url.value)
+                ),
+                increment_sequential_chunks=lambda: None,
+                reader=raw(),
+            )
+            conn.seek = StreamConnection.seek.__get__(conn)
+            h.stream._active_stream_connection = conn
+            if conn_idx == 1:
+                reconnect_opened.set()
+            yield conn
+
+        async def blocking_cache(*, start, data, admission):
+            if start == 4 and not cache_entered.is_set():
+                cache_entered.set()
+                await allow_cache.wait()
+            return await h.cache(start=start, data=data, admission=admission)
+
+        h.stream.manage_connection = connection
+        h.stream._cache_chunk = blocking_cache
+
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(h.stream.run, 4)
+                h.start_read()
+                # Primary read chunk 1 (offset 4) off the HTTP stream and entered _cache_chunk
+                await cache_entered.wait()
+                # Unowned demand at offset 20 arrives outside the prefetch batch [4, 8, 12]
+                await h.stream._delivery_registry.register_pending(20)
+                h.stream.recent_reads.current_read.value = SimpleNamespace(
+                    read_type="body_read",
+                    chunk_range=h.chunk_range(position=20),
+                )
+                # Primary must invalidate its consumed HTTP stream and reconnect cleanly at 20
+                await reconnect_opened.wait()
+                allow_cache.set()
+                await wait_all_tasks_blocked()
+                await h.published[5].wait()
+                await h.stream.close()
+
+        assert wire_positions[0] == 4
+        assert wire_positions[1] == 20
+        assert h.stored[20] == bytes([20]) * 4
+        # Chunk 4 was never overwritten by shifted chunk-8 bytes from the first connection
+        assert 4 not in h.stored or h.stored[4] == bytes([4]) * 4
+
+    trio.run(run)

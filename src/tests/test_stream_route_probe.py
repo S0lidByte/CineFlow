@@ -81,6 +81,30 @@ def test_stored_link_lookup_never_emits_database_credentials(tmp_path, monkeypat
         runtime["read_stored_link"](path, 12853)
 
 
+def test_stored_link_lookup_uses_forced_env_without_settings_file(
+    tmp_path, monkeypatch
+):
+    import psycopg2
+
+    monkeypatch.setenv("CINEFLOW_FORCE_ENV", "true")
+    monkeypatch.setenv(
+        "CINEFLOW_DATABASE_HOST", "postgresql+psycopg2://env@db/cineflow"
+    )
+    runtime = probe.__globals__
+    missing_file = tmp_path / "missing-cineflow.json"
+
+    conn = MagicMock()
+    cursor = conn.cursor.return_value.__enter__.return_value
+    cursor.fetchall.return_value = [("https://cdn.example.test/from-env",)]
+    connect = MagicMock(return_value=conn)
+    monkeypatch.setattr(psycopg2, "connect", connect)
+
+    assert runtime["read_stored_link"](missing_file, 42) == (
+        "https://cdn.example.test/from-env"
+    )
+    connect.assert_called_once_with("postgresql://env@db/cineflow", connect_timeout=5)
+
+
 def test_stored_link_cli_passes_exact_range_without_echoing_link(monkeypatch, capsys):
     runtime = probe.__globals__
     url = "https://cdn.example.test/movie?token=stored-private"

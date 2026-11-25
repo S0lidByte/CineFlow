@@ -2374,12 +2374,18 @@ class RivenVFS(pyfuse3.Operations):
                 else:
                     attrs = pyfuse3.EntryAttributes()
 
-                if not pyfuse3.readdir_reply(
-                    token, pyfuse3.FileNameT(name_bytes), attrs, idx + 1
-                ):
-                    break
-                if name_bytes not in (b".", b".."):
-                    with self._tree_lock:
+                with self._tree_lock:
+                    if (
+                        name_bytes not in (b".", b"..")
+                        and child_ino
+                        and child_ino not in self._inode_to_node
+                    ):
+                        continue
+                    if not pyfuse3.readdir_reply(
+                        token, pyfuse3.FileNameT(name_bytes), attrs, idx + 1
+                    ):
+                        break
+                    if name_bytes not in (b".", b".."):
                         self._lookup_counts[child_ino] = (
                             self._lookup_counts.get(child_ino, 0) + 1
                         )

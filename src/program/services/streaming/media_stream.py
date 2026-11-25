@@ -778,6 +778,43 @@ class MediaStream:
         )
         self._active_stream_connection: StreamConnection | None = None
 
+    def _invalidate_misaligned_connection(
+        self,
+        connection: Any,
+        *,
+        chunk_start: int,
+        chunk_size: int,
+        prefer_pending_demand: bool = False,
+    ) -> None:
+        """Force a reconnect after consuming bytes from a response whose read position did not advance."""
+        self._inflight_chunk = None
+        if getattr(getattr(self, "is_killed", None), "value", False) or not hasattr(
+            connection, "seek_required"
+        ):
+            return
+        if connection.seek_required.value:
+            return
+        seek_target_range = None
+        get_chunk_range = getattr(
+            getattr(self, "chunker", None), "get_chunk_range", None
+        )
+        if get_chunk_range is not None:
+            if prefer_pending_demand and hasattr(self, "_delivery_registry"):
+                pending_starts = self._uncached_foreground_starts()
+                if pending_starts:
+                    candidate = get_chunk_range(position=pending_starts[0], size=1)
+                    if candidate.uncached_chunks:
+                        seek_target_range = candidate
+            if seek_target_range is None:
+                fallback = get_chunk_range(position=chunk_start, size=chunk_size)
+                if fallback.uncached_chunks:
+                    seek_target_range = fallback
+        if seek_target_range is not None:
+            connection.seek(chunk_range=seek_target_range)
+        if not connection.seek_required.value:
+            connection.seek_range = None
+            connection.seek_required.value = True
+
     def _resolve_async_client(self) -> httpx.AsyncClient:
         """Return the current streaming client (from injected pool or DI fallback)."""
 
@@ -1454,7 +1491,9 @@ class MediaStream:
                         latest_read = self.recent_reads.current_read.value
                         if latest_read is not None:
                             seek_range = latest_read.chunk_range
-                            position = seek_range.position
+                            position = getattr(
+                                seek_range, "position", seek_range.request_range[0]
+                            )
                         attempt_count = 0
                     failed_connection: StreamConnection | None = None
                     run_generation = getattr(
@@ -1642,226 +1681,258 @@ class MediaStream:
                                                 return
 
                                             chunk_label = f"[{chunk.start}-{chunk.end}]"
-
-                                            with benchmark(
-                                                log=lambda duration, c=chunk: (
-                                                    logger.log(
-                                                        "STREAM",
-                                                        self.build_log_message(
-                                                            f"Fetching {c} took {duration}s"
-                                                        ),
+                                            stream_consumed = False
+                                            try:
+                                                with benchmark(
+                                                    log=lambda duration, c=chunk: (
+                                                        logger.log(
+                                                            "STREAM",
+                                                            self.build_log_message(
+                                                                f"Fetching {c} took {duration}s"
+                                                            ),
+                                                        )
+                                                        if self.enable_tracing
+                                                        else None
                                                     )
-                                                    if self.enable_tracing
-                                                    else None
-                                                )
-                                            ):
-                                                fetch_started = monotonic()
-                                                ap_mgr = getattr(
-                                                    self, "adaptive_prefetch", None
-                                                )
-                                                fetch_generation = (
-                                                    ap_mgr.current_generation
-                                                    if ap_mgr is not None
-                                                    else 0
-                                                )
-                                                self._inflight_chunk = (
-                                                    fetch_generation,
-                                                    chunk.start,
-                                                )
-                                                chunk_buffer = bytearray()
-                                                wait_sec = float(
-                                                    self.config.chunk_wait_timeout_seconds
-                                                )
-                                                headroom = (
-                                                    3.0
-                                                    if wait_sec >= 4.0
-                                                    else (
-                                                        1.0 if wait_sec >= 2.0 else 0.5
+                                                ):
+                                                    fetch_started = monotonic()
+                                                    ap_mgr = getattr(
+                                                        self, "adaptive_prefetch", None
                                                     )
-                                                )
-                                                body_read_stall_timeout = min(
-                                                    7.0,
-                                                    max(0.5, wait_sec - headroom),
-                                                )
-                                                # A trickle can keep resetting the idle timer
-                                                # without delivering a usable chunk. One body
-                                                # attempt must also respect the chunk wait budget.
-                                                chunk_deadline = (
-                                                    trio.current_time() + wait_sec
-                                                )
-                                                while len(chunk_buffer) < chunk.size:
+                                                    fetch_generation = (
+                                                        ap_mgr.current_generation
+                                                        if ap_mgr is not None
+                                                        else 0
+                                                    )
+                                                    self._inflight_chunk = (
+                                                        fetch_generation,
+                                                        chunk.start,
+                                                    )
+                                                    chunk_buffer = bytearray()
+                                                    wait_sec = float(
+                                                        self.config.chunk_wait_timeout_seconds
+                                                    )
+                                                    headroom = (
+                                                        3.0
+                                                        if wait_sec >= 4.0
+                                                        else (
+                                                            1.0
+                                                            if wait_sec >= 2.0
+                                                            else 0.5
+                                                        )
+                                                    )
+                                                    body_read_stall_timeout = min(
+                                                        7.0,
+                                                        max(0.5, wait_sec - headroom),
+                                                    )
+                                                    # A trickle can keep resetting the idle timer
+                                                    # without delivering a usable chunk. One body
+                                                    # attempt must also respect the chunk wait budget.
+                                                    chunk_deadline = (
+                                                        trio.current_time() + wait_sec
+                                                    )
+                                                    while (
+                                                        len(chunk_buffer) < chunk.size
+                                                    ):
+                                                        if (
+                                                            is_prefetch
+                                                            and prefetch_gen is not None
+                                                        ):
+                                                            if hasattr(
+                                                                self,
+                                                                "adaptive_prefetch",
+                                                            ) and self.adaptive_prefetch.should_abort_prefetch(
+                                                                prefetch_gen
+                                                            ):
+                                                                self._trace_stream(
+                                                                    f"Prefetch read aborted mid-chunk #{chunk.index}: seek detected"
+                                                                )
+                                                                if (
+                                                                    len(chunk_buffer)
+                                                                    > 0
+                                                                    or stream_consumed
+                                                                ):
+                                                                    self._invalidate_misaligned_connection(
+                                                                        connection,
+                                                                        chunk_start=chunk.start,
+                                                                        chunk_size=chunk.size,
+                                                                    )
+                                                                return
+                                                        raw_part = getattr(
+                                                            connection,
+                                                            "pending_body",
+                                                            b"",
+                                                        )
+                                                        if not raw_part:
+                                                            # Empty fragments are not byte progress.
+                                                            idle_deadline = (
+                                                                trio.current_time()
+                                                                + body_read_stall_timeout
+                                                            )
+                                                            deadline = min(
+                                                                chunk_deadline,
+                                                                idle_deadline,
+                                                            )
+                                                            try:
+                                                                with trio.fail_at(
+                                                                    deadline
+                                                                ):
+                                                                    while not raw_part:
+                                                                        raw_part = await anext(
+                                                                            connection.reader
+                                                                        )
+                                                            except (
+                                                                trio.TooSlowError
+                                                            ) as err:
+                                                                if (
+                                                                    deadline
+                                                                    == chunk_deadline
+                                                                ):
+                                                                    raise httpx.ReadTimeout(
+                                                                        f"HTTP response-body chunk did not complete within {wait_sec:.1f}s"
+                                                                    ) from err
+                                                                raise httpx.ReadTimeout(
+                                                                    f"HTTP response-body read stalled for {body_read_stall_timeout:.1f}s"
+                                                                ) from err
+                                                            except StopAsyncIteration:
+                                                                break
+                                                        remaining = chunk.size - len(
+                                                            chunk_buffer
+                                                        )
+                                                        stream_consumed = True
+                                                        chunk_buffer.extend(
+                                                            raw_part[:remaining]
+                                                        )
+                                                        connection.pending_body = (
+                                                            raw_part[remaining:]
+                                                        )
+                                                    data = bytes(chunk_buffer)
                                                     if (
                                                         is_prefetch
-                                                        and prefetch_gen is not None
+                                                        and hasattr(
+                                                            self, "adaptive_prefetch"
+                                                        )
+                                                        and self.adaptive_prefetch.should_abort_prefetch(
+                                                            fetch_generation
+                                                        )
                                                     ):
-                                                        if hasattr(
-                                                            self,
-                                                            "adaptive_prefetch",
-                                                        ) and self.adaptive_prefetch.should_abort_prefetch(
-                                                            prefetch_gen
-                                                        ):
-                                                            self._trace_stream(
-                                                                f"Prefetch read aborted mid-chunk #{chunk.index}: seek detected"
-                                                            )
-                                                            if len(chunk_buffer) > 0:
-                                                                # Partial bytes consumed from socket; reposition connection before next demand
-                                                                connection.seek(
-                                                                    chunk_range=self.chunker.get_chunk_range(
-                                                                        position=chunk.start,
-                                                                        size=chunk.size,
-                                                                    )
-                                                                )
-                                                            return
-                                                    raw_part = getattr(
-                                                        connection,
-                                                        "pending_body",
-                                                        b"",
-                                                    )
-                                                    if not raw_part:
-                                                        # Empty fragments are not byte progress.
-                                                        idle_deadline = (
-                                                            trio.current_time()
-                                                            + body_read_stall_timeout
+                                                        self._invalidate_misaligned_connection(
+                                                            connection,
+                                                            chunk_start=chunk.start,
+                                                            chunk_size=chunk.size,
                                                         )
-                                                        deadline = min(
-                                                            chunk_deadline,
-                                                            idle_deadline,
-                                                        )
-                                                        try:
-                                                            with trio.fail_at(deadline):
-                                                                while not raw_part:
-                                                                    raw_part = await anext(
-                                                                        connection.reader
-                                                                    )
-                                                        except trio.TooSlowError as err:
-                                                            if (
-                                                                deadline
-                                                                == chunk_deadline
-                                                            ):
-                                                                raise httpx.ReadTimeout(
-                                                                    f"HTTP response-body chunk did not complete within {wait_sec:.1f}s"
-                                                                ) from err
-                                                            raise httpx.ReadTimeout(
-                                                                f"HTTP response-body read stalled for {body_read_stall_timeout:.1f}s"
-                                                            ) from err
-                                                        except StopAsyncIteration:
-                                                            break
-                                                    remaining = chunk.size - len(
-                                                        chunk_buffer
-                                                    )
-                                                    chunk_buffer.extend(
-                                                        raw_part[:remaining]
-                                                    )
-                                                    connection.pending_body = raw_part[
-                                                        remaining:
-                                                    ]
-                                                data = bytes(chunk_buffer)
-                                                if (
-                                                    is_prefetch
-                                                    and hasattr(
-                                                        self, "adaptive_prefetch"
-                                                    )
-                                                    and self.adaptive_prefetch.should_abort_prefetch(
-                                                        fetch_generation
-                                                    )
-                                                ):
-                                                    self._inflight_chunk = None
-                                                    connection.seek(
-                                                        chunk_range=self.chunker.get_chunk_range(
-                                                            position=chunk.start
-                                                        )
-                                                    )
-                                                    return
+                                                        return
 
-                                            if not data:
-                                                # Signal the outer loop to refresh the URL
-                                                # before the next reconnect attempt.
-                                                needs_url_refresh = True
+                                                if not data:
+                                                    # Signal the outer loop to refresh the URL
+                                                    # before the next reconnect attempt.
+                                                    needs_url_refresh = True
 
-                                                raise EmptyDataException(
-                                                    range=(chunk.start, chunk.end)
-                                                )
-
-                                            expected_chunk_size = chunk.size
-                                            if (
-                                                chunk.start
-                                                < self.file_metadata.file_size
-                                            ):
-                                                expected_chunk_size = min(
-                                                    chunk.size,
-                                                    self.file_metadata.file_size
-                                                    - chunk.start,
-                                                )
-
-                                            if len(data) < expected_chunk_size:
-                                                logger.warning(
-                                                    self.build_log_message(
-                                                        f"Incomplete chunk read for {chunk}: expected {expected_chunk_size} bytes, got {len(data)} bytes; "
-                                                        "discarding partial chunk to prevent cache corruption"
-                                                    )
-                                                )
-                                                raise RecoverableMediaStreamException(
-                                                    EmptyDataException(
+                                                    raise EmptyDataException(
                                                         range=(chunk.start, chunk.end)
                                                     )
-                                                )
 
-                                            with benchmark(
-                                                log=lambda duration, label=chunk_label, range_label=chunk_range_label: (
-                                                    logger.log(
-                                                        "STREAM",
+                                                expected_chunk_size = chunk.size
+                                                if (
+                                                    chunk.start
+                                                    < self.file_metadata.file_size
+                                                ):
+                                                    expected_chunk_size = min(
+                                                        chunk.size,
+                                                        self.file_metadata.file_size
+                                                        - chunk.start,
+                                                    )
+
+                                                if len(data) < expected_chunk_size:
+                                                    logger.warning(
                                                         self.build_log_message(
-                                                            f"Processing chunk(s) #{range_label} {label} took {duration}s"
+                                                            f"Incomplete chunk read for {chunk}: expected {expected_chunk_size} bytes, got {len(data)} bytes; "
+                                                            "discarding partial chunk to prevent cache corruption"
+                                                        )
+                                                    )
+                                                    raise RecoverableMediaStreamException(
+                                                        EmptyDataException(
+                                                            range=(
+                                                                chunk.start,
+                                                                chunk.end,
+                                                            )
+                                                        )
+                                                    )
+
+                                                with benchmark(
+                                                    log=lambda duration, label=chunk_label, range_label=chunk_range_label: (
+                                                        logger.log(
+                                                            "STREAM",
+                                                            self.build_log_message(
+                                                                f"Processing chunk(s) #{range_label} {label} took {duration}s"
+                                                            ),
+                                                        )
+                                                        if self.enable_tracing
+                                                        else None
+                                                    )
+                                                ):
+                                                    connection.increment_sequential_chunks()
+
+                                                    cache_result = await self._cache_chunk(
+                                                        start=chunk.start,
+                                                        data=data,
+                                                        admission=(
+                                                            "prefetch"
+                                                            if is_prefetch
+                                                            and not self._delivery_registry.has_pending(
+                                                                chunk.start
+                                                            )
+                                                            else "demand"
                                                         ),
                                                     )
-                                                    if self.enable_tracing
-                                                    else None
-                                                )
-                                            ):
-                                                connection.increment_sequential_chunks()
-
-                                                cache_result = await self._cache_chunk(
-                                                    start=chunk.start,
-                                                    data=data,
-                                                    admission=(
-                                                        "prefetch"
-                                                        if is_prefetch
-                                                        and not self._delivery_registry.has_pending(
-                                                            chunk.start
+                                                    self._inflight_chunk = None
+                                                    if hasattr(
+                                                        self, "adaptive_prefetch"
+                                                    ):
+                                                        self.adaptive_prefetch.record_provider_fetch(
+                                                            monotonic() - fetch_started
                                                         )
-                                                        else "demand"
+
+                                                    from .cache import CachePutResult
+
+                                                    if cache_result in (
+                                                        CachePutResult.STORED_HOT,
+                                                        CachePutResult.STORED_WARM,
+                                                    ):
+                                                        chunk.emit_cache_signal()
+
+                                                    connection.current_read_position += len(
+                                                        data
+                                                    )
+                                                    stream_consumed = False
+
+                                                    position = (
+                                                        connection.current_read_position
+                                                    )
+                                                    if self._consumer_end is not None:
+                                                        self._update_runway_observation(
+                                                            self._consumer_end + 1
+                                                        )
+
+                                                    self.session_statistics.bytes_transferred += len(
+                                                        data
+                                                    )
+                                                    self.session_statistics.publish()
+                                            except trio.Cancelled:
+                                                if stream_consumed or getattr(
+                                                    getattr(
+                                                        connection, "response", None
                                                     ),
-                                                )
-                                                self._inflight_chunk = None
-                                                if hasattr(self, "adaptive_prefetch"):
-                                                    self.adaptive_prefetch.record_provider_fetch(
-                                                        monotonic() - fetch_started
-                                                    )
-
-                                                from .cache import CachePutResult
-
-                                                if cache_result in (
-                                                    CachePutResult.STORED_HOT,
-                                                    CachePutResult.STORED_WARM,
+                                                    "is_closed",
+                                                    False,
                                                 ):
-                                                    chunk.emit_cache_signal()
-
-                                                connection.current_read_position += len(
-                                                    data
-                                                )
-
-                                                position = (
-                                                    connection.current_read_position
-                                                )
-                                                if self._consumer_end is not None:
-                                                    self._update_runway_observation(
-                                                        self._consumer_end + 1
+                                                    self._invalidate_misaligned_connection(
+                                                        connection,
+                                                        chunk_start=chunk.start,
+                                                        chunk_size=chunk.size,
+                                                        prefer_pending_demand=True,
                                                     )
-
-                                                self.session_statistics.bytes_transferred += len(
-                                                    data
-                                                )
-                                                self.session_statistics.publish()
+                                                raise
 
                                 if seek_range:
                                     await _process_chunks(seek_range.uncached_chunks)
@@ -2177,6 +2248,8 @@ class MediaStream:
                                                         prefetch_gen,
                                                         _process_chunks,
                                                     )
+                                                    if connection.seek_required.value:
+                                                        break
                                                 else:
                                                     prefetched = await self._run_opportunistic_prefetch(
                                                         ahead,

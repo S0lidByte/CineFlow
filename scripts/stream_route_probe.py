@@ -64,12 +64,14 @@ def read_stored_link(settings_file: Path, item_id: int) -> str:
     import psycopg2
 
     try:
-        dsn = json.loads(settings_file.read_text(encoding="utf-8"))["database"]["host"]
         forced = os.getenv("CINEFLOW_FORCE_ENV", os.getenv("RIVEN_FORCE_ENV", ""))
-        if forced.strip().lower() == "true":
-            dsn = os.getenv(
-                "CINEFLOW_DATABASE_HOST", os.getenv("RIVEN_DATABASE_HOST", dsn)
-            )
+        env_dsn = os.getenv("CINEFLOW_DATABASE_HOST", os.getenv("RIVEN_DATABASE_HOST"))
+        if forced.strip().lower() == "true" and env_dsn is not None:
+            dsn = env_dsn
+        else:
+            dsn = json.loads(settings_file.read_text(encoding="utf-8"))["database"][
+                "host"
+            ]
         if not isinstance(dsn, str):
             raise TypeError
         dsn = dsn.replace("postgresql+psycopg2://", "postgresql://", 1)

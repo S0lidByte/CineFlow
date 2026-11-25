@@ -582,10 +582,53 @@ def test_cache_lru_eviction_shortfall_sets_failure_and_refuses_prefetch(
             p3,
             admission="prefetch",
         )
+        assert res is CachePutResult.STORED_WARM
 
-        # Prefetch must be refused or eviction failure recorded
+        # Prefetch eviction shortfall must be recorded and 120-byte leased entry kept
         assert cache.eviction_refusals >= 1
-        # p1 (active playback) must NOT have been evicted
         assert cache.has("movie.mkv", 0, 119)
+
+    trio.run(_run)
+
+
+def test_cache_lru_eviction_shortfall_refuses_overflow_prefetch_and_skips_zero_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Shortfall refuses physical overflow past max_size_bytes; zero-target _evict_lru avoids scanning _index."""
+    from program.services.streaming.cache import CachePutResult
+
+    cache = _make_cache(tmp_path, max_size_bytes=200)
+
+    async def _run() -> None:
+        p1 = b"A" * 120
+        p2 = b"B" * 50
+        p3_overflow = b"C" * 81  # 120 + 81 = 201 > 200 hard cap
+
+        await cache.put("movie.mkv", 0, p1, stream_id="active_stream_1")
+        await cache.put("movie.mkv", 120, p2)
+
+        # Verify zero-target _evict_lru returns True without scanning protected status.
+        probe_calls = 0
+        orig_protected = cache._is_entry_protected
+
+        def tracking_protected(key, entry):
+            nonlocal probe_calls
+            probe_calls += 1
+            return orig_protected(key, entry)
+
+        monkeypatch.setattr(cache, "_is_entry_protected", tracking_protected)
+        assert await cache._evict_lru(0) is True
+        assert probe_calls == 0
+
+        res = await cache.put(
+            "movie.mkv",
+            170,
+            p3_overflow,
+            admission="prefetch",
+        )
+        assert res is CachePutResult.REFUSED_PHYSICAL_PRESSURE
+        assert cache.eviction_refusals >= 1
+        assert cache.has("movie.mkv", 0, 119)
+        assert not cache.has("movie.mkv", 170, 250)
 
     trio.run(_run)
