@@ -26,6 +26,13 @@
 
 * **stream:** time a bounded provider read by item ID without exposing the saved link or refreshing it, honoring forced environment DSN overrides when no settings file exists.
 
+## [1.52.9](https://github.com/S0lidByte/CineFlow/compare/v1.52.8...v1.52.9) (2026-11-26)
+
+
+### Bug Fixes
+
+* **stream:** scale multi-worker parallel prefetch and remove hot-cache shard contention ([#394](https://github.com/S0lidByte/CineFlow/issues/394)) ([e0af868](https://github.com/S0lidByte/CineFlow/commit/e0af868a6aeee72cfd184ef1451ee7fceabcf040))
+
 ## [1.52.8](https://github.com/S0lidByte/CineFlow/compare/v1.52.7...v1.52.8) (2026-11-25)
 
 
