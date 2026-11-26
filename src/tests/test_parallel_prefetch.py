@@ -1927,3 +1927,383 @@ def test_large_window_multi_worker_wave_bounds_primary_span():
         assert dispatched_batches[0] == list(range(1, 17))
 
     trio.run(run)
+
+
+def test_speculative_span_run_preserves_unattempted_tail_after_cached_break() -> None:
+    """Stopping early on a cached/claimed middle chunk must re-queue unattempted suffix chunks."""
+    from contextlib import asynccontextmanager
+
+    import trio_util
+
+    from program.services.streaming.cache import CachePutResult
+
+    chunk_size = 1024 * 1024
+    total_size = 4 * chunk_size
+    chunks = [
+        _TestChunk(
+            start=i * chunk_size,
+            end=(i + 1) * chunk_size - 1,
+            size=chunk_size,
+            index=i,
+            is_cached=trio_util.AsyncBool(i == 1),
+        )
+        for i in range(4)
+    ]
+    for c in chunks:
+        c.emit_cache_signal = lambda ch=c: setattr(ch.is_cached, "value", True)
+
+    observed_ranges: list[str] = []
+
+    class Pool:
+        @asynccontextmanager
+        async def admit(self, kind, *, workload):
+            assert (kind, workload) == ("body", "background")
+            yield
+
+        def acquire_lease(self, *, use_proxy):
+            return SimpleNamespace(client=SimpleNamespace(stream=self.stream))
+
+        @asynccontextmanager
+        async def stream(self, method, url, *, headers, timeout):
+            observed_ranges.append(headers["Range"])
+            start_s, end_s = headers["Range"].removeprefix("bytes=").split("-")
+            start, end = int(start_s), int(end_s)
+            length = end - start + 1
+
+            async def aiter_raw():
+                yield bytes([65 + (start // chunk_size)]) * length
+
+            yield SimpleNamespace(
+                status_code=206,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{total_size}",
+                    "Content-Length": str(length),
+                },
+                raise_for_status=lambda: None,
+                aiter_raw=aiter_raw,
+            )
+
+        async def release_lease(self, lease):
+            return None
+
+    async def run() -> None:
+        stream = MediaStream.__new__(MediaStream)
+        stream.config = SimpleNamespace(
+            chunk_size=chunk_size,
+            block_size=128 * 1024,
+            chunk_wait_timeout_seconds=10,
+            connect_timeout_seconds=10,
+        )
+        stream._producer_claims = _ProducerClaims()
+        stream._delivery_registry = SimpleNamespace(
+            get_pending_starts=lambda: [], has_pending=lambda _: False
+        )
+        stream.is_killed = trio_util.AsyncBool(False)
+        stream.adaptive_prefetch = SimpleNamespace(
+            current_generation=0, record_provider_fetch=MagicMock()
+        )
+        stream._use_proxy_client = False
+        stream._speculative_active = 0
+        stream._speculative_peak = 0
+        stream._speculative_bytes = 0
+        stream._speculative_failures = 0
+        stream._speculative_inflight_chunks = set()
+        stream._batch_spec_starts = {c.start for c in chunks}
+        stream.session_statistics = SessionStatistics()
+        stream.build_log_message = lambda text: text
+        stream.target_url = SimpleNamespace(value="https://example.test/video")
+        stream.file_metadata = SimpleNamespace(file_size=total_size)
+        stream.provider = "test"
+        stream._http_pool = Pool()
+        stream._cache_chunk = AsyncMock(return_value=CachePutResult.STORED_HOT)
+
+        await stream._fetch_speculative_span(chunks, 0)
+
+        # C0 fetched singly, C1 skipped (cached), [C2, C3] preserved and fetched as one coalesced span
+        assert observed_ranges == [
+            f"bytes=0-{chunk_size - 1}",
+            f"bytes={2 * chunk_size}-{total_size - 1}",
+        ]
+        assert all(c.is_cached.value for c in chunks)
+        assert stream._producer_claims.active_starts() == set()
+
+    trio.run(run)
+
+
+def test_speculative_break_on_claimed_head_preserves_other_owner_and_fetches_tail() -> (
+    None
+):
+    """When C0 is already claimed by another producer, C0 stays owned in _batch_spec_starts while [C1..C3] are fetched."""
+    from contextlib import asynccontextmanager
+
+    import trio_util
+
+    from program.services.streaming.cache import CachePutResult
+
+    chunk_size = 1024 * 1024
+    total_size = 4 * chunk_size
+    chunks = [
+        _TestChunk(
+            start=i * chunk_size,
+            end=(i + 1) * chunk_size - 1,
+            size=chunk_size,
+            index=i,
+            is_cached=trio_util.AsyncBool(False),
+        )
+        for i in range(4)
+    ]
+    for c in chunks:
+        c.emit_cache_signal = lambda ch=c: setattr(ch.is_cached, "value", True)
+
+    observed_ranges: list[str] = []
+
+    class Pool:
+        @asynccontextmanager
+        async def admit(self, kind, *, workload):
+            yield
+
+        def acquire_lease(self, *, use_proxy):
+            return SimpleNamespace(client=SimpleNamespace(stream=self.stream))
+
+        @asynccontextmanager
+        async def stream(self, method, url, *, headers, timeout):
+            observed_ranges.append(headers["Range"])
+            start_s, end_s = headers["Range"].removeprefix("bytes=").split("-")
+            start, end = int(start_s), int(end_s)
+            length = end - start + 1
+
+            async def aiter_raw():
+                yield b"X" * length
+
+            yield SimpleNamespace(
+                status_code=206,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{total_size}",
+                    "Content-Length": str(length),
+                },
+                raise_for_status=lambda: None,
+                aiter_raw=aiter_raw,
+            )
+
+        async def release_lease(self, lease):
+            return None
+
+    async def run() -> None:
+        stream = MediaStream.__new__(MediaStream)
+        stream.config = SimpleNamespace(
+            chunk_size=chunk_size,
+            block_size=128 * 1024,
+            chunk_wait_timeout_seconds=10,
+            connect_timeout_seconds=10,
+        )
+        stream._producer_claims = _ProducerClaims()
+        acquired, c0_claim = stream._producer_claims.acquire(0)
+        assert acquired
+        stream._delivery_registry = SimpleNamespace(
+            get_pending_starts=lambda: [], has_pending=lambda _: False
+        )
+        stream.is_killed = trio_util.AsyncBool(False)
+        stream.adaptive_prefetch = SimpleNamespace(
+            current_generation=0, record_provider_fetch=MagicMock()
+        )
+        stream._use_proxy_client = False
+        stream._speculative_active = 0
+        stream._speculative_peak = 0
+        stream._speculative_bytes = 0
+        stream._speculative_failures = 0
+        stream._speculative_inflight_chunks = set()
+        stream._batch_spec_starts = {c.start for c in chunks}
+        stream.session_statistics = SessionStatistics()
+        stream.build_log_message = lambda text: text
+        stream.target_url = SimpleNamespace(value="https://example.test/video")
+        stream.file_metadata = SimpleNamespace(file_size=total_size)
+        stream.provider = "test"
+        stream._http_pool = Pool()
+        stream._cache_chunk = AsyncMock(return_value=CachePutResult.STORED_HOT)
+
+        await stream._fetch_speculative_span(chunks, 0)
+
+        assert observed_ranges == [f"bytes={chunk_size}-{total_size - 1}"]
+        assert 0 in stream._batch_spec_starts
+        assert all(c.is_cached.value for c in chunks[1:])
+        stream._producer_claims.release(0, c0_claim)
+        assert stream._producer_claims.active_starts() == set()
+
+    trio.run(run)
+
+
+def test_speculative_header_and_trickle_timeouts_fail_fast_below_http_read_timeout() -> (
+    None
+):
+    """Speculative header stall (5s) and coalesced trickle stall (14s) fail fast before 30s STREAM_READ_TIMEOUT."""
+    from contextlib import asynccontextmanager
+
+    import trio_util
+    from trio.testing import MockClock
+
+    from program.services.streaming.cache import CachePutResult
+
+    chunk_size = 1024 * 1024
+    total_size = 4 * chunk_size
+
+    def make_stream(pool):
+        chunks = [
+            _TestChunk(
+                start=i * chunk_size,
+                end=(i + 1) * chunk_size - 1,
+                size=chunk_size,
+                index=i,
+                is_cached=trio_util.AsyncBool(False),
+            )
+            for i in range(4)
+        ]
+        for c in chunks:
+            c.emit_cache_signal = lambda ch=c: setattr(ch.is_cached, "value", True)
+        stream = MediaStream.__new__(MediaStream)
+        stream.config = SimpleNamespace(
+            chunk_size=chunk_size,
+            block_size=128 * 1024,
+            chunk_wait_timeout_seconds=10,
+            connect_timeout_seconds=10,
+        )
+        stream._producer_claims = _ProducerClaims()
+        stream._delivery_registry = SimpleNamespace(
+            get_pending_starts=lambda: [], has_pending=lambda _: False
+        )
+        stream.is_killed = trio_util.AsyncBool(False)
+        stream.adaptive_prefetch = SimpleNamespace(
+            current_generation=0, record_provider_fetch=MagicMock()
+        )
+        stream._use_proxy_client = False
+        stream._speculative_active = 0
+        stream._speculative_peak = 0
+        stream._speculative_bytes = 0
+        stream._speculative_failures = 0
+        stream._speculative_inflight_chunks = set()
+        stream.session_statistics = SessionStatistics()
+        stream.build_log_message = lambda text: text
+        stream.target_url = SimpleNamespace(value="https://example.test/video")
+        stream.file_metadata = SimpleNamespace(file_size=total_size)
+        stream.provider = "test"
+        stream._http_pool = pool
+        stream._cache_chunk = AsyncMock(return_value=CachePutResult.STORED_HOT)
+        return stream, chunks
+
+    async def run() -> None:
+        # 1. Hung headers on both single chunk and coalesced span must abort at 5.0s, not 30s.
+        released_leases = 0
+
+        class HungHeaderPool:
+            @asynccontextmanager
+            async def admit(self, kind, *, workload):
+                yield
+
+            def acquire_lease(self, *, use_proxy):
+                return SimpleNamespace(client=SimpleNamespace(stream=self.stream))
+
+            @asynccontextmanager
+            async def stream(self, method, url, *, headers, timeout):
+                assert timeout.read == 30.0
+                await trio.sleep_forever()
+                yield  # pragma: no cover
+
+            async def release_lease(self, lease):
+                nonlocal released_leases
+                released_leases += 1
+
+        s_single, chunks_single = make_stream(HungHeaderPool())
+        t0 = trio.current_time()
+        await s_single._fetch_speculative_chunk(chunks_single[0], 0)
+        elapsed_single = trio.current_time() - t0
+        assert elapsed_single == pytest.approx(5.0)
+        assert s_single._speculative_failures == 1
+        assert s_single._producer_claims.active_starts() == set()
+        assert s_single._speculative_active == 0
+        assert s_single._speculative_inflight_chunks == set()
+        assert released_leases == 1
+
+        s_span, chunks_span = make_stream(HungHeaderPool())
+        t1 = trio.current_time()
+        await s_span._fetch_speculative_span_run(chunks_span, 0)
+        elapsed_span = trio.current_time() - t1
+        assert elapsed_span == pytest.approx(5.0)
+        assert s_span._speculative_failures == 1
+        assert s_span._producer_claims.active_starts() == set()
+        assert s_span._speculative_active == 0
+        assert s_span._speculative_inflight_chunks == set()
+
+        # 2. Slow 6s/chunk trickle across 4 chunks (<7s per chunk) hits 14.0s span ceiling,
+        # commits first 2 completed chunks cleanly, and fails cleanly instead of taking 24s+.
+        released_trickle = 0
+
+        class SlowTricklePool:
+            @asynccontextmanager
+            async def admit(self, kind, *, workload):
+                yield
+
+            def acquire_lease(self, *, use_proxy):
+                return SimpleNamespace(client=SimpleNamespace(stream=self.stream))
+
+            @asynccontextmanager
+            async def stream(self, method, url, *, headers, timeout):
+                async def aiter_raw():
+                    for idx in range(4):
+                        await trio.sleep(6.0)
+                        yield bytes([65 + idx]) * chunk_size
+
+                yield SimpleNamespace(
+                    status_code=206,
+                    headers={
+                        "Content-Range": f"bytes 0-{total_size - 1}/{total_size}",
+                        "Content-Length": str(total_size),
+                    },
+                    raise_for_status=lambda: None,
+                    aiter_raw=aiter_raw,
+                )
+
+            async def release_lease(self, lease):
+                nonlocal released_trickle
+                released_trickle += 1
+
+        s_trickle, chunks_trickle = make_stream(SlowTricklePool())
+        t2 = trio.current_time()
+        await s_trickle._fetch_speculative_span_run(chunks_trickle, 0)
+        elapsed_trickle = trio.current_time() - t2
+        assert elapsed_trickle == pytest.approx(14.0)
+        assert chunks_trickle[0].is_cached.value is True
+        assert chunks_trickle[1].is_cached.value is True
+        assert chunks_trickle[2].is_cached.value is False
+        assert chunks_trickle[3].is_cached.value is False
+        assert s_trickle._speculative_failures == 1
+        assert s_trickle._producer_claims.active_starts() == set()
+        assert released_trickle == 1
+
+    trio.run(run, clock=MockClock(autojump_threshold=0))
+
+
+def test_fetch_speculative_span_missing_reservation_waits_without_spin() -> None:
+    """Missing _delivery_registry entry on blocking foreground demand must wait on primary instead of CPU-spinning."""
+
+    async def run() -> None:
+        h = _Harness(workers=2)
+        h.stream._batch_spec_starts = {h.chunks[2].start}
+        primary_done = trio.Event()
+        # Foreground pending exists, but get_entry intentionally returns None (race / torn-down reservation)
+        h.stream._delivery_registry.get_pending_starts = lambda: [h.chunks[1].start]  # type: ignore[method-assign]
+        h.stream._delivery_registry.get_entry = lambda _start: None  # type: ignore[method-assign]
+
+        async def complete_primary():
+            await trio.sleep(0.05)
+            primary_done.set()
+
+        with trio.fail_after(1):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(complete_primary)
+                await h.stream._fetch_speculative_span(
+                    [h.chunks[2]],
+                    0,
+                    [h.chunks[1]],
+                    primary_done,
+                )
+
+    trio.run(run)

@@ -668,3 +668,155 @@ def test_put_warm_fallback_overwrite_cleans_stale_hot_file(
         assert await cache.get("movie.mkv", 0, 199) == b"L" * 200
 
     trio.run(_run)
+
+
+def test_demotion_shard_serializes_concurrent_warm_fallback_upgrade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Demotion Phase 2..4 holds per-chunk shard so concurrent warm-fallback upgrade never loses or reverts bytes."""
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "warm",
+            max_size_bytes=10 * 1024 * 1024,
+            hot_dir=tmp_path / "hot",
+            hot_max_size_bytes=150,
+            metrics_enabled=False,
+        )
+    )
+    stage_done = trio.Event()
+    resume_after_stage = threading.Event()
+    orig_stage = cache._stage_demote_hot_to_warm_temp
+
+    def pausing_stage(key: str):
+        res = orig_stage(key)
+        trio.from_thread.run_sync(stage_done.set)
+        assert resume_after_stage.wait(5)
+        return res
+
+    # Scenario A: writer upgrades k0 via warm fallback right after Phase 1 staging
+    # (before _ensure_hot_capacity acquires _shard(k0) for Phase 2..4).
+    monkeypatch.setattr(cache, "_stage_demote_hot_to_warm_temp", pausing_stage)
+
+    async def _run_scenario_a() -> None:
+        k0 = cache._key("movie.mkv", 0)
+        await cache.put("movie.mkv", 0, b"a" * 140)
+        assert cache._index[k0].tier == "hot"
+
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(cache.trim)
+                await stage_done.wait()
+                # Concurrent warm-fallback overwrite while _hot_demotion_in_progress=True
+                await cache.put("movie.mkv", 0, b"Z" * 180)
+                assert cache._index[k0].tier == "warm"
+                assert cache._index[k0].size == 180
+                resume_after_stage.set()
+
+        assert cache._index[k0].tier == "warm"
+        assert cache._index[k0].size == 180
+        assert await cache.get("movie.mkv", 0, 179) == b"Z" * 180
+
+    trio.run(_run_scenario_a)
+
+    # Scenario B: writer attempts upgrade while Phase 2..4 is already executing;
+    # _shard(k0) serializes Phase 2..4 before writer enters.
+    monkeypatch.undo()
+    cache2 = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "warm2",
+            max_size_bytes=10 * 1024 * 1024,
+            hot_dir=tmp_path / "hot2",
+            hot_max_size_bytes=150,
+            metrics_enabled=False,
+        )
+    )
+    place_entered = trio.Event()
+    allow_place = threading.Event()
+    orig_place = cache2._place_staged_demotion
+    writer_finished_before_place = False
+
+    def blocking_place(key: str, staged_payload, staged_meta):
+        trio.from_thread.run_sync(place_entered.set)
+        assert allow_place.wait(5)
+        return orig_place(key, staged_payload, staged_meta)
+
+    monkeypatch.setattr(cache2, "_place_staged_demotion", blocking_place)
+
+    async def _run_scenario_b() -> None:
+        nonlocal writer_finished_before_place
+        k0 = cache2._key("movie2.mkv", 0)
+        await cache2.put("movie2.mkv", 0, b"m" * 140)
+
+        async def _writer() -> None:
+            nonlocal writer_finished_before_place
+            await cache2.put("movie2.mkv", 0, b"N" * 180)
+            if not allow_place.is_set():
+                writer_finished_before_place = True
+
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(cache2.trim)
+                await place_entered.wait()
+                nursery.start_soon(_writer)
+                await wait_all_tasks_blocked()
+                allow_place.set()
+
+        assert not writer_finished_before_place
+        assert cache2._index[k0].tier == "warm"
+        assert cache2._index[k0].size == 180
+        assert await cache2.get("movie2.mkv", 0, 179) == b"N" * 180
+        assert not cache2._file_for(k0, tier="hot").exists()
+
+    trio.run(_run_scenario_b)
+
+
+def test_demotion_cancellation_after_placement_cleans_warm_orphan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancelling demotion between Phase 2 placement and Phase 3 commit unlinks warm orphan cleanly."""
+    from contextlib import asynccontextmanager
+
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "warm",
+            max_size_bytes=10 * 1024 * 1024,
+            hot_dir=tmp_path / "hot",
+            hot_max_size_bytes=150,
+            metrics_enabled=False,
+        )
+    )
+    orig_locks = cache.locks
+    locks_calls = 0
+    phase3_entered = trio.Event()
+
+    @asynccontextmanager
+    async def intercepted_locks():
+        nonlocal locks_calls
+        locks_calls += 1
+        # Call #1: candidate selection, #2: pre-stage fence, #3: pre-Phase2 revalidation, #4: Phase 3 commit
+        if locks_calls == 4:
+            phase3_entered.set()
+            await trio.sleep_forever()
+        async with orig_locks():
+            yield
+
+    async def _run() -> None:
+        k0 = cache._key("cancel.mkv", 0)
+        await cache.put("cancel.mkv", 0, b"c" * 140)
+        monkeypatch.setattr(cache, "locks", intercepted_locks)
+
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(cache.trim)
+                await phase3_entered.wait()
+                # Phase 2 already placed warm_fp; cancel trim before Phase 3 index flip.
+                nursery.cancel_scope.cancel()
+
+        assert cache._index[k0].tier == "hot"
+        assert cache._file_for(k0, tier="hot").exists()
+        assert not cache._file_for(k0, tier="warm").exists()
+        assert not cache._metadata_file_for(k0, tier="warm").exists()
+        assert cache._hot_demotion_in_progress is False
+        assert await cache.get("cancel.mkv", 0, 139) == b"c" * 140
+
+    trio.run(_run)
