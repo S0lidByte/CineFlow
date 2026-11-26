@@ -1,11 +1,12 @@
 import inspect
 import re
 import threading
+from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import cached_property
+from functools import cached_property, partial
 from http import HTTPStatus
 from math import ceil
 from time import monotonic
@@ -352,6 +353,14 @@ class _ProducerClaims:
             self._owners.pop(start)
             event.set()
 
+    def is_claimed(self, start: int) -> bool:
+        """Return True if an active producer currently owns ``start``."""
+        return start in self._owners
+
+    def active_starts(self) -> set[int]:
+        """Return snapshot of chunk start offsets owned by active producers."""
+        return set(self._owners)
+
     def wake_all(self) -> None:
         for event in self._owners.values():
             event.set()
@@ -661,6 +670,7 @@ class MediaStream:
         self._speculative_scope: trio.CancelScope | None = None
         self._speculative_done: trio.Event | None = None
         self._speculative_inflight_chunks: set[tuple[int, int]] = set()
+        self._batch_spec_starts: set[int] | None = None
         # Per-failed-URL transport recovery budget: allows re-arming after progression on new URL
         self._last_recovered_url: str | None = None
         self._bytes_transferred_at_last_recovery: int = 0
@@ -1128,10 +1138,243 @@ class MediaStream:
             ).first_chunk.is_cached.value
         ]
 
-    async def _fetch_speculative_chunk(self, chunk: Chunk, generation: int) -> bool:
-        """Fetch one bounded range; return True only if foreground demand deferred it."""
+    def _should_defer_speculative_chunk(
+        self,
+        chunk_start: int,
+        *,
+        span_starts: set[int] | None = None,
+    ) -> bool:
+        """Yield only when unowned foreground demand needs priority over this transfer."""
+        pending = self._uncached_foreground_starts()
+        if not pending:
+            return False
+        batch_spec_starts = getattr(self, "_batch_spec_starts", None)
+        for start in pending:
+            if start == chunk_start or (
+                span_starts is not None and start in span_starts
+            ):
+                # Waiting foreground reader needs a chunk owned by this worker/span.
+                continue
+            if batch_spec_starts is not None and start in batch_spec_starts:
+                # Active sibling speculative worker in this batch owns this start.
+                continue
+            return True
+        return False
+
+    def _max_speculative_span_chunks(self) -> int:
+        """Return max contiguous chunks a speculative worker coalesces into one GET."""
+        cfg = getattr(self, "config", None)
+        if cfg is None:
+            return 1
+        chunk_size = getattr(cfg, "chunk_size", 0)
+        block_size = getattr(cfg, "block_size", 128 * 1024)
+        if chunk_size < block_size or chunk_size >= 4 * 1024 * 1024:
+            return 1
+        return max(1, (4 * 1024 * 1024) // chunk_size)
+
+    async def _commit_speculative_chunk(
+        self,
+        chunk: Chunk,
+        data: bytes,
+        generation: int,
+        *,
+        fetch_started: float,
+    ) -> None:
+        """Publish one verified speculative chunk into cache and telemetry."""
         from .cache import CachePutResult
 
+        result = await self._cache_chunk(
+            start=chunk.start,
+            data=data,
+            admission=(
+                "demand"
+                if self._delivery_registry.has_pending(chunk.start)
+                else "prefetch"
+            ),
+        )
+        if not self._transport_generation_live(generation):
+            return
+        if result in (
+            CachePutResult.STORED_HOT,
+            CachePutResult.STORED_WARM,
+        ):
+            chunk.emit_cache_signal()
+        self._speculative_bytes += len(data)
+        if hasattr(self, "adaptive_prefetch"):
+            self.adaptive_prefetch.record_provider_fetch(monotonic() - fetch_started)
+
+    async def _fetch_speculative_span_run(
+        self, sub_run: list[Chunk], generation: int
+    ) -> bool:
+        """Fetch a bounded contiguous chunk run in one streaming Range GET."""
+        if not sub_run or not self._transport_generation_live(generation):
+            return False
+
+        claimed: list[tuple[Chunk, trio.Event]] = []
+        for chunk in sub_run:
+            if chunk.is_cached.value:
+                break
+            acquired, claim = self._producer_claims.acquire(chunk.start)
+            if not acquired:
+                break
+            if chunk.is_cached.value:
+                self._producer_claims.release(chunk.start, claim)
+                break
+            if claimed and chunk.start != claimed[-1][0].start + claimed[-1][0].size:
+                self._producer_claims.release(chunk.start, claim)
+                break
+            claimed.append((chunk, claim))
+
+        if not claimed:
+            return False
+
+        if len(claimed) == 1:
+            only_chunk, only_claim = claimed[0]
+            self._producer_claims.release(only_chunk.start, only_claim)
+            return await self._fetch_speculative_chunk(only_chunk, generation)
+
+        span_starts = {c.start for c, _ in claimed}
+        try:
+            if self._should_defer_speculative_chunk(
+                claimed[0][0].start, span_starts=span_starts
+            ):
+                return True
+            pool = self._http_pool
+            if pool is None:
+                return False
+            try:
+                async with pool.admit("body", workload="background"):
+                    if not self._transport_generation_live(generation):
+                        return False
+                    if self._should_defer_speculative_chunk(
+                        claimed[0][0].start, span_starts=span_starts
+                    ):
+                        return True
+
+                    lease = pool.acquire_lease(use_proxy=self._use_proxy_client)
+                    spec_chunks = getattr(self, "_speculative_inflight_chunks", None)
+                    span_start = claimed[0][0].start
+                    span_end = claimed[-1][0].end
+                    expected_total = span_end - span_start + 1
+                    try:
+                        self._speculative_active += 1
+                        self._speculative_peak = max(
+                            self._speculative_peak, self._speculative_active
+                        )
+                        if spec_chunks is not None:
+                            for c, _ in claimed:
+                                spec_chunks.add((generation, c.start))
+                        url = self.target_url.value
+                        req_context = lease.client.stream(
+                            "GET",
+                            url,
+                            timeout=self._request_http_timeout(),
+                            headers={
+                                "Accept-Encoding": "identity",
+                                "Range": format_range_header(span_start, span_end),
+                            },
+                        )
+                        async with observe_response(
+                            req_context, self.session_statistics, speculative=True
+                        ) as response:
+                            response.raise_for_status()
+                            parsed = validate_range_response(
+                                response,
+                                span_start,
+                                span_end,
+                                self.provider,
+                                self.file_metadata.file_size,
+                            )
+                            if (
+                                parsed is None
+                                or parsed.last_byte != span_end
+                                or parsed.complete_length
+                                != self.file_metadata.file_size
+                            ):
+                                raise ValueError(
+                                    "Speculative span Content-Range does not match exact span/file size"
+                                )
+                            length = response.headers.get("Content-Length")
+                            if length is not None and int(length) != expected_total:
+                                raise ValueError(
+                                    "Speculative span Content-Length mismatch"
+                                )
+
+                            buf = bytearray()
+                            cursor = 0
+                            consumed_total = 0
+                            idx = 0
+                            chunk_started = monotonic()
+                            wait_sec = float(self.config.chunk_wait_timeout_seconds)
+                            with trio.fail_at(
+                                trio.current_time() + wait_sec
+                            ) as chunk_scope:
+                                async for part in _iter_raw_chunks(response):
+                                    if not self._transport_generation_live(generation):
+                                        return False
+                                    buf.extend(part)
+                                    if (
+                                        len(buf) - cursor
+                                        > expected_total - consumed_total
+                                    ):
+                                        raise ValueError(
+                                            "Speculative span response exceeds requested range"
+                                        )
+                                    while idx < len(claimed):
+                                        cur, cur_claim = claimed[idx]
+                                        if len(buf) - cursor < cur.size:
+                                            break
+                                        payload = bytes(buf[cursor : cursor + cur.size])
+                                        cursor += cur.size
+                                        consumed_total += cur.size
+                                        await self._commit_speculative_chunk(
+                                            cur,
+                                            payload,
+                                            generation,
+                                            fetch_started=chunk_started,
+                                        )
+                                        self._producer_claims.release(
+                                            cur.start, cur_claim
+                                        )
+                                        if spec_chunks is not None:
+                                            spec_chunks.discard((generation, cur.start))
+                                        idx += 1
+                                        chunk_started = monotonic()
+                                        chunk_scope.deadline = (
+                                            trio.current_time() + wait_sec
+                                        )
+                                    if cursor >= 1024 * 1024:
+                                        del buf[:cursor]
+                                        cursor = 0
+                            if idx != len(claimed) or consumed_total != expected_total:
+                                raise ValueError("Truncated speculative span response")
+                    finally:
+                        self._speculative_active -= 1
+                        if spec_chunks is not None:
+                            for c, _ in claimed:
+                                spec_chunks.discard((generation, c.start))
+                        with trio.CancelScope(shield=True):
+                            await pool.release_lease(lease)
+            except httpx.PoolTimeout:
+                return False
+        except trio.Cancelled:
+            raise
+        except Exception as exc:
+            self._speculative_failures += 1
+            self.session_statistics.speculative_failures += 1
+            self.session_statistics.publish()
+            logger.debug(
+                self.build_log_message(
+                    f"Speculative span skipped: {type(exc).__name__}"
+                )
+            )
+        finally:
+            for c, claim in claimed:
+                self._producer_claims.release(c.start, claim)
+        return False
+
+    async def _fetch_speculative_chunk(self, chunk: Chunk, generation: int) -> bool:
+        """Fetch one bounded range; return True only if foreground demand deferred it."""
         if not self._transport_generation_live(generation) or chunk.is_cached.value:
             return False
         acquired, claim = self._producer_claims.acquire(chunk.start)
@@ -1140,7 +1383,7 @@ class MediaStream:
         try:
             if chunk.is_cached.value:
                 return False
-            if self._uncached_foreground_starts():
+            if self._should_defer_speculative_chunk(chunk.start):
                 return True
             # Reserve a body token before opening the independent HTTP response.
             # Speculative saturation is a soft yield, never a pool heal.
@@ -1154,7 +1397,7 @@ class MediaStream:
                         or chunk.is_cached.value
                     ):
                         return False
-                    if self._uncached_foreground_starts():
+                    if self._should_defer_speculative_chunk(chunk.start):
                         return True
                     lease = pool.acquire_lease(use_proxy=self._use_proxy_client)
                     try:
@@ -1214,23 +1457,12 @@ class MediaStream:
                                 raise ValueError("Truncated speculative response")
                         if not self._transport_generation_live(generation):
                             return False
-                        result = await self._cache_chunk(
-                            start=chunk.start,
-                            data=bytes(data),
-                            admission=(
-                                "demand"
-                                if self._delivery_registry.has_pending(chunk.start)
-                                else "prefetch"
-                            ),
+                        await self._commit_speculative_chunk(
+                            chunk,
+                            bytes(data),
+                            generation,
+                            fetch_started=monotonic(),
                         )
-                        if not self._transport_generation_live(generation):
-                            return False
-                        if result in (
-                            CachePutResult.STORED_HOT,
-                            CachePutResult.STORED_WARM,
-                        ):
-                            chunk.emit_cache_signal()
-                        self._speculative_bytes += len(data)
                     finally:
                         self._speculative_active -= 1
                         spec_chunks = getattr(
@@ -1263,44 +1495,170 @@ class MediaStream:
         generation: int,
         primary_span: list[Chunk] | None = None,
         primary_done: trio.Event | None = None,
+        *,
+        work_queues: list[deque[Chunk]] | None = None,
+        queue_index: int | None = None,
+        on_ownership_change: Callable[[], None] | None = None,
     ) -> None:
-        """Yield to foreground work, then resume if this batch can satisfy it."""
-        primary: dict[int, Chunk] | None = None
-        for chunk in span:
-            while self._transport_generation_live(generation):
-                pending = (
-                    self._uncached_foreground_starts()
-                    if hasattr(self, "_delivery_registry")
-                    else []
-                )
-                if not pending:
-                    deferred = await self._fetch_speculative_chunk(chunk, generation)
-                    if not deferred:
-                        break
-                    continue  # Demand arrived during pool admission; no permit is held.
+        """Yield to unowned foreground work, coalesce contiguous runs, and steal stalled tails."""
+        primary: dict[int, Chunk] | None = (
+            {(c if isinstance(c, int) else c.start): c for c in primary_span}
+            if primary_span is not None
+            else None
+        )
+        my_queue: deque[Chunk] = (
+            work_queues[queue_index]
+            if (work_queues is not None and queue_index is not None)
+            else deque(span)
+        )
+        max_run = self._max_speculative_span_chunks()
 
-                if (
-                    primary_span is None
-                    or primary_done is None
-                    or primary_done.is_set()
+        def _is_cached(item: Any) -> bool:
+            cached = getattr(item, "is_cached", None)
+            return bool(getattr(cached, "value", False))
+
+        def _item_start(item: Chunk | int) -> int:
+            return item if isinstance(item, int) else item.start
+
+        def _pop_next_run() -> list[Any]:
+            run: list[Any] = []
+            while my_queue and len(run) < max_run:
+                head = my_queue[0]
+                if _is_cached(head):
+                    my_queue.popleft()
+                    continue
+                if run and (
+                    not hasattr(head, "start")
+                    or not hasattr(run[-1], "start")
+                    or not hasattr(run[-1], "size")
+                    or head.start != run[-1].start + run[-1].size
                 ):
+                    break
+                run.append(my_queue.popleft())
+            if run or work_queues is None:
+                return run
+
+            # Own queue drained: steal contiguous unclaimed chunks from the tail
+            # of the longest peer queue so straggling workers never stall the batch.
+            steal_source = max(
+                (q for q in work_queues if q is not my_queue and len(q) > 0),
+                key=len,
+                default=None,
+            )
+            if steal_source is None:
+                return []
+            steal_cap = min(max_run, max(1, len(steal_source) // 2))
+            stolen: deque[Any] = deque()
+            while steal_source and len(stolen) < steal_cap:
+                tail = steal_source[-1]
+                if _is_cached(tail):
+                    steal_source.pop()
+                    continue
+                tail_start = _item_start(tail)
+                claims = getattr(self, "_producer_claims", None)
+                if claims is not None and claims.is_claimed(tail_start):
+                    break
+                if stolen and (
+                    not hasattr(tail, "start")
+                    or not hasattr(tail, "size")
+                    or not hasattr(stolen[0], "start")
+                    or tail.start + tail.size != stolen[0].start
+                ):
+                    break
+                stolen.appendleft(steal_source.pop())
+            return list(stolen)
+
+        batch_spec = getattr(self, "_batch_spec_starts", None)
+        try:
+            while self._transport_generation_live(generation):
+                sub_run = _pop_next_run()
+                if not sub_run:
                     return
-                if primary is None:
-                    primary = {c.start: c for c in primary_span}
-                if any(start not in primary for start in pending):
-                    # The play loop must leave this batch to dispatch that read.
-                    return
-                start = pending[0]
-                reservation = self._delivery_registry.get_entry(start)
-                if reservation is not None:
-                    primary_chunk = primary[start]
-                    await trio_util.wait_any(
-                        lambda: primary_chunk.is_cached.wait_value(True),
-                        reservation.ready.wait,
-                        primary_done.wait,
+                sub_starts = {_item_start(c) for c in sub_run}
+                while self._transport_generation_live(generation):
+                    pending = (
+                        self._uncached_foreground_starts()
+                        if hasattr(self, "_delivery_registry")
+                        else []
                     )
-            else:
-                return
+                    blocking_pending = [
+                        s
+                        for s in pending
+                        if s not in sub_starts
+                        and (batch_spec is None or s not in batch_spec)
+                    ]
+                    if not blocking_pending:
+                        if len(sub_run) == 1:
+                            deferred = await self._fetch_speculative_chunk(
+                                sub_run[0], generation
+                            )
+                        else:
+                            deferred = await self._fetch_speculative_span_run(
+                                sub_run, generation
+                            )
+                        if not deferred:
+                            discarded = False
+                            if batch_spec is not None:
+                                for c in sub_run:
+                                    if not _is_cached(c):
+                                        start_val = _item_start(c)
+                                        if start_val in batch_spec:
+                                            batch_spec.discard(start_val)
+                                            discarded = True
+                            if discarded and on_ownership_change is not None:
+                                on_ownership_change()
+                            break
+                        pending = (
+                            self._uncached_foreground_starts()
+                            if hasattr(self, "_delivery_registry")
+                            else []
+                        )
+                        blocking_pending = [
+                            s
+                            for s in pending
+                            if s not in sub_starts
+                            and (batch_spec is None or s not in batch_spec)
+                        ]
+                        if not blocking_pending:
+                            continue
+
+                    if (
+                        primary is None
+                        or primary_done is None
+                        or primary_done.is_set()
+                        or any(start not in primary for start in blocking_pending)
+                    ):
+                        for c in reversed(sub_run):
+                            my_queue.appendleft(c)
+                        return
+                    start = blocking_pending[0]
+                    reservation = self._delivery_registry.get_entry(start)
+                    if reservation is not None:
+                        primary_chunk = primary[start]
+                        if hasattr(primary_chunk, "is_cached"):
+                            await trio_util.wait_any(
+                                lambda: primary_chunk.is_cached.wait_value(True),
+                                reservation.ready.wait,
+                                primary_done.wait,
+                            )
+                        else:
+                            await trio_util.wait_any(
+                                reservation.ready.wait,
+                                primary_done.wait,
+                            )
+                else:
+                    return
+        finally:
+            discarded_leftover = False
+            if batch_spec is not None:
+                while my_queue:
+                    leftover = my_queue.popleft()
+                    start_val = _item_start(leftover)
+                    if start_val in batch_spec:
+                        batch_spec.discard(start_val)
+                        discarded_leftover = True
+            if discarded_leftover and on_ownership_change is not None:
+                on_ownership_change()
 
     def _partition_prefetch_spans(
         self, chunks: OrderedSet[Chunk] | list[Chunk], parallel_workers: int
@@ -1368,37 +1726,74 @@ class MediaStream:
                 chunks, self.parallel_prefetch_workers
             )
             primary_done = trio.Event()
-            batch_starts = {getattr(chunk, "start", chunk) for chunk in chunks}
+            ownership_changed = trio.Event()
+
+            def _notify_ownership_changed() -> None:
+                nonlocal ownership_changed
+                ownership_changed.set()
+                ownership_changed = trio.Event()
+
+            batch_starts: set[int] = {
+                chunk if isinstance(chunk, int) else chunk.start for chunk in chunks
+            }
+            spec_starts: set[int] = {
+                chunk if isinstance(chunk, int) else chunk.start
+                for span in spec_spans
+                for chunk in span
+            }
+            self._batch_spec_starts = spec_starts
+            work_queues = [deque(span) for span in spec_spans]
+
+            def _has_unowned_demand() -> bool:
+                recent_reads = getattr(self, "recent_reads", None)
+                if recent_reads is None or recent_reads.current_read.value is None:
+                    return False
+                claims = getattr(self, "_producer_claims", None)
+                primary_finished = primary_done.is_set()
+                for start in self._uncached_foreground_starts():
+                    if start not in batch_starts:
+                        return True
+                    if (
+                        primary_finished
+                        and start not in spec_starts
+                        and (claims is None or not claims.is_claimed(start))
+                    ):
+                        return True
+                return False
 
             async def wait_for_unowned_demand() -> None:
                 recent_reads = getattr(self, "recent_reads", None)
                 if recent_reads is None:
                     await trio.sleep_forever()
                 else:
-                    await recent_reads.current_read.wait_value(
-                        lambda read: (
-                            read is not None
-                            and any(
-                                start not in batch_starts
-                                for start in self._uncached_foreground_starts()
-                            )
+                    while not _has_unowned_demand():
+                        cur_event = ownership_changed
+                        await trio_util.wait_any(
+                            lambda: recent_reads.current_read.wait_value(
+                                lambda _v: _has_unowned_demand()
+                            ),
+                            cur_event.wait,
                         )
-                    )
 
-            # The nursery is a batch barrier. Demand outside this batch has no
-            # producer here, so waiting for an unrelated speculative body would
-            # stall playback until that body's timeout. Drain its owners first,
-            # then let the main loop dispatch the queued foreground read.
+            # The nursery is a batch barrier. Demand outside active batch owners
+            # has no producer here, so waiting for an unrelated speculative body
+            # would stall playback until that body's timeout. Drain its owners
+            # first, then let the main loop dispatch the queued foreground read.
             async with trio_util.move_on_when(wait_for_unowned_demand) as scope:
                 self._speculative_scope = scope
                 async with trio.open_nursery() as nursery:
-                    for span in spec_spans:
+                    for q_idx, span in enumerate(spec_spans):
                         nursery.start_soon(
-                            self._fetch_speculative_span,
-                            span,
-                            generation,
-                            primary_span,
-                            primary_done,
+                            partial(
+                                self._fetch_speculative_span,
+                                span,
+                                generation,
+                                primary_span,
+                                primary_done,
+                                work_queues=work_queues,
+                                queue_index=q_idx,
+                                on_ownership_change=_notify_ownership_changed,
+                            )
                         )
                     try:
                         await process_chunks(
@@ -1408,9 +1803,11 @@ class MediaStream:
                         )
                     finally:
                         primary_done.set()
+                        _notify_ownership_changed()
                     if not self._transport_generation_live(generation):
                         nursery.cancel_scope.cancel()
         finally:
+            self._batch_spec_starts = None
             self._speculative_scope = None
             self._speculative_done = None
             done.set()
@@ -2223,33 +2620,130 @@ class MediaStream:
                                                             f"ahead of playhead@{playhead_end}"
                                                         ),
                                                     )
+                                                parallel_workers = getattr(
+                                                    self, "parallel_prefetch_workers", 1
+                                                )
+                                                wave_cap: int | None = None
+                                                if (
+                                                    parallel_workers > 1
+                                                    and prefetch_gen is not None
+                                                    and self.config.chunk_size
+                                                    >= getattr(
+                                                        self.config,
+                                                        "block_size",
+                                                        128 * 1024,
+                                                    )
+                                                ):
+                                                    wave_cap = max(
+                                                        parallel_workers * 2,
+                                                        parallel_workers
+                                                        * self._max_speculative_span_chunks(),
+                                                    )
+                                                batch_ahead = (
+                                                    OrderedSet(list(ahead)[:wave_cap])
+                                                    if wave_cap is not None
+                                                    and len(ahead) > wave_cap
+                                                    else ahead
+                                                )
                                                 # Prefer contiguous fetch from connection tip;
                                                 # seek if gap to first prefetch chunk.
-                                                first = ahead[0]
+                                                first = batch_ahead[0]
                                                 if (
                                                     connection.current_read_position
                                                     < first.start
                                                 ):
-                                                    if (
+                                                    gap_bytes = (
                                                         first.start
                                                         - connection.current_read_position
-                                                        <= self.config.chunk_size * 2
-                                                    ):
-                                                        gap_range = self.chunker.get_chunk_range(
+                                                    )
+                                                    gap_range = (
+                                                        self.chunker.get_chunk_range(
                                                             position=connection.current_read_position,
-                                                            size=first.start
-                                                            - connection.current_read_position,
+                                                            size=gap_bytes,
                                                         )
-                                                        if gap_range.uncached_chunks:
-                                                            prefetched = await self._run_opportunistic_prefetch(
-                                                                gap_range.uncached_chunks,
-                                                                _process_chunks,
-                                                                label="Prefetch gap-fill",
-                                                                prefetch_gen=prefetch_gen,
-                                                            )
-                                                            if not prefetched:
-                                                                break
+                                                        if gap_bytes
+                                                        <= self.config.chunk_size * 2
+                                                        else None
+                                                    )
+                                                    if (
+                                                        gap_range is not None
+                                                        and gap_range.uncached_chunks
+                                                    ):
+                                                        prefetched = await self._run_opportunistic_prefetch(
+                                                            gap_range.uncached_chunks,
+                                                            _process_chunks,
+                                                            label="Prefetch gap-fill",
+                                                            prefetch_gen=prefetch_gen,
+                                                        )
+                                                        if (
+                                                            not prefetched
+                                                            or connection.seek_required.value
+                                                        ):
+                                                            break
                                                     else:
+                                                        # Avoid tearing down the primary HTTP stream
+                                                        # just to fetch a 1-2 chunk tail edge when
+                                                        # speculative workers already filled runway ahead.
+                                                        footer_limit = getattr(
+                                                            self.chunker,
+                                                            "footer_start",
+                                                            self.file_metadata.file_size,
+                                                        )
+                                                        at_eof_horizon = (
+                                                            playhead_end
+                                                            + (prefetch_window + 1)
+                                                            * self.config.chunk_size
+                                                            >= footer_limit
+                                                        )
+                                                        effective_batch = (
+                                                            min(
+                                                                prefetch_window,
+                                                                wave_cap,
+                                                            )
+                                                            if wave_cap is not None
+                                                            else prefetch_window
+                                                        )
+                                                        min_batch = (
+                                                            min(
+                                                                effective_batch,
+                                                                max(
+                                                                    parallel_workers,
+                                                                    effective_batch
+                                                                    // 2,
+                                                                ),
+                                                            )
+                                                            if wave_cap is not None
+                                                            else min(
+                                                                prefetch_window,
+                                                                max(
+                                                                    parallel_workers
+                                                                    * 2,
+                                                                    prefetch_window
+                                                                    // 2,
+                                                                ),
+                                                            )
+                                                        )
+                                                        cached_runway_chunks = max(
+                                                            0,
+                                                            (
+                                                                first.start
+                                                                - (playhead_end + 1)
+                                                            )
+                                                            // max(
+                                                                1,
+                                                                self.config.chunk_size,
+                                                            ),
+                                                        )
+                                                        if (
+                                                            parallel_workers > 1
+                                                            and not at_eof_horizon
+                                                            and cached_runway_chunks
+                                                            >= min_batch
+                                                            and len(batch_ahead)
+                                                            < min_batch
+                                                        ):
+                                                            continue
+
                                                         connection.seek(
                                                             chunk_range=self.chunker.get_chunk_range(
                                                                 position=first.start,
@@ -2257,15 +2751,12 @@ class MediaStream:
                                                             )
                                                         )
                                                         break
-                                                parallel_workers = getattr(
-                                                    self, "parallel_prefetch_workers", 1
-                                                )
                                                 if (
                                                     parallel_workers > 1
                                                     and prefetch_gen is not None
                                                 ):
                                                     await self._parallel_prefetch(
-                                                        ahead,
+                                                        batch_ahead,
                                                         prefetch_gen,
                                                         _process_chunks,
                                                     )

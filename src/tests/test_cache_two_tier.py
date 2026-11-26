@@ -455,3 +455,216 @@ def test_unlink_evicted_files_batches_per_title_shard(
     movie2_keys = [cache._key("movie2", st) for st in (0, 1000)]
     assert unlinked_batches[0] == movie1_keys
     assert unlinked_batches[1] == movie2_keys
+
+
+def test_same_title_distinct_chunks_write_concurrently(tmp_path: Path) -> None:
+    """Distinct chunk offsets of the same title must overlap via per-chunk shards."""
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "warm",
+            max_size_bytes=10 * 1024 * 1024,
+            hot_dir=tmp_path / "hot",
+            hot_max_size_bytes=10 * 1024 * 1024,
+            metrics_enabled=False,
+        )
+    )
+    offsets: list[int] = []
+    seen_buckets: set[int] = set()
+    candidate = 0
+    while len(offsets) < 3:
+        bucket = cache._shard_bucket(cache._key("same_movie.mkv", candidate))
+        if bucket not in seen_buckets:
+            seen_buckets.add(bucket)
+            offsets.append(candidate)
+        candidate += 1024 * 1024
+
+    barrier = threading.Barrier(3)
+    real_write = cache._write_file_bytes
+
+    def concurrent_write(path: Path, data: bytes) -> None:
+        barrier.wait(timeout=2)
+        real_write(path, data)
+
+    cache._write_file_bytes = concurrent_write  # type: ignore[method-assign]
+
+    async def _run() -> None:
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                for idx, off in enumerate(offsets):
+                    payload = bytes([65 + idx]) * 128
+                    nursery.start_soon(cache.put, "same_movie.mkv", off, payload)
+
+        for idx, off in enumerate(offsets):
+            assert await cache.get("same_movie.mkv", off, off + 127) == (
+                bytes([65 + idx]) * 128
+            )
+
+    trio.run(_run)
+
+
+def test_hot_demotion_congestion_concurrent_writers_fallback_to_warm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Concurrent writers must fall back to warm while one writer is stalled in hot demotion."""
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "warm",
+            max_size_bytes=10 * 1024 * 1024,
+            hot_dir=tmp_path / "hot",
+            hot_max_size_bytes=150,
+            metrics_enabled=False,
+        )
+    )
+    demote_started = trio.Event()
+    allow_demote = threading.Event()
+    real_stage = cache._stage_demote_hot_to_warm_temp
+
+    def blocking_stage(key: str):
+        trio.from_thread.run_sync(demote_started.set)
+        assert allow_demote.wait(5)
+        return real_stage(key)
+
+    monkeypatch.setattr(cache, "_stage_demote_hot_to_warm_temp", blocking_stage)
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, b"a" * 100)
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(cache.put, "movie.mkv", 1000, b"b" * 100)
+                await demote_started.wait()
+                # Second writer must not queue on _hot_write_lock; falls back to warm immediately.
+                await cache.put("movie.mkv", 2000, b"c" * 100)
+                k2 = cache._key("movie.mkv", 2000)
+                assert cache._index[k2].tier == "warm"
+                allow_demote.set()
+
+        assert await cache.get("movie.mkv", 2000, 2099) == b"c" * 100
+
+    trio.run(_run)
+
+
+def test_evict_lru_skips_index_lock_when_no_deficit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_evict_lru fast-path must return True without acquiring global _index_lock when within budget."""
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path,
+            max_size_bytes=10 * 1024 * 1024,
+            metrics_enabled=False,
+        )
+    )
+    orig_locks = cache.locks
+    lock_entries = 0
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def counting_locks():
+        nonlocal lock_entries
+        lock_entries += 1
+        async with orig_locks():
+            yield
+
+    monkeypatch.setattr(cache, "locks", counting_locks)
+
+    async def _run() -> None:
+        assert await cache._evict_lru(1024) is True
+
+    trio.run(_run)
+    assert lock_entries == 0
+
+
+def test_concurrent_trim_and_reserve_demotion_preserves_warm_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Concurrent trim() and write demotion must never race or delete published warm files."""
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "warm",
+            max_size_bytes=10 * 1024 * 1024,
+            hot_dir=tmp_path / "hot",
+            hot_max_size_bytes=150,
+            metrics_enabled=False,
+        )
+    )
+    demote_calls = 0
+    active_demotions = 0
+    max_concurrent_demotions = 0
+    trim_staging = trio.Event()
+    allow_trim_finish = threading.Event()
+    orig_stage = cache._stage_demote_hot_to_warm_temp
+
+    def tracking_stage(key: str):
+        nonlocal demote_calls, active_demotions, max_concurrent_demotions
+        demote_calls += 1
+        active_demotions += 1
+        max_concurrent_demotions = max(max_concurrent_demotions, active_demotions)
+        try:
+            trio.from_thread.run_sync(trim_staging.set)
+            assert allow_trim_finish.wait(5)
+            return orig_stage(key)
+        finally:
+            active_demotions -= 1
+
+    monkeypatch.setattr(cache, "_stage_demote_hot_to_warm_temp", tracking_stage)
+
+    async def _run() -> None:
+        await cache.put("movie.mkv", 0, b"x" * 140)
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(cache.trim)
+                await trim_staging.wait()
+                # Launch both another _ensure_hot_capacity and a put() concurrently
+                # while trim() is mid-stage; neither may double-demote or unlink warm_fp.
+                nursery.start_soon(cache._ensure_hot_capacity, 0)
+                nursery.start_soon(cache.put, "movie.mkv", 1000, b"y" * 100)
+                await trio.sleep(0.02)
+                allow_trim_finish.set()
+
+        k0 = cache._key("movie.mkv", 0)
+        assert cache._index[k0].tier == "warm"
+        assert cache._file_for(k0, tier="warm").exists()
+        assert await cache.get("movie.mkv", 0, 139) == b"x" * 140
+        assert max_concurrent_demotions == 1
+        assert demote_calls == 1
+
+    trio.run(_run)
+
+
+def test_put_warm_fallback_overwrite_cleans_stale_hot_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Overwriting a shorter hot entry on warm fallback must delete the orphaned hot file."""
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "warm",
+            max_size_bytes=10 * 1024 * 1024,
+            hot_dir=tmp_path / "hot",
+            hot_max_size_bytes=1024,
+            metrics_enabled=False,
+        )
+    )
+
+    async def _run() -> None:
+        k = cache._key("movie.mkv", 0)
+        await cache.put("movie.mkv", 0, b"s" * 100)
+        assert cache._index[k].tier == "hot"
+        assert cache._file_for(k, tier="hot").exists()
+
+        # Simulate hot congestion forcing a larger overwrite onto warm tier.
+        async def force_warm(*args, **kwargs) -> bool:
+            return False
+
+        monkeypatch.setattr(cache, "_reserve_hot_capacity", force_warm)
+        await cache.put("movie.mkv", 0, b"L" * 200)
+
+        assert cache._index[k].tier == "warm"
+        assert cache._index[k].size == 200
+        assert cache._hot_bytes == 0
+        assert not cache._file_for(k, tier="hot").exists()
+        assert not cache._metadata_file_for(k, tier="hot").exists()
+        assert cache._file_for(k, tier="warm").exists()
+        assert await cache.get("movie.mkv", 0, 199) == b"L" * 200
+
+    trio.run(_run)

@@ -1355,3 +1355,575 @@ def test_interrupted_primary_cache_put_reconnects_instead_of_reusing_misaligned_
         assert 4 not in h.stored or h.stored[4] == bytes([4]) * 4
 
     trio.run(run)
+
+
+def test_coalesced_speculative_span_streams_multi_chunk_range_and_publishes_incrementally():
+    """Real multi-block chunks coalesce up to 4 MiB into one Range GET and publish per chunk."""
+    from contextlib import asynccontextmanager
+
+    import trio_util
+
+    from program.services.streaming.cache import CachePutResult
+
+    chunk_size = 1024 * 1024
+    total_size = 4 * chunk_size
+    chunks = [
+        _TestChunk(
+            start=i * chunk_size,
+            end=(i + 1) * chunk_size - 1,
+            size=chunk_size,
+            index=i,
+            is_cached=trio_util.AsyncBool(False),
+        )
+        for i in range(4)
+    ]
+    for c in chunks:
+        c.emit_cache_signal = lambda ch=c: setattr(ch.is_cached, "value", True)
+
+    observed_ranges: list[str] = []
+    published_starts: list[int] = []
+    released_leases = 0
+
+    class Pool:
+        @asynccontextmanager
+        async def admit(self, kind, *, workload):
+            assert (kind, workload) == ("body", "background")
+            yield
+
+        def acquire_lease(self, *, use_proxy):
+            return SimpleNamespace(client=SimpleNamespace(stream=self.stream))
+
+        @asynccontextmanager
+        async def stream(self, method, url, *, headers, timeout):
+            observed_ranges.append(headers["Range"])
+
+            async def aiter_raw():
+                for idx in range(4):
+                    # Deliver in two 512 KiB fragments so incremental slicing is exercised
+                    byte_val = bytes([65 + idx])
+                    yield byte_val * (chunk_size // 2)
+                    yield byte_val * (chunk_size // 2)
+
+            yield SimpleNamespace(
+                status_code=206,
+                headers={
+                    "Content-Range": f"bytes 0-{total_size - 1}/{total_size}",
+                    "Content-Length": str(total_size),
+                },
+                raise_for_status=lambda: None,
+                aiter_raw=aiter_raw,
+            )
+
+        async def release_lease(self, lease):
+            nonlocal released_leases
+            released_leases += 1
+
+    async def run():
+        stream = MediaStream.__new__(MediaStream)
+        stream.config = SimpleNamespace(
+            chunk_size=chunk_size,
+            block_size=128 * 1024,
+            chunk_wait_timeout_seconds=10,
+            connect_timeout_seconds=10,
+        )
+        stream._producer_claims = _ProducerClaims()
+        stream._delivery_registry = SimpleNamespace(
+            get_pending_starts=lambda: [], has_pending=lambda _: False
+        )
+        stream.is_killed = trio_util.AsyncBool(False)
+        stream.adaptive_prefetch = SimpleNamespace(
+            current_generation=0, record_provider_fetch=MagicMock()
+        )
+        stream._use_proxy_client = False
+        stream._speculative_active = 0
+        stream._speculative_peak = 0
+        stream._speculative_bytes = 0
+        stream._speculative_failures = 0
+        stream._speculative_inflight_chunks = set()
+        stream._batch_spec_starts = {c.start for c in chunks}
+        stream.session_statistics = SessionStatistics()
+        stream.build_log_message = lambda text: text
+        stream.target_url = SimpleNamespace(value="https://example.test/video")
+        stream.file_metadata = SimpleNamespace(file_size=total_size)
+        stream.provider = "test"
+        stream._http_pool = Pool()
+
+        async def fake_cache(*, start, data, admission):
+            assert admission == "prefetch"
+            published_starts.append(start)
+            assert stream._producer_claims.is_claimed(start)
+            return CachePutResult.STORED_HOT
+
+        stream._cache_chunk = fake_cache
+        await stream._fetch_speculative_span(chunks, 0)
+
+        assert observed_ranges == [f"bytes=0-{total_size - 1}"]
+        assert published_starts == [c.start for c in chunks]
+        assert all(c.is_cached.value for c in chunks)
+        assert stream._speculative_bytes == total_size
+        assert stream.session_statistics.upstream_bytes == total_size
+        assert stream._producer_claims.active_starts() == set()
+        assert released_leases == 1
+        assert stream._speculative_active == 0
+
+    trio.run(run)
+
+
+def test_coalesced_speculative_span_midstream_error_preserves_committed_and_cleans_claims():
+    """Mid-span transport error keeps earlier committed chunks and releases all claims/leases."""
+    from contextlib import asynccontextmanager
+
+    import trio_util
+
+    from program.services.streaming.cache import CachePutResult
+
+    chunk_size = 1024 * 1024
+    total_size = 4 * chunk_size
+    chunks = [
+        _TestChunk(
+            start=i * chunk_size,
+            end=(i + 1) * chunk_size - 1,
+            size=chunk_size,
+            index=i,
+            is_cached=trio_util.AsyncBool(False),
+        )
+        for i in range(4)
+    ]
+    for c in chunks:
+        c.emit_cache_signal = lambda ch=c: setattr(ch.is_cached, "value", True)
+
+    released_leases = 0
+
+    class Pool:
+        @asynccontextmanager
+        async def admit(self, kind, *, workload):
+            yield
+
+        def acquire_lease(self, *, use_proxy):
+            return SimpleNamespace(client=SimpleNamespace(stream=self.stream))
+
+        @asynccontextmanager
+        async def stream(self, method, url, *, headers, timeout):
+            async def aiter_raw():
+                yield b"A" * chunk_size
+                yield b"B" * (chunk_size // 2)
+                raise httpx.ReadError("mid-span disconnect")
+
+            yield SimpleNamespace(
+                status_code=206,
+                headers={
+                    "Content-Range": f"bytes 0-{total_size - 1}/{total_size}",
+                    "Content-Length": str(total_size),
+                },
+                raise_for_status=lambda: None,
+                aiter_raw=aiter_raw,
+            )
+
+        async def release_lease(self, lease):
+            nonlocal released_leases
+            released_leases += 1
+
+    async def run():
+        stream = MediaStream.__new__(MediaStream)
+        stream.config = SimpleNamespace(
+            chunk_size=chunk_size,
+            block_size=128 * 1024,
+            chunk_wait_timeout_seconds=10,
+            connect_timeout_seconds=10,
+        )
+        stream._producer_claims = _ProducerClaims()
+        stream._delivery_registry = SimpleNamespace(
+            get_pending_starts=lambda: [], has_pending=lambda _: False
+        )
+        stream.is_killed = trio_util.AsyncBool(False)
+        stream.adaptive_prefetch = SimpleNamespace(
+            current_generation=0, record_provider_fetch=MagicMock()
+        )
+        stream._use_proxy_client = False
+        stream._speculative_active = 0
+        stream._speculative_peak = 0
+        stream._speculative_bytes = 0
+        stream._speculative_failures = 0
+        stream._speculative_inflight_chunks = set()
+        stream._batch_spec_starts = {c.start for c in chunks}
+        stream.session_statistics = SessionStatistics()
+        stream.build_log_message = lambda text: text
+        stream.target_url = SimpleNamespace(value="https://example.test/video")
+        stream.file_metadata = SimpleNamespace(file_size=total_size)
+        stream.provider = "test"
+        stream._http_pool = Pool()
+        stream._cache_chunk = AsyncMock(return_value=CachePutResult.STORED_HOT)
+
+        await stream._fetch_speculative_span(chunks, 0)
+
+        assert chunks[0].is_cached.value is True
+        assert all(not c.is_cached.value for c in chunks[1:])
+        assert stream._speculative_failures == 1
+        assert stream._producer_claims.active_starts() == set()
+        assert released_leases == 1
+        assert stream._speculative_active == 0
+
+    trio.run(run)
+
+
+def test_sequential_playback_into_spec_span_does_not_abort_sibling_workers():
+    """Foreground demand arriving on spec_spans[0] must not abort active sibling workers."""
+    from trio.testing import wait_all_tasks_blocked
+
+    async def run():
+        h = _Harness(workers=4)
+        h.stream.adaptive_prefetch.calculate_window = lambda **_: 4
+        h.start_read()
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(h.stream.run, 4)
+                for idx in range(1, 5):
+                    await h.entered[idx].wait()
+
+                # Reader advances straight into chunk 2 (owned by speculative worker 1)
+                reservation = await h.stream._delivery_registry.register_pending(8)
+                h.stream.recent_reads.current_read.value = SimpleNamespace(
+                    read_type="body_read", chunk_range=h.chunk_range(position=8)
+                )
+                await wait_all_tasks_blocked()
+
+                # Sibling speculative workers 2 and 3 must NOT abort!
+                h.gates[3].set()
+                h.gates[4].set()
+                h.gates[2].set()
+                h.gates[1].set()
+                for idx in range(1, 5):
+                    await h.published[idx].wait()
+                await h.stream._delivery_registry.release_reservation(reservation)
+                await h.stream.close()
+
+        assert h.requests.count(("background", 8)) == 1
+        assert h.requests.count(("background", 12)) == 1
+        assert h.requests.count(("background", 16)) == 1
+        assert h.requests.count(("foreground", 8)) == 0
+        assert h.stored == {i * 4: bytes([i * 4]) * 4 for i in range(1, 5)}
+
+    trio.run(run)
+
+
+def test_parallel_prefetch_dynamic_tail_work_stealing():
+    """Fast speculative worker must steal trailing unclaimed chunks from a slower peer."""
+    from collections import deque
+    from functools import partial
+
+    from trio.testing import wait_all_tasks_blocked
+
+    async def run():
+        h = _Harness(workers=3)
+        h.stream._batch_spec_starts = {c.start for c in h.chunks[3:8]}
+        primary_done = trio.Event()
+        primary_done.set()
+        work_queues = [
+            deque([h.chunks[3]]),
+            deque([h.chunks[4], h.chunks[5], h.chunks[6], h.chunks[7]]),
+        ]
+
+        # Allow worker 0's chunk 3 and stolen chunks 6/7, while blocking chunk 4 indefinitely
+        h.gates[3].set()
+        h.gates[6].set()
+        h.gates[7].set()
+
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(
+                    partial(
+                        h.stream._fetch_speculative_span,
+                        list(work_queues[0]),
+                        0,
+                        h.chunks[1:3],
+                        primary_done,
+                        work_queues=work_queues,
+                        queue_index=0,
+                    )
+                )
+                nursery.start_soon(
+                    partial(
+                        h.stream._fetch_speculative_span,
+                        list(work_queues[1]),
+                        0,
+                        h.chunks[1:3],
+                        primary_done,
+                        work_queues=work_queues,
+                        queue_index=1,
+                    )
+                )
+                # Worker 0 must finish chunk 3 and steal chunk 7 (then 6) while worker 1 blocks on 4
+                await h.published[3].wait()
+                await h.published[7].wait()
+                assert not h.published[4].is_set()
+                h.gates[4].set()
+                h.gates[5].set()
+                await wait_all_tasks_blocked()
+
+        for idx in range(3, 8):
+            assert h.chunks[idx].is_cached.value
+            assert h.requests.count(("background", idx * 4)) == 1
+
+    trio.run(run)
+
+
+def test_tail_refill_hysteresis_avoids_single_chunk_reconnect():
+    """With >50% cached runway ahead, W=4 must skip 1-chunk tail seeks until runway drops below threshold."""
+    from ordered_set import OrderedSet
+
+    async def run():
+        h = _Harness(workers=4)
+        h.chunks = [
+            _TestChunk(
+                start=i * 4,
+                end=i * 4 + 3,
+                size=4,
+                index=i,
+                is_cached=h.chunks[0].is_cached.__class__(i < 17),
+            )
+            for i in range(28)
+        ]
+        for c in h.chunks:
+            c.emit_cache_signal = lambda ch=c: setattr(ch.is_cached, "value", True)
+        h.gates = [trio.Event() for _ in h.chunks]
+        h.entered = [trio.Event() for _ in h.chunks]
+        h.published = [trio.Event() for _ in h.chunks]
+        h.stream.file_metadata = SimpleNamespace(
+            file_size=len(h.chunks) * 4, original_filename="d107", path="d107"
+        )
+        h.stream.adaptive_prefetch.calculate_window = lambda **_: 16
+
+        def get_prefetch_uncached(after_end=0, count=16, **_):
+            return OrderedSet(
+                c
+                for c in h.chunks
+                if after_end < c.start <= after_end + count * 4
+                and not c.is_cached.value
+            )[:count]
+
+        h.stream.chunker.get_prefetch_uncached = get_prefetch_uncached
+        h.stream.chunker.footer_start = len(h.chunks) * 4
+
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                # Primary stopped at offset 16 (chunk 4); speculative cached 5..16 already.
+                nursery.start_soon(h.stream.run, 16)
+                # Consumer reads chunk 5: 11 cached chunks remain ahead, ahead=[17] (len=1 < 8)
+                h.stream._consumer_end = 23
+                h.stream.recent_reads.current_read.value = SimpleNamespace(
+                    read_type="cache_hit",
+                    chunk_range=SimpleNamespace(
+                        request_range=(20, 23),
+                        uncached_chunks=OrderedSet(),
+                        position=20,
+                    ),
+                )
+                await trio.sleep(0.02)
+                conn = h.stream._active_stream_connection
+                assert conn is not None
+                assert conn.seek_required.value is False
+
+                # Consumer advances to chunk 11: only 5 cached chunks left (<8), ahead=[17..24] (len=8>=8)
+                h.stream._consumer_end = 47
+                h.stream.recent_reads.current_read.value = SimpleNamespace(
+                    read_type="cache_hit",
+                    chunk_range=SimpleNamespace(
+                        request_range=(44, 47),
+                        uncached_chunks=OrderedSet(),
+                        position=44,
+                    ),
+                )
+                await trio.sleep(0.02)
+                assert conn.seek_required.value is True
+                assert conn.seek_range.position == 17 * 4
+                await h.stream.close()
+
+    trio.run(run)
+
+
+def test_abandoned_speculative_worker_wakes_unowned_demand_after_primary_done():
+    """Abandoned speculative chunk must wake unowned demand barrier once primary finishes."""
+    from ordered_set import OrderedSet
+    from trio.testing import MockClock
+
+    async def run():
+        h = _Harness(workers=3)
+        h.start_read()
+        batch_done = trio.Event()
+
+        async def primary(chunks, **kwargs):
+            for chunk in chunks:
+                h.stored[chunk.start] = bytes([chunk.start]) * 4
+                chunk.emit_cache_signal()
+
+        async def batch():
+            # primary=[chunk 1 (4)], spec=[[chunk 2 (8)], [chunk 3 (12)]]
+            await h.stream._parallel_prefetch(OrderedSet(h.chunks[1:4]), 0, primary)
+            batch_done.set()
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(batch)
+            # Worker 1 starts chunk 2 (8), Worker 2 stalls indefinitely on chunk 3 (12)
+            await h.entered[2].wait()
+            await h.entered[3].wait()
+
+            # Foreground arrives needing chunk 2 (8) right as Worker 1 fails on chunk 2
+            await h.stream._delivery_registry.register_pending(8)
+            h.stream.recent_reads.current_read.value = SimpleNamespace(
+                read_type="body_read", chunk_range=h.chunk_range(position=8)
+            )
+            h.fail.add(8)
+            h.gates[2].set()
+
+            with trio.move_on_after(1) as deadline:
+                await batch_done.wait()
+            nursery.cancel_scope.cancel()
+
+        assert not deadline.cancelled_caught
+        assert h.requests.count(("background", 8)) == 1
+        assert h.stream._producer_claims.active_starts() == set()
+
+    trio.run(run, clock=MockClock(autojump_threshold=0))
+
+
+def test_tail_refill_short_cached_gap_does_not_misaligned_seek():
+    """Short <=2 chunk gap already cached by spec workers uses hysteresis instead of misaligned prefetch."""
+    from ordered_set import OrderedSet
+
+    async def run():
+        h = _Harness(workers=4)
+        h.chunks = [
+            _TestChunk(
+                start=i * 4,
+                end=i * 4 + 3,
+                size=4,
+                index=i,
+                is_cached=h.chunks[0].is_cached.__class__(i < 17),
+            )
+            for i in range(28)
+        ]
+        for c in h.chunks:
+            c.emit_cache_signal = lambda ch=c: setattr(ch.is_cached, "value", True)
+        h.gates = [trio.Event() for _ in h.chunks]
+        h.entered = [trio.Event() for _ in h.chunks]
+        h.published = [trio.Event() for _ in h.chunks]
+        h.stream.file_metadata = SimpleNamespace(
+            file_size=len(h.chunks) * 4,
+            original_filename="d107-short-gap",
+            path="d107-short-gap",
+        )
+        h.stream.adaptive_prefetch.calculate_window = lambda **_: 16
+
+        def get_prefetch_uncached(after_end=0, count=16, **_):
+            return OrderedSet(
+                c
+                for c in h.chunks
+                if after_end < c.start <= after_end + count * 4
+                and not c.is_cached.value
+            )[:count]
+
+        h.stream.chunker.get_prefetch_uncached = get_prefetch_uncached
+        h.stream.chunker.footer_start = len(h.chunks) * 4
+
+        prefetch_calls = 0
+
+        async def counting_parallel_prefetch(chunks, generation, process_chunks):
+            nonlocal prefetch_calls
+            prefetch_calls += 1
+
+        h.stream._parallel_prefetch = counting_parallel_prefetch
+
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                # Connection stopped at offset 60 (chunk 15); 15 & 16 cached, first=17 at offset 68 (gap=2 chunks)
+                nursery.start_soon(h.stream.run, 60)
+                # Consumer reads chunk 5 -> 11 cached chunks ahead (>= 8), ahead=[17] (len=1 < 8)
+                h.stream._consumer_end = 23
+                h.stream.recent_reads.current_read.value = SimpleNamespace(
+                    read_type="cache_hit",
+                    chunk_range=SimpleNamespace(
+                        request_range=(20, 23),
+                        uncached_chunks=OrderedSet(),
+                        position=20,
+                    ),
+                )
+                await trio.sleep(0.02)
+                conn = h.stream._active_stream_connection
+                assert conn is not None
+                assert conn.seek_required.value is False
+                assert prefetch_calls == 0
+                await h.stream.close()
+
+    trio.run(run)
+
+
+def test_large_window_multi_worker_wave_bounds_primary_span():
+    """Large high-bitrate prefetch windows must dispatch bounded multi-worker waves rather than starving near-head chunks on one primary connection."""
+    from ordered_set import OrderedSet
+
+    async def run():
+        chunk_sz = 1024 * 1024
+        h = _Harness(workers=4)
+        h.stream.config = SimpleNamespace(
+            chunk_size=chunk_sz,
+            block_size=128 * 1024,
+            header_size=256 * 1024,
+            activity_timeout_seconds=10,
+            chunk_wait_timeout_seconds=10,
+            connect_timeout_seconds=10,
+            prefetch_chunks=16,
+            target_buffer_seconds=15.0,
+            min_safe_runway_seconds=4.0,
+        )
+        # 120 chunks (~120 MiB ahead, typical of 120 Mbps 4K Remux calculate_window)
+        h.chunks = [
+            _TestChunk(
+                start=256 * 1024 + (i - 1) * chunk_sz if i > 0 else 0,
+                end=(256 * 1024 + i * chunk_sz - 1) if i > 0 else (256 * 1024 - 1),
+                size=chunk_sz if i > 0 else 256 * 1024,
+                index=i,
+                is_cached=h.chunks[0].is_cached.__class__(i == 0),
+            )
+            for i in range(121)
+        ]
+        for c in h.chunks:
+            c.emit_cache_signal = lambda ch=c: setattr(ch.is_cached, "value", True)
+        h.stream.file_metadata = SimpleNamespace(
+            file_size=256 * 1024 + 120 * chunk_sz,
+            original_filename="remux-wave",
+            path="remux-wave",
+        )
+        h.stream.adaptive_prefetch.calculate_window = lambda **_: 120
+        h.stream.chunker.footer_start = 256 * 1024 + 120 * chunk_sz
+        h.stream.chunker.get_prefetch_uncached = lambda after_end=0, count=120, **_: (
+            OrderedSet(
+                c for c in h.chunks if c.start > after_end and not c.is_cached.value
+            )[:count]
+        )
+
+        dispatched_batches: list[list[int]] = []
+
+        async def record_parallel_prefetch(chunks, generation, process_chunks):
+            dispatched_batches.append([c.index for c in chunks])
+            await h.stream.close()
+
+        h.stream._parallel_prefetch = record_parallel_prefetch
+
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(h.stream.run, 256 * 1024)
+                h.stream._consumer_end = 256 * 1024 - 1
+                h.stream.recent_reads.current_read.value = SimpleNamespace(
+                    read_type="cache_hit",
+                    chunk_range=SimpleNamespace(
+                        request_range=(0, 256 * 1024 - 1),
+                        uncached_chunks=OrderedSet(),
+                        position=0,
+                    ),
+                )
+
+        # W=4 with 1 MiB chunks coalescing up to 4 MiB -> wave_cap = 16 chunks (4 per worker)
+        assert len(dispatched_batches) == 1
+        assert dispatched_batches[0] == list(range(1, 17))
+
+    trio.run(run)
