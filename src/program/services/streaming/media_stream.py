@@ -1203,27 +1203,56 @@ class MediaStream:
         if hasattr(self, "adaptive_prefetch"):
             self.adaptive_prefetch.record_provider_fetch(monotonic() - fetch_started)
 
+    def _speculative_timeout_budgets(self) -> tuple[float, float, float]:
+        """Return bounded (header_budget_s, chunk_stall_s, span_budget_s) for speculative transfers."""
+        config = getattr(self, "config", None)
+        wait_sec = max(
+            0.25,
+            float(getattr(config, "chunk_wait_timeout_seconds", 10.0)),
+        )
+        # Keep speculative stalls faster than the foreground chunk-wait budget so
+        # primary recovery retains headroom when chunk_wait_timeout_seconds >= 4s.
+        chunk_stall_sec = min(7.0, wait_sec - 3.0) if wait_sec >= 4.0 else wait_sec
+        header_budget_sec = min(5.0, chunk_stall_sec) if wait_sec >= 4.0 else wait_sec
+        span_budget_sec = max(chunk_stall_sec * 2.0, wait_sec)
+        return header_budget_sec, chunk_stall_sec, span_budget_sec
+
     async def _fetch_speculative_span_run(
-        self, sub_run: list[Chunk], generation: int
+        self,
+        sub_run: list[Chunk],
+        generation: int,
+        *,
+        unattempted_out: list[Chunk] | None = None,
     ) -> bool:
         """Fetch a bounded contiguous chunk run in one streaming Range GET."""
         if not sub_run or not self._transport_generation_live(generation):
             return False
 
         claimed: list[tuple[Chunk, trio.Event]] = []
-        for chunk in sub_run:
+        stop_idx: int | None = None
+        include_stop_chunk = False
+        for loop_idx, chunk in enumerate(sub_run):
             if chunk.is_cached.value:
+                stop_idx = loop_idx
                 break
             acquired, claim = self._producer_claims.acquire(chunk.start)
             if not acquired:
+                stop_idx = loop_idx
                 break
             if chunk.is_cached.value:
                 self._producer_claims.release(chunk.start, claim)
+                stop_idx = loop_idx
                 break
             if claimed and chunk.start != claimed[-1][0].start + claimed[-1][0].size:
                 self._producer_claims.release(chunk.start, claim)
+                stop_idx = loop_idx
+                include_stop_chunk = True
                 break
             claimed.append((chunk, claim))
+
+        if stop_idx is not None and unattempted_out is not None:
+            tail_start = stop_idx if include_stop_chunk else stop_idx + 1
+            unattempted_out.extend(sub_run[tail_start:])
 
         if not claimed:
             return False
@@ -1265,6 +1294,9 @@ class MediaStream:
                             for c, _ in claimed:
                                 spec_chunks.add((generation, c.start))
                         url = self.target_url.value
+                        header_budget_sec, chunk_stall_sec, span_budget_sec = (
+                            self._speculative_timeout_budgets()
+                        )
                         req_context = lease.client.stream(
                             "GET",
                             url,
@@ -1274,41 +1306,45 @@ class MediaStream:
                                 "Range": format_range_header(span_start, span_end),
                             },
                         )
-                        async with observe_response(
-                            req_context, self.session_statistics, speculative=True
-                        ) as response:
-                            response.raise_for_status()
-                            parsed = validate_range_response(
-                                response,
-                                span_start,
-                                span_end,
-                                self.provider,
-                                self.file_metadata.file_size,
-                            )
-                            if (
-                                parsed is None
-                                or parsed.last_byte != span_end
-                                or parsed.complete_length
-                                != self.file_metadata.file_size
-                            ):
-                                raise ValueError(
-                                    "Speculative span Content-Range does not match exact span/file size"
+                        span_started = trio.current_time()
+                        hard_deadline = span_started + span_budget_sec
+                        with trio.fail_at(
+                            min(hard_deadline, span_started + header_budget_sec)
+                        ) as chunk_scope:
+                            async with observe_response(
+                                req_context, self.session_statistics, speculative=True
+                            ) as response:
+                                response.raise_for_status()
+                                parsed = validate_range_response(
+                                    response,
+                                    span_start,
+                                    span_end,
+                                    self.provider,
+                                    self.file_metadata.file_size,
                                 )
-                            length = response.headers.get("Content-Length")
-                            if length is not None and int(length) != expected_total:
-                                raise ValueError(
-                                    "Speculative span Content-Length mismatch"
-                                )
+                                if (
+                                    parsed is None
+                                    or parsed.last_byte != span_end
+                                    or parsed.complete_length
+                                    != self.file_metadata.file_size
+                                ):
+                                    raise ValueError(
+                                        "Speculative span Content-Range does not match exact span/file size"
+                                    )
+                                length = response.headers.get("Content-Length")
+                                if length is not None and int(length) != expected_total:
+                                    raise ValueError(
+                                        "Speculative span Content-Length mismatch"
+                                    )
 
-                            buf = bytearray()
-                            cursor = 0
-                            consumed_total = 0
-                            idx = 0
-                            chunk_started = monotonic()
-                            wait_sec = float(self.config.chunk_wait_timeout_seconds)
-                            with trio.fail_at(
-                                trio.current_time() + wait_sec
-                            ) as chunk_scope:
+                                buf = bytearray()
+                                cursor = 0
+                                consumed_total = 0
+                                idx = 0
+                                chunk_started = monotonic()
+                                chunk_scope.deadline = min(
+                                    hard_deadline, trio.current_time() + chunk_stall_sec
+                                )
                                 async for part in _iter_raw_chunks(response):
                                     if not self._transport_generation_live(generation):
                                         return False
@@ -1340,14 +1376,20 @@ class MediaStream:
                                             spec_chunks.discard((generation, cur.start))
                                         idx += 1
                                         chunk_started = monotonic()
-                                        chunk_scope.deadline = (
-                                            trio.current_time() + wait_sec
+                                        chunk_scope.deadline = min(
+                                            hard_deadline,
+                                            trio.current_time() + chunk_stall_sec,
                                         )
                                     if cursor >= 1024 * 1024:
                                         del buf[:cursor]
                                         cursor = 0
-                            if idx != len(claimed) or consumed_total != expected_total:
-                                raise ValueError("Truncated speculative span response")
+                                if (
+                                    idx != len(claimed)
+                                    or consumed_total != expected_total
+                                ):
+                                    raise ValueError(
+                                        "Truncated speculative span response"
+                                    )
                     finally:
                         self._speculative_active -= 1
                         if spec_chunks is not None:
@@ -1411,6 +1453,9 @@ class MediaStream:
                         if spec_chunks is not None:
                             spec_chunks.add((generation, chunk.start))
                         url = self.target_url.value
+                        header_budget_sec, chunk_stall_sec, _ = (
+                            self._speculative_timeout_budgets()
+                        )
                         req_context = lease.client.stream(
                             "GET",
                             url,
@@ -1420,41 +1465,48 @@ class MediaStream:
                                 "Range": format_range_header(chunk.start, chunk.end),
                             },
                         )
-                        async with observe_response(
-                            req_context, self.session_statistics, speculative=True
-                        ) as response:
-                            response.raise_for_status()
-                            parsed = validate_range_response(
-                                response,
-                                chunk.start,
-                                chunk.end,
-                                self.provider,
-                                self.file_metadata.file_size,
-                            )
-                            if (
-                                parsed is None
-                                or parsed.last_byte != chunk.end
-                                or parsed.complete_length
-                                != self.file_metadata.file_size
-                            ):
-                                raise ValueError(
-                                    "Speculative Content-Range does not match exact chunk/file size"
+                        with trio.fail_at(
+                            trio.current_time() + header_budget_sec
+                        ) as chunk_scope:
+                            async with observe_response(
+                                req_context, self.session_statistics, speculative=True
+                            ) as response:
+                                response.raise_for_status()
+                                parsed = validate_range_response(
+                                    response,
+                                    chunk.start,
+                                    chunk.end,
+                                    self.provider,
+                                    self.file_metadata.file_size,
                                 )
-                            length = response.headers.get("Content-Length")
-                            if length is not None and int(length) != chunk.size:
-                                raise ValueError("Speculative Content-Length mismatch")
-                            data = bytearray()
-                            with trio.fail_after(
-                                self.config.chunk_wait_timeout_seconds
-                            ):
+                                if (
+                                    parsed is None
+                                    or parsed.last_byte != chunk.end
+                                    or parsed.complete_length
+                                    != self.file_metadata.file_size
+                                ):
+                                    raise ValueError(
+                                        "Speculative Content-Range does not match exact chunk/file size"
+                                    )
+                                length = response.headers.get("Content-Length")
+                                if length is not None and int(length) != chunk.size:
+                                    raise ValueError(
+                                        "Speculative Content-Length mismatch"
+                                    )
+                                data = bytearray()
+                                chunk_scope.deadline = (
+                                    trio.current_time() + chunk_stall_sec
+                                )
                                 async for part in _iter_raw_chunks(response):
+                                    if not self._transport_generation_live(generation):
+                                        return False
                                     data.extend(part)
                                     if len(data) > chunk.size:
                                         raise ValueError(
                                             "Speculative response exceeds requested chunk"
                                         )
-                            if len(data) != chunk.size:
-                                raise ValueError("Truncated speculative response")
+                                if len(data) != chunk.size:
+                                    raise ValueError("Truncated speculative response")
                         if not self._transport_generation_live(generation):
                             return False
                         await self._commit_speculative_chunk(
@@ -1593,16 +1645,29 @@ class MediaStream:
                                 sub_run[0], generation
                             )
                         else:
+                            unattempted_tail: list[Chunk] = []
                             deferred = await self._fetch_speculative_span_run(
-                                sub_run, generation
+                                sub_run,
+                                generation,
+                                unattempted_out=unattempted_tail,
                             )
+                            if unattempted_tail:
+                                attempted_end = len(sub_run) - len(unattempted_tail)
+                                for tail_chunk in reversed(unattempted_tail):
+                                    my_queue.appendleft(tail_chunk)
+                                sub_run = sub_run[:attempted_end]
+                                sub_starts = {_item_start(c) for c in sub_run}
                         if not deferred:
                             discarded = False
+                            claims = getattr(self, "_producer_claims", None)
                             if batch_spec is not None:
                                 for c in sub_run:
                                     if not _is_cached(c):
                                         start_val = _item_start(c)
-                                        if start_val in batch_spec:
+                                        if start_val in batch_spec and (
+                                            claims is None
+                                            or not claims.is_claimed(start_val)
+                                        ):
                                             batch_spec.discard(start_val)
                                             discarded = True
                             if discarded and on_ownership_change is not None:
@@ -1633,8 +1698,8 @@ class MediaStream:
                         return
                     start = blocking_pending[0]
                     reservation = self._delivery_registry.get_entry(start)
+                    primary_chunk = primary[start]
                     if reservation is not None:
-                        primary_chunk = primary[start]
                         if hasattr(primary_chunk, "is_cached"):
                             await trio_util.wait_any(
                                 lambda: primary_chunk.is_cached.wait_value(True),
@@ -1646,15 +1711,25 @@ class MediaStream:
                                 reservation.ready.wait,
                                 primary_done.wait,
                             )
+                    elif hasattr(primary_chunk, "is_cached"):
+                        await trio_util.wait_any(
+                            lambda: primary_chunk.is_cached.wait_value(True),
+                            primary_done.wait,
+                        )
+                    else:
+                        await primary_done.wait()
                 else:
                     return
         finally:
             discarded_leftover = False
             if batch_spec is not None:
+                claims = getattr(self, "_producer_claims", None)
                 while my_queue:
                     leftover = my_queue.popleft()
                     start_val = _item_start(leftover)
-                    if start_val in batch_spec:
+                    if start_val in batch_spec and (
+                        claims is None or not claims.is_claimed(start_val)
+                    ):
                         batch_spec.discard(start_val)
                         discarded_leftover = True
             if discarded_leftover and on_ownership_change is not None:
