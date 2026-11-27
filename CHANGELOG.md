@@ -26,6 +26,13 @@
 
 * **stream:** time a bounded provider read by item ID without exposing the saved link or refreshing it, honoring forced environment DSN overrides when no settings file exists.
 
+## [1.52.10](https://github.com/S0lidByte/CineFlow/compare/v1.52.9...v1.52.10) (2026-11-27)
+
+
+### Bug Fixes
+
+* **stream:** harden cache demotion sharding, speculative timeouts, and span recovery ([#396](https://github.com/S0lidByte/CineFlow/issues/396)) ([b61a20d](https://github.com/S0lidByte/CineFlow/commit/b61a20d3e49ca92e8f829873675353b9836ea703))
+
 ## [1.52.9](https://github.com/S0lidByte/CineFlow/compare/v1.52.8...v1.52.9) (2026-11-26)
 
 
