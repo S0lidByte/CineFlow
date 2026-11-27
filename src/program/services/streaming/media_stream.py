@@ -660,6 +660,8 @@ class MediaStream:
         # are delivered directly to waiting readers without a second HTTP request.
         self._delivery_registry = _DeliveryRegistry()
         self._consumer_end: int | None = None
+        self._last_protected_bucket: int | None = None
+        self._last_protected_at: float | None = None
         self._inflight_chunk: tuple[int, int] | None = None
         self.parallel_prefetch_workers = stream_settings.parallel_prefetch_workers
         self._producer_claims = _ProducerClaims()
@@ -858,15 +860,21 @@ class MediaStream:
         return di[AsyncClient]
 
     def _update_runway_observation(self, position: int) -> None:
-        """Publish contiguous cached runway for the generic mount pressure signal."""
+        """Publish contiguous cached runway without eagerly materializing all window chunks."""
         manager = getattr(self, "adaptive_prefetch", None)
         if manager is None:
             return
         try:
-            window = self.chunker.get_chunk_range(
-                position=position,
-                size=self.config.chunk_size * manager.config.max_window_chunks,
-            )
+            file_size = getattr(getattr(self, "file_metadata", None), "file_size", None)
+            chunk_size = max(1, int(getattr(self.config, "chunk_size", 1)))
+            max_chunks = max(1, int(getattr(manager.config, "max_window_chunks", 48)))
+            horizon_end = position + chunk_size * max_chunks - 1
+            if isinstance(file_size, int) and file_size > 0:
+                horizon_end = min(horizon_end, file_size - 1)
+            if position < 0 or position > horizon_end:
+                manager.record_runway(cached_bytes=0, in_flight_bytes=0)
+                return
+
             cached_bytes = 0
             in_flight_bytes = 0
             inflight = getattr(self, "_inflight_chunk", None)
@@ -875,13 +883,29 @@ class MediaStream:
                 self, "_speculative_inflight_chunks", empty_spec
             )
             cur_gen = manager.current_generation
-            for chunk in window.chunks:
-                remaining = chunk.end - max(position, chunk.start) + 1
+            cur_pos = position
+            steps = 0
+            while cur_pos <= horizon_end and steps <= max_chunks + 2:
+                steps += 1
+                single = self.chunker.get_chunk_range(position=cur_pos, size=1)
+                chunks = getattr(single, "chunks", None)
+                if not chunks:
+                    break
+                chunk = (
+                    single.first_chunk if hasattr(single, "first_chunk") else chunks[0]
+                )
+                c_start = getattr(chunk, "start", None)
+                c_end = getattr(chunk, "end", None)
+                if not isinstance(c_start, int) or not isinstance(c_end, int):
+                    break
+                if c_end < cur_pos or c_start > horizon_end:
+                    break
+                remaining = c_end - max(position, c_start) + 1
                 if chunk.is_cached.value:
                     cached_bytes += remaining
-                elif (cur_gen, chunk.start) in speculative or inflight == (
+                elif (cur_gen, c_start) in speculative or inflight == (
                     cur_gen,
-                    chunk.start,
+                    c_start,
                 ):
                     # Count all in-flight chunks (primary + speculative workers).
                     # Speculative workers may cover non-contiguous chunks; keep scanning
@@ -889,6 +913,7 @@ class MediaStream:
                     in_flight_bytes += remaining
                 else:
                     break
+                cur_pos = c_end + 1
             manager.record_runway(
                 cached_bytes=cached_bytes,
                 in_flight_bytes=in_flight_bytes,
@@ -896,6 +921,27 @@ class MediaStream:
         except Exception:
             # Runway telemetry must never affect delivery correctness.
             return
+
+    def _cache_pressure_percentages(self) -> tuple[float, float]:
+        """Return (cache_usage_pct, cache_protected_pct) safely for window sizing."""
+        cache_usage = 0.0
+        cache_protected = 0.0
+        try:
+            from .cache import Cache
+
+            if Cache in di:
+                cache_inst: Any = di[Cache]
+                if hasattr(cache_inst, "usage_percentage"):
+                    u_val: Any = cache_inst.usage_percentage
+                    raw_u: Any = u_val() if callable(u_val) else u_val
+                    cache_usage = float(cast(float, raw_u))
+                if hasattr(cache_inst, "protected_usage_percentage"):
+                    p_val: Any = cache_inst.protected_usage_percentage
+                    raw_p: Any = p_val() if callable(p_val) else p_val
+                    cache_protected = float(cast(float, raw_p))
+        except Exception:
+            pass
+        return cache_usage, cache_protected
 
     def _publish_telemetry_snapshot(self, stats: SessionStatistics) -> None:
         try:
@@ -1214,7 +1260,11 @@ class MediaStream:
         # primary recovery retains headroom when chunk_wait_timeout_seconds >= 4s.
         chunk_stall_sec = min(7.0, wait_sec - 3.0) if wait_sec >= 4.0 else wait_sec
         header_budget_sec = min(5.0, chunk_stall_sec) if wait_sec >= 4.0 else wait_sec
-        span_budget_sec = max(chunk_stall_sec * 2.0, wait_sec)
+        span_budget_sec = (
+            max(chunk_stall_sec * 2.0, wait_sec * 0.6)
+            if wait_sec >= 15.0
+            else max(chunk_stall_sec * 2.0, wait_sec)
+        )
         return header_budget_sec, chunk_stall_sec, span_budget_sec
 
     async def _fetch_speculative_span_run(
@@ -1363,6 +1413,10 @@ class MediaStream:
                                         payload = bytes(buf[cursor : cursor + cur.size])
                                         cursor += cur.size
                                         consumed_total += cur.size
+                                        # Suspend the per-chunk network stall timer while publishing
+                                        # already-downloaded bytes to cache so disk/demotion contention
+                                        # cannot discard a finished chunk (still bounded by hard_deadline).
+                                        chunk_scope.deadline = hard_deadline
                                         await self._commit_speculative_chunk(
                                             cur,
                                             payload,
@@ -2431,127 +2485,8 @@ class MediaStream:
                                     await _process_chunks(seek_range.uncached_chunks)
                                     seek_range = None
 
-                                # Read.current_read is intentionally a latest-value
-                                # signal, not a queue. Drain every registered body
-                                # reservation first so a rapid subsequent read cannot
-                                # erase an earlier producer demand.
-                                for (
-                                    pending_start
-                                ) in self._delivery_registry.get_pending_starts():
-                                    pending_range = self.chunker.get_chunk_range(
-                                        position=pending_start, size=1
-                                    )
-                                    pending_chunks = pending_range.uncached_chunks
-                                    if not pending_chunks:
-                                        continue
-                                    first_pending = pending_chunks[0]
-                                    if (
-                                        connection.current_read_position
-                                        < first_pending.start
-                                    ):
-                                        connection.seek(chunk_range=pending_range)
-                                        self._protect_consumer(first_pending.start)
-                                        break
-                                    if (
-                                        first_pending.start
-                                        < connection.current_read_position
-                                    ):
-                                        continue
-                                    await _process_chunks(OrderedSet([first_pending]))
-
-                                async for (
-                                    read
-                                ) in self.recent_reads.current_read.eventual_values(
-                                    lambda v: (
-                                        v is not None
-                                        and v.read_type in ("body_read", "cache_hit")
-                                    )
-                                ):
-                                    if not read:
-                                        raise ValueError(
-                                            self.build_log_message("No read available")
-                                        )
-
-                                    uncached_chunks = read.chunk_range.uncached_chunks
-
-                                    if len(uncached_chunks) > 0:
-                                        if self.enable_tracing:
-                                            logger.log(
-                                                "STREAM",
-                                                self.build_log_message(
-                                                    f"Received read event: {read} with uncached_chunks {uncached_chunks}"
-                                                ),
-                                            )
-
-                                        request_start, _ = (
-                                            read.chunk_range.request_range
-                                        )
-
-                                        if (
-                                            self.config.header_size
-                                            < uncached_chunks[0].start
-                                            < connection.start_position
-                                        ):
-                                            # Backward seek detection:
-                                            #
-                                            # If the requested start is before the start of the stream, we will always need to seek.
-                                            # This is because streams can only read forwards, so a new connection must be made.
-
-                                            if self.enable_tracing:
-                                                logger.log(
-                                                    "STREAM",
-                                                    self.build_log_message(
-                                                        f"Requested start {request_start} "
-                                                        f"is before current read position {connection.current_read_position} "
-                                                        f"for {self.file_metadata.path}. "
-                                                        f"Seeking to new start position {uncached_chunks[0].start}/{self.file_metadata.file_size}."
-                                                    ),
-                                                )
-
-                                            connection.seek(
-                                                chunk_range=read.chunk_range
-                                            )
-                                            self._protect_consumer(
-                                                read.chunk_range.position
-                                            )
-
-                                            break
-
-                                        if (
-                                            connection.current_read_position
-                                            < uncached_chunks[0].start
-                                        ):
-                                            # Forward seek detection:
-                                            #
-                                            # If the requested start is after the current read position, we need to seek forward.
-                                            # This is because streams cannot skip chunks of data, so a new connection must be made,
-                                            # to avoid requesting data that will be discarded and using unnecessary bandwidth.
-
-                                            if self.enable_tracing:
-                                                logger.log(
-                                                    "STREAM",
-                                                    self.build_log_message(
-                                                        f"Request chunk start {uncached_chunks[0].start} "
-                                                        f"is after current read position {connection.current_read_position} "
-                                                        f"for {self.file_metadata.path}. "
-                                                        f"Seeking to new start position {uncached_chunks[0].start}/{self.file_metadata.file_size}."
-                                                    ),
-                                                )
-
-                                            connection.seek(
-                                                chunk_range=read.chunk_range
-                                            )
-                                            self._protect_consumer(
-                                                read.chunk_range.position
-                                            )
-
-                                            break
-
-                                        await _process_chunks(uncached_chunks)
-
-                                    # Drain any other concurrently queued demands that arrived
-                                    # while processing this read before waiting for the next
-                                    # event, ensuring older or parallel demands are never starved.
+                                async def _drain_pending_demands() -> bool:
+                                    """Seek to or serve any pending foreground chunk before blocking/prefetching."""
                                     for (
                                         pending_start
                                     ) in self._delivery_registry.get_pending_starts():
@@ -2564,288 +2499,370 @@ class MediaStream:
                                         first_pending = pending_chunks[0]
                                         if (
                                             connection.current_read_position
-                                            < first_pending.start
+                                            != first_pending.start
                                         ):
                                             connection.seek(chunk_range=pending_range)
                                             self._protect_consumer(first_pending.start)
-                                            break
-                                        if (
-                                            first_pending.start
-                                            < connection.current_read_position
-                                        ):
-                                            continue
+                                            return True
                                         await _process_chunks(
                                             OrderedSet([first_pending])
                                         )
+                                        if connection.seek_required.value:
+                                            return True
+                                    return False
 
-                                    # Sequential playhead prefetch: fill ahead without
-                                    # blocking the current VFS read (already returned /
-                                    # waiting independently via is_cached).
-                                    consumer_end = getattr(self, "_consumer_end", None)
-                                    if consumer_end is None and hasattr(
-                                        read, "chunk_range"
+                                # Read.current_read is intentionally a latest-value
+                                # signal, not a queue. Drain every registered body
+                                # reservation first so a rapid subsequent read cannot
+                                # erase an earlier producer demand.
+                                if not await _drain_pending_demands():
+                                    async for (
+                                        read
+                                    ) in self.recent_reads.current_read.eventual_values(
+                                        lambda v: (
+                                            v is not None
+                                            and v.read_type
+                                            in ("body_read", "cache_hit")
+                                        )
                                     ):
-                                        consumer_end = getattr(
-                                            read.chunk_range,
-                                            "request_range",
-                                            (None, None),
-                                        )[1]
-                                    ap_manager = getattr(
-                                        self, "adaptive_prefetch", None
-                                    )
-                                    should_prefetch = (
-                                        ap_manager is None
-                                        or (
-                                            ap_manager.should_refill_prefetch()
-                                            if hasattr(
-                                                ap_manager,
-                                                "should_refill_prefetch",
-                                            )
-                                            else ap_manager.should_prefetch_now()
-                                        )
-                                        or ap_manager.get_effective_bitrate() <= 0
-                                        or (
-                                            hasattr(read, "chunk_range")
-                                            and self._is_sequential_cache_playback(
-                                                read.chunk_range
-                                            )
-                                        )
-                                    )
-                                    if (
-                                        self.config.prefetch_chunks > 0
-                                        and consumer_end is not None
-                                        and should_prefetch
-                                    ):
-                                        active_leases = 0
-                                        pool = getattr(self, "_http_pool", None)
-                                        if pool is not None:
-                                            try:
-                                                active_leases = pool.active_leases
-                                            except Exception:
-                                                pass
-
-                                        cache_usage = 0.0
-                                        cache_protected = 0.0
-                                        try:
-                                            from .cache import Cache
-
-                                            if Cache in di:
-                                                cache_inst: Any = di[Cache]
-                                                if hasattr(
-                                                    cache_inst, "usage_percentage"
-                                                ):
-                                                    u_val: Any = (
-                                                        cache_inst.usage_percentage
-                                                    )
-                                                    raw_u: Any = (
-                                                        u_val()
-                                                        if callable(u_val)
-                                                        else u_val
-                                                    )
-                                                    cache_usage = float(
-                                                        cast(float, raw_u)
-                                                    )
-                                                if hasattr(
-                                                    cache_inst,
-                                                    "protected_usage_percentage",
-                                                ):
-                                                    p_val: Any = (
-                                                        cache_inst.protected_usage_percentage
-                                                    )
-                                                    raw_p: Any = (
-                                                        p_val()
-                                                        if callable(p_val)
-                                                        else p_val
-                                                    )
-                                                    cache_protected = float(
-                                                        cast(float, raw_p)
-                                                    )
-                                        except Exception:
-                                            pass
-
-                                        prefetch_window = (
-                                            self.adaptive_prefetch.calculate_window(
-                                                active_leases=active_leases,
-                                                cache_usage_pct=cache_usage,
-                                                cache_protected_pct=cache_protected,
-                                            )
-                                            if hasattr(self, "adaptive_prefetch")
-                                            else self.config.prefetch_chunks
-                                        )
-
-                                        if prefetch_window > 0:
-                                            playhead_end = consumer_end
-                                            ahead = self.chunker.get_prefetch_uncached(
-                                                after_end=playhead_end,
-                                                count=prefetch_window,
-                                            )
-                                            if ahead:
-                                                prefetch_gen = (
-                                                    self.adaptive_prefetch.current_generation
-                                                    if hasattr(
-                                                        self, "adaptive_prefetch"
-                                                    )
-                                                    else None
+                                        if not read:
+                                            raise ValueError(
+                                                self.build_log_message(
+                                                    "No read available"
                                                 )
+                                            )
+
+                                        uncached_chunks = (
+                                            read.chunk_range.uncached_chunks
+                                        )
+
+                                        if len(uncached_chunks) > 0:
+                                            if self.enable_tracing:
+                                                logger.log(
+                                                    "STREAM",
+                                                    self.build_log_message(
+                                                        f"Received read event: {read} with uncached_chunks {uncached_chunks}"
+                                                    ),
+                                                )
+
+                                            request_start, _ = (
+                                                read.chunk_range.request_range
+                                            )
+
+                                            if (
+                                                self.config.header_size
+                                                < uncached_chunks[0].start
+                                                < connection.current_read_position
+                                            ):
+                                                # Backward seek detection:
+                                                #
+                                                # If the requested start is before the current wire position, we will always need to seek.
+                                                # This is because streams can only read forwards, so a new connection must be made.
+
                                                 if self.enable_tracing:
                                                     logger.log(
                                                         "STREAM",
                                                         self.build_log_message(
-                                                            f"Prefetching {len(ahead)} chunk(s) (window={prefetch_window}) "
-                                                            f"ahead of playhead@{playhead_end}"
+                                                            f"Requested start {request_start} "
+                                                            f"is before current read position {connection.current_read_position} "
+                                                            f"for {self.file_metadata.path}. "
+                                                            f"Seeking to new start position {uncached_chunks[0].start}/{self.file_metadata.file_size}."
                                                         ),
                                                     )
-                                                parallel_workers = getattr(
-                                                    self, "parallel_prefetch_workers", 1
+
+                                                connection.seek(
+                                                    chunk_range=read.chunk_range
                                                 )
-                                                wave_cap: int | None = None
-                                                if (
-                                                    parallel_workers > 1
-                                                    and prefetch_gen is not None
-                                                    and self.config.chunk_size
-                                                    >= getattr(
-                                                        self.config,
-                                                        "block_size",
-                                                        128 * 1024,
-                                                    )
-                                                ):
-                                                    wave_cap = max(
-                                                        parallel_workers * 2,
-                                                        parallel_workers
-                                                        * self._max_speculative_span_chunks(),
-                                                    )
-                                                batch_ahead = (
-                                                    OrderedSet(list(ahead)[:wave_cap])
-                                                    if wave_cap is not None
-                                                    and len(ahead) > wave_cap
-                                                    else ahead
+                                                self._protect_consumer(
+                                                    read.chunk_range.position
                                                 )
-                                                # Prefer contiguous fetch from connection tip;
-                                                # seek if gap to first prefetch chunk.
-                                                first = batch_ahead[0]
-                                                if (
-                                                    connection.current_read_position
-                                                    < first.start
-                                                ):
-                                                    gap_bytes = (
-                                                        first.start
-                                                        - connection.current_read_position
+
+                                                break
+
+                                            if (
+                                                connection.current_read_position
+                                                < uncached_chunks[0].start
+                                            ):
+                                                # Forward seek detection:
+                                                #
+                                                # If the requested start is after the current read position, we need to seek forward.
+                                                # This is because streams cannot skip chunks of data, so a new connection must be made,
+                                                # to avoid requesting data that will be discarded and using unnecessary bandwidth.
+
+                                                if self.enable_tracing:
+                                                    logger.log(
+                                                        "STREAM",
+                                                        self.build_log_message(
+                                                            f"Request chunk start {uncached_chunks[0].start} "
+                                                            f"is after current read position {connection.current_read_position} "
+                                                            f"for {self.file_metadata.path}. "
+                                                            f"Seeking to new start position {uncached_chunks[0].start}/{self.file_metadata.file_size}."
+                                                        ),
                                                     )
-                                                    gap_range = (
-                                                        self.chunker.get_chunk_range(
-                                                            position=connection.current_read_position,
-                                                            size=gap_bytes,
+
+                                                connection.seek(
+                                                    chunk_range=read.chunk_range
+                                                )
+                                                self._protect_consumer(
+                                                    read.chunk_range.position
+                                                )
+
+                                                break
+
+                                            await _process_chunks(uncached_chunks)
+                                            if connection.seek_required.value:
+                                                break
+
+                                        # Drain any other concurrently queued demands that arrived
+                                        # while processing this read before waiting for the next
+                                        # event, ensuring older or parallel demands are never starved.
+                                        if await _drain_pending_demands():
+                                            break
+
+                                        # Sequential playhead prefetch: fill ahead without
+                                        # blocking the current VFS read (already returned /
+                                        # waiting independently via is_cached).
+                                        consumer_end = getattr(
+                                            self, "_consumer_end", None
+                                        )
+                                        if consumer_end is None and hasattr(
+                                            read, "chunk_range"
+                                        ):
+                                            consumer_end = getattr(
+                                                read.chunk_range,
+                                                "request_range",
+                                                (None, None),
+                                            )[1]
+                                        ap_manager = getattr(
+                                            self, "adaptive_prefetch", None
+                                        )
+                                        should_prefetch = (
+                                            ap_manager is None
+                                            or (
+                                                ap_manager.should_refill_prefetch()
+                                                if hasattr(
+                                                    ap_manager,
+                                                    "should_refill_prefetch",
+                                                )
+                                                else ap_manager.should_prefetch_now()
+                                            )
+                                            or ap_manager.get_effective_bitrate() <= 0
+                                            or (
+                                                hasattr(read, "chunk_range")
+                                                and self._is_sequential_cache_playback(
+                                                    read.chunk_range
+                                                )
+                                            )
+                                        )
+                                        if (
+                                            self.config.prefetch_chunks > 0
+                                            and consumer_end is not None
+                                            and should_prefetch
+                                        ):
+                                            active_leases = 0
+                                            pool = getattr(self, "_http_pool", None)
+                                            if pool is not None:
+                                                try:
+                                                    active_leases = pool.active_leases
+                                                except Exception:
+                                                    pass
+
+                                            cache_usage, cache_protected = (
+                                                self._cache_pressure_percentages()
+                                            )
+
+                                            prefetch_window = (
+                                                self.adaptive_prefetch.calculate_window(
+                                                    active_leases=active_leases,
+                                                    cache_usage_pct=cache_usage,
+                                                    cache_protected_pct=cache_protected,
+                                                )
+                                                if hasattr(self, "adaptive_prefetch")
+                                                else self.config.prefetch_chunks
+                                            )
+
+                                            if prefetch_window > 0:
+                                                playhead_end = consumer_end
+                                                ahead = (
+                                                    self.chunker.get_prefetch_uncached(
+                                                        after_end=playhead_end,
+                                                        count=prefetch_window,
+                                                    )
+                                                )
+                                                if ahead:
+                                                    prefetch_gen = (
+                                                        self.adaptive_prefetch.current_generation
+                                                        if hasattr(
+                                                            self, "adaptive_prefetch"
                                                         )
-                                                        if gap_bytes
-                                                        <= self.config.chunk_size * 2
                                                         else None
                                                     )
+                                                    if self.enable_tracing:
+                                                        logger.log(
+                                                            "STREAM",
+                                                            self.build_log_message(
+                                                                f"Prefetching {len(ahead)} chunk(s) (window={prefetch_window}) "
+                                                                f"ahead of playhead@{playhead_end}"
+                                                            ),
+                                                        )
+                                                    parallel_workers = getattr(
+                                                        self,
+                                                        "parallel_prefetch_workers",
+                                                        1,
+                                                    )
+                                                    wave_cap: int | None = None
                                                     if (
-                                                        gap_range is not None
-                                                        and gap_range.uncached_chunks
+                                                        parallel_workers > 1
+                                                        and prefetch_gen is not None
+                                                        and self.config.chunk_size
+                                                        >= getattr(
+                                                            self.config,
+                                                            "block_size",
+                                                            128 * 1024,
+                                                        )
                                                     ):
-                                                        prefetched = await self._run_opportunistic_prefetch(
-                                                            gap_range.uncached_chunks,
-                                                            _process_chunks,
-                                                            label="Prefetch gap-fill",
-                                                            prefetch_gen=prefetch_gen,
+                                                        wave_cap = max(
+                                                            parallel_workers * 2,
+                                                            parallel_workers
+                                                            * self._max_speculative_span_chunks(),
+                                                        )
+                                                    batch_ahead = (
+                                                        OrderedSet(
+                                                            list(ahead)[:wave_cap]
+                                                        )
+                                                        if wave_cap is not None
+                                                        and len(ahead) > wave_cap
+                                                        else ahead
+                                                    )
+                                                    # Prefer contiguous fetch from connection tip;
+                                                    # seek if gap to first prefetch chunk.
+                                                    first = batch_ahead[0]
+                                                    if (
+                                                        connection.current_read_position
+                                                        < first.start
+                                                    ):
+                                                        gap_bytes = (
+                                                            first.start
+                                                            - connection.current_read_position
+                                                        )
+                                                        gap_range = (
+                                                            self.chunker.get_chunk_range(
+                                                                position=connection.current_read_position,
+                                                                size=gap_bytes,
+                                                            )
+                                                            if gap_bytes
+                                                            <= self.config.chunk_size
+                                                            * 2
+                                                            else None
                                                         )
                                                         if (
-                                                            not prefetched
-                                                            or connection.seek_required.value
+                                                            gap_range is not None
+                                                            and gap_range.uncached_chunks
+                                                        ):
+                                                            prefetched = await self._run_opportunistic_prefetch(
+                                                                gap_range.uncached_chunks,
+                                                                _process_chunks,
+                                                                label="Prefetch gap-fill",
+                                                                prefetch_gen=prefetch_gen,
+                                                            )
+                                                            if (
+                                                                not prefetched
+                                                                or connection.seek_required.value
+                                                            ):
+                                                                break
+                                                        else:
+                                                            # Avoid tearing down the primary HTTP stream
+                                                            # just to fetch a 1-2 chunk tail edge when
+                                                            # speculative workers already filled runway ahead.
+                                                            footer_limit = getattr(
+                                                                self.chunker,
+                                                                "footer_start",
+                                                                self.file_metadata.file_size,
+                                                            )
+                                                            at_eof_horizon = (
+                                                                playhead_end
+                                                                + (prefetch_window + 1)
+                                                                * self.config.chunk_size
+                                                                >= footer_limit
+                                                            )
+                                                            effective_batch = (
+                                                                min(
+                                                                    prefetch_window,
+                                                                    wave_cap,
+                                                                )
+                                                                if wave_cap is not None
+                                                                else prefetch_window
+                                                            )
+                                                            min_batch = (
+                                                                min(
+                                                                    effective_batch,
+                                                                    max(
+                                                                        parallel_workers,
+                                                                        effective_batch
+                                                                        // 2,
+                                                                    ),
+                                                                )
+                                                                if wave_cap is not None
+                                                                else min(
+                                                                    prefetch_window,
+                                                                    max(
+                                                                        parallel_workers
+                                                                        * 2,
+                                                                        prefetch_window
+                                                                        // 2,
+                                                                    ),
+                                                                )
+                                                            )
+                                                            cached_runway_chunks = max(
+                                                                0,
+                                                                (
+                                                                    first.start
+                                                                    - (playhead_end + 1)
+                                                                )
+                                                                // max(
+                                                                    1,
+                                                                    self.config.chunk_size,
+                                                                ),
+                                                            )
+                                                            if (
+                                                                parallel_workers > 1
+                                                                and not at_eof_horizon
+                                                                and cached_runway_chunks
+                                                                >= min_batch
+                                                                and len(batch_ahead)
+                                                                < min_batch
+                                                            ):
+                                                                continue
+
+                                                            connection.seek(
+                                                                chunk_range=self.chunker.get_chunk_range(
+                                                                    position=first.start,
+                                                                    size=first.size,
+                                                                )
+                                                            )
+                                                            break
+                                                    if (
+                                                        parallel_workers > 1
+                                                        and prefetch_gen is not None
+                                                    ):
+                                                        await self._parallel_prefetch(
+                                                            batch_ahead,
+                                                            prefetch_gen,
+                                                            _process_chunks,
+                                                        )
+                                                        if (
+                                                            connection.seek_required.value
                                                         ):
                                                             break
                                                     else:
-                                                        # Avoid tearing down the primary HTTP stream
-                                                        # just to fetch a 1-2 chunk tail edge when
-                                                        # speculative workers already filled runway ahead.
-                                                        footer_limit = getattr(
-                                                            self.chunker,
-                                                            "footer_start",
-                                                            self.file_metadata.file_size,
+                                                        prefetched = await self._run_opportunistic_prefetch(
+                                                            ahead,
+                                                            _process_chunks,
+                                                            label="Prefetch",
+                                                            prefetch_gen=prefetch_gen,
                                                         )
-                                                        at_eof_horizon = (
-                                                            playhead_end
-                                                            + (prefetch_window + 1)
-                                                            * self.config.chunk_size
-                                                            >= footer_limit
-                                                        )
-                                                        effective_batch = (
-                                                            min(
-                                                                prefetch_window,
-                                                                wave_cap,
-                                                            )
-                                                            if wave_cap is not None
-                                                            else prefetch_window
-                                                        )
-                                                        min_batch = (
-                                                            min(
-                                                                effective_batch,
-                                                                max(
-                                                                    parallel_workers,
-                                                                    effective_batch
-                                                                    // 2,
-                                                                ),
-                                                            )
-                                                            if wave_cap is not None
-                                                            else min(
-                                                                prefetch_window,
-                                                                max(
-                                                                    parallel_workers
-                                                                    * 2,
-                                                                    prefetch_window
-                                                                    // 2,
-                                                                ),
-                                                            )
-                                                        )
-                                                        cached_runway_chunks = max(
-                                                            0,
-                                                            (
-                                                                first.start
-                                                                - (playhead_end + 1)
-                                                            )
-                                                            // max(
-                                                                1,
-                                                                self.config.chunk_size,
-                                                            ),
-                                                        )
-                                                        if (
-                                                            parallel_workers > 1
-                                                            and not at_eof_horizon
-                                                            and cached_runway_chunks
-                                                            >= min_batch
-                                                            and len(batch_ahead)
-                                                            < min_batch
-                                                        ):
-                                                            continue
-
-                                                        connection.seek(
-                                                            chunk_range=self.chunker.get_chunk_range(
-                                                                position=first.start,
-                                                                size=first.size,
-                                                            )
-                                                        )
-                                                        break
-                                                if (
-                                                    parallel_workers > 1
-                                                    and prefetch_gen is not None
-                                                ):
-                                                    await self._parallel_prefetch(
-                                                        batch_ahead,
-                                                        prefetch_gen,
-                                                        _process_chunks,
-                                                    )
-                                                    if connection.seek_required.value:
-                                                        break
-                                                else:
-                                                    prefetched = await self._run_opportunistic_prefetch(
-                                                        ahead,
-                                                        _process_chunks,
-                                                        label="Prefetch",
-                                                        prefetch_gen=prefetch_gen,
-                                                    )
-                                                    if not prefetched:
-                                                        break
+                                                        if not prefetched:
+                                                            break
 
                             position = connection.current_read_position
                             seek_range = connection.seek_range
@@ -3227,6 +3244,7 @@ class MediaStream:
             elif (
                 read_type == "cache_hit"
                 and foreground
+                and not self.is_streaming.value
                 and (
                     getattr(self, "adaptive_prefetch", None) is None
                     or (
@@ -3242,23 +3260,7 @@ class MediaStream:
                 )
             ):
                 _, playhead_end = chunk_range.request_range
-                cache_usage = 0.0
-                cache_protected = 0.0
-                try:
-                    from .cache import Cache
-
-                    if Cache in di:
-                        cache_inst: Any = di[Cache]
-                        if hasattr(cache_inst, "usage_percentage"):
-                            u_val: Any = cache_inst.usage_percentage
-                            raw_u: Any = u_val() if callable(u_val) else u_val
-                            cache_usage = float(cast(float, raw_u))
-                        if hasattr(cache_inst, "protected_usage_percentage"):
-                            p_val: Any = cache_inst.protected_usage_percentage
-                            raw_p: Any = p_val() if callable(p_val) else p_val
-                            cache_protected = float(cast(float, raw_p))
-                except Exception:
-                    pass
+                cache_usage, cache_protected = self._cache_pressure_percentages()
 
                 ahead_count = (
                     self.adaptive_prefetch.calculate_window(
@@ -3333,11 +3335,32 @@ class MediaStream:
 
     def _protect_consumer(self, request_start: int) -> None:
         """Metadata probes must not move the foreground lease window."""
-        # Protect active playhead lookback and lookahead chunks in VFS cache
+        # Protect active playhead lookback and lookahead chunks in VFS cache.
+        # Throttle reconciliation to chunk-boundary transitions or >= 5s intervals
+        # so 128 KiB FUSE slice reads inside the same chunk do not repeatedly
+        # recompute SHA-1 keys and rebuild hundreds of StreamLease entries under _thread_lock.
         try:
             from .cache import Cache
 
             if Cache in di and hasattr(self, "stream_id"):
+                chunk_size = getattr(getattr(self, "chunker", None), "chunk_size", 0)
+                bucket = (
+                    request_start // chunk_size
+                    if isinstance(chunk_size, int) and chunk_size > 0
+                    else None
+                )
+                now = monotonic()
+                last_bucket = getattr(self, "_last_protected_bucket", None)
+                last_at = getattr(self, "_last_protected_at", None)
+                if (
+                    bucket is not None
+                    and last_bucket == bucket
+                    and last_at is not None
+                    and (now - last_at) < 5.0
+                ):
+                    return
+                self._last_protected_bucket = bucket
+                self._last_protected_at = now
                 max_prefetch_chunks = (
                     self.adaptive_prefetch.config.max_window_chunks
                     if hasattr(self, "adaptive_prefetch")

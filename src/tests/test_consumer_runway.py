@@ -280,3 +280,65 @@ def test_refused_prefetch_does_not_spin(setup_stream):
             nursery.cancel_scope.cancel()
 
     trio.run(exercise, clock=MockClock(autojump_threshold=0))
+
+
+def test_active_streaming_cache_hit_and_runway_avoid_full_window_scans(
+    setup_stream, monkeypatch
+):
+    """Sequential cache hits during active streaming skip redundant uncached scans and throttle reconciliation."""
+
+    async def exercise():
+        async with trio.open_nursery() as nursery:
+            stream, cache, _, _ = setup_stream(nursery)
+            start = stream.config.header_size
+            # Pre-cache chunks 0 and 1, leave chunk 2 uncached so runway stops early.
+            cache.data[start] = b"x" * CHUNK
+            cache.data[start + CHUNK] = b"x" * CHUNK
+
+            # Force large max_window_chunks (like target_buffer_seconds=60 -> 859 chunks)
+            stream.adaptive_prefetch.config.max_window_chunks = 500
+            get_range_sizes = []
+            orig_get_chunk_range = stream.chunker.get_chunk_range
+
+            def tracking_range(*, position, size=1):
+                get_range_sizes.append(size)
+                return orig_get_chunk_range(position=position, size=size)
+
+            monkeypatch.setattr(stream.chunker, "get_chunk_range", tracking_range)
+            stream._update_runway_observation(start + CHUNK // 2)
+            # Only queried single-chunk steps across cached prefix + first gap (never size=500*CHUNK)
+            assert all(sz == 1 for sz in get_range_sizes)
+            assert len(get_range_sizes) == 3
+            assert stream.adaptive_prefetch._cached_runway_bytes == CHUNK + CHUNK // 2
+
+            # Now simulate active streaming with multiple 128 KiB slice reads inside the same chunk:
+            # _protect_consumer should throttle reconcile_stream_playhead to once per chunk bucket.
+            stream.is_streaming.value = True
+            stream._consumer_end = start
+            prefetch_calls = 0
+            orig_get_prefetch = stream.chunker.get_prefetch_uncached
+
+            def counting_prefetch(**kwargs):
+                nonlocal prefetch_calls
+                prefetch_calls += 1
+                return orig_get_prefetch(**kwargs)
+
+            monkeypatch.setattr(
+                stream.chunker, "get_prefetch_uncached", counting_prefetch
+            )
+            leases_before = len(cache.leases)
+            for idx in range(1, 5):
+                assert len(await read(stream, start + idx * 128 * 1024)) == 128 * 1024
+            # Active streaming cache_hit path skipped dead get_prefetch_uncached lookup
+            assert prefetch_calls == 0
+            # Reconciled only on first transition into bucket 0, not repeated per 128 KiB slice
+            assert len(cache.leases) == leases_before + 1
+
+            # Moving across chunk boundary into chunk 1 triggers reconcile again.
+            assert len(await read(stream, start + CHUNK)) == 128 * 1024
+            assert len(cache.leases) == leases_before + 2
+
+            await stream.close()
+            nursery.cancel_scope.cancel()
+
+    trio.run(exercise, clock=MockClock(autojump_threshold=0))

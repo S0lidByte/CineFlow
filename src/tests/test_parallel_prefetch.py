@@ -2307,3 +2307,167 @@ def test_fetch_speculative_span_missing_reservation_waits_without_spin() -> None
                 )
 
     trio.run(run)
+
+
+def test_pending_backward_demand_triggers_seek_instead_of_skipping() -> None:
+    """Backward pending foreground demand in _delivery_registry must trigger seek instead of starving."""
+    from contextlib import asynccontextmanager
+
+    from ordered_set import OrderedSet
+
+    from program.services.streaming.stream_connection import StreamConnection
+
+    async def run() -> None:
+        h = _Harness(workers=2)
+        h.stream.adaptive_prefetch.calculate_window = lambda **_: 1
+        # Chunk 1 and Chunk 4 are cached so only Chunk 2 (offset 8) needs provider bytes.
+        h.chunks[1].emit_cache_signal()
+        h.chunks[4].emit_cache_signal()
+        h.gates[2].set()
+        h.gates[3].set()
+
+        @asynccontextmanager
+        async def connection(*, position):
+            async with h.connection(position=position) as conn:
+                conn.seek = StreamConnection.seek.__get__(conn)
+                yield conn
+
+        h.stream.manage_connection = connection
+
+        # Advance connection to offset 16 (Chunk 4), ahead of pending Chunk 2 (offset 8).
+        reservation = await h.stream._delivery_registry.register_pending(8)
+        h.stream._consumer_end = 19
+        h.stream.recent_reads.current_read.value = SimpleNamespace(
+            read_type="cache_hit",
+            chunk_range=SimpleNamespace(
+                request_range=(16, 19),
+                uncached_chunks=OrderedSet(),
+                position=16,
+            ),
+        )
+
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(h.stream.run, 16)
+                await h.published[2].wait()
+                await h.stream._delivery_registry.release_reservation(reservation)
+                await h.stream.close()
+
+        assert h.chunks[2].is_cached.value is True
+        assert ("foreground", 8) in h.requests
+
+    trio.run(run)
+
+
+def test_speculative_span_slow_cache_commit_does_not_trip_network_stall_deadline() -> (
+    None
+):
+    """Slow local Cache.put admission must not abort an already-downloaded chunk via network chunk_stall_sec."""
+    from contextlib import asynccontextmanager
+
+    import trio_util
+    from trio.testing import MockClock
+
+    from program.services.streaming.cache import CachePutResult
+
+    chunk_size = 1024 * 1024
+    chunks = [
+        _TestChunk(
+            start=i * chunk_size,
+            end=(i + 1) * chunk_size - 1,
+            size=chunk_size,
+            index=i,
+            is_cached=trio_util.AsyncBool(False),
+        )
+        for i in range(2)
+    ]
+    for c in chunks:
+        c.emit_cache_signal = lambda ch=c: setattr(ch.is_cached, "value", True)
+
+    class Pool:
+        @asynccontextmanager
+        async def admit(self, kind, *, workload):
+            yield
+
+        def acquire_lease(self, *, use_proxy):
+            return SimpleNamespace(client=SimpleNamespace(stream=self.stream))
+
+        @asynccontextmanager
+        async def stream(self, method, url, *, headers, timeout):
+            async def aiter_raw():
+                # 4s < 7s chunk_stall_sec, followed by a 3.5s cache commit -> 7.5s > 7s per chunk,
+                # yet still inside the 14s hard span budget across both chunks (12.0s total).
+                await trio.sleep(4.0)
+                yield b"A" * chunk_size
+                await trio.sleep(1.0)
+                yield b"B" * chunk_size
+
+            yield SimpleNamespace(
+                status_code=206,
+                headers={
+                    "Content-Range": f"bytes 0-{2 * chunk_size - 1}/{2 * chunk_size}",
+                    "Content-Length": str(2 * chunk_size),
+                },
+                raise_for_status=lambda: None,
+                aiter_raw=aiter_raw,
+            )
+
+        async def release_lease(self, lease):
+            return None
+
+    async def slow_cache(*, start, data, admission):
+        await trio.sleep(3.5)
+        return CachePutResult.STORED_WARM
+
+    async def run() -> None:
+        stream = MediaStream.__new__(MediaStream)
+        stream.config = SimpleNamespace(
+            chunk_size=chunk_size,
+            block_size=128 * 1024,
+            chunk_wait_timeout_seconds=10,
+            connect_timeout_seconds=10,
+        )
+        stream._producer_claims = _ProducerClaims()
+        stream._delivery_registry = SimpleNamespace(
+            get_pending_starts=lambda: [], has_pending=lambda _: False
+        )
+        stream.is_killed = trio_util.AsyncBool(False)
+        stream.adaptive_prefetch = SimpleNamespace(
+            current_generation=0, record_provider_fetch=MagicMock()
+        )
+        stream._use_proxy_client = False
+        stream._speculative_active = 0
+        stream._speculative_peak = 0
+        stream._speculative_bytes = 0
+        stream._speculative_failures = 0
+        stream._speculative_inflight_chunks = set()
+        stream.session_statistics = SessionStatistics()
+        stream.build_log_message = lambda text: text
+        stream.target_url = SimpleNamespace(value="https://example.test/video")
+        stream.file_metadata = SimpleNamespace(file_size=2 * chunk_size)
+        stream.provider = "test"
+        stream._http_pool = Pool()
+        stream._cache_chunk = slow_cache
+
+        await stream._fetch_speculative_span_run(chunks, 0)
+
+        assert chunks[0].is_cached.value is True
+        assert chunks[1].is_cached.value is True
+        assert stream._speculative_failures == 0
+        assert stream._producer_claims.active_starts() == set()
+
+    trio.run(run, clock=MockClock(autojump_threshold=0))
+
+
+def test_speculative_timeout_budgets_preserve_headroom_for_high_wait_timeout() -> None:
+    """High chunk_wait_timeout_seconds (e.g. 35s) must leave headroom below foreground timeout."""
+    stream = MediaStream.__new__(MediaStream)
+    stream.config = SimpleNamespace(chunk_wait_timeout_seconds=10)
+    assert stream._speculative_timeout_budgets() == pytest.approx((5.0, 7.0, 14.0))
+
+    stream.config = SimpleNamespace(chunk_wait_timeout_seconds=35)
+    header_s, stall_s, span_s = stream._speculative_timeout_budgets()
+    assert header_s == pytest.approx(5.0)
+    assert stall_s == pytest.approx(7.0)
+    assert span_s == pytest.approx(21.0)
+    assert span_s < 35.0
