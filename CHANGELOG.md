@@ -26,6 +26,13 @@
 
 * **stream:** time a bounded provider read by item ID without exposing the saved link or refreshing it, honoring forced environment DSN overrides when no settings file exists.
 
+## [1.52.11](https://github.com/S0lidByte/CineFlow/compare/v1.52.10...v1.52.11) (2026-11-28)
+
+
+### Bug Fixes
+
+* **streaming:** resolve backward pending demand deadlock, hot-demotion lock contention, and Trio-loop stalls ([#398](https://github.com/S0lidByte/CineFlow/issues/398)) ([638b59d](https://github.com/S0lidByte/CineFlow/commit/638b59d2497a933676447488ae2c07f5e1679877))
+
 ## [1.52.10](https://github.com/S0lidByte/CineFlow/compare/v1.52.9...v1.52.10) (2026-11-27)
 
 
