@@ -820,3 +820,148 @@ def test_demotion_cancellation_after_placement_cleans_warm_orphan(
         assert await cache.get("cancel.mkv", 0, 139) == b"c" * 140
 
     trio.run(_run)
+
+
+def test_hot_demotion_pre_scan_congestion_does_not_stall_concurrent_writers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Concurrent writer arriving during _ensure_hot_capacity lock scan falls back to warm immediately."""
+    from contextlib import asynccontextmanager
+
+    from trio.testing import wait_all_tasks_blocked
+
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "warm",
+            max_size_bytes=10 * 1024 * 1024,
+            hot_dir=tmp_path / "hot",
+            hot_max_size_bytes=150,
+            metrics_enabled=False,
+        )
+    )
+    orig_locks = cache.locks
+    scan_lock_entered = trio.Event()
+    allow_scan_proceed = trio.Event()
+
+    @asynccontextmanager
+    async def paused_first_demotion_scan():
+        if not scan_lock_entered.is_set() and cache._hot_demotion_in_progress:
+            scan_lock_entered.set()
+            await allow_scan_proceed.wait()
+        async with orig_locks():
+            yield
+
+    async def _run() -> None:
+        await cache.put("pre.mkv", 0, b"a" * 130)
+        monkeypatch.setattr(cache, "locks", paused_first_demotion_scan)
+
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                # Writer 1 triggers hot demotion and stalls BEFORE reaching staging
+                nursery.start_soon(cache.put, "w1.mkv", 0, b"b" * 100)
+                await scan_lock_entered.wait()
+
+                # Writer 2 must fall back to warm immediately without queueing on _hot_write_lock
+                await cache.put("w2.mkv", 0, b"c" * 100)
+                k2 = cache._key("w2.mkv", 0)
+                assert cache._index[k2].tier == "warm"
+
+                allow_scan_proceed.set()
+                await wait_all_tasks_blocked()
+
+        assert await cache.get("w2.mkv", 0, 99) == b"c" * 100
+
+    trio.run(_run)
+
+
+def test_hot_write_lock_contention_after_demotion_flag_clears_falls_back_to_warm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Writer arriving while _hot_write_lock is still held during post-demotion eviction falls back to warm."""
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "warm",
+            max_size_bytes=10 * 1024 * 1024,
+            hot_dir=tmp_path / "hot",
+            hot_max_size_bytes=150,
+            metrics_enabled=False,
+        )
+    )
+    orig_evict_lru = cache._evict_lru
+    evict_entered = trio.Event()
+    allow_evict_proceed = trio.Event()
+
+    async def paused_post_demotion_evict(need_bytes: int, put_breakdown=None) -> bool:
+        if (
+            need_bytes == 0
+            and cache._hot_demotion_in_progress is False
+            and not evict_entered.is_set()
+        ):
+            evict_entered.set()
+            await allow_evict_proceed.wait()
+        return await orig_evict_lru(need_bytes, put_breakdown=put_breakdown)
+
+    async def _run() -> None:
+        await cache.put("pre.mkv", 0, b"a" * 130)
+        monkeypatch.setattr(cache, "_evict_lru", paused_post_demotion_evict)
+
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                # Writer 1 completes demotion (_hot_demotion_in_progress becomes False),
+                # then pauses inside _evict_lru(0) while still holding _hot_write_lock.
+                nursery.start_soon(cache.put, "w1.mkv", 0, b"b" * 100)
+                await evict_entered.wait()
+                assert cache._hot_demotion_in_progress is False
+
+                # Writer 2 must pass the flag check, hit _hot_write_lock.acquire_nowait(),
+                # and fall back to warm immediately without blocking on Writer 1.
+                await cache.put("w2.mkv", 0, b"c" * 100)
+                k2 = cache._key("w2.mkv", 0)
+                assert cache._index[k2].tier == "warm"
+
+                allow_evict_proceed.set()
+
+        assert await cache.get("w2.mkv", 0, 99) == b"c" * 100
+
+    trio.run(_run)
+
+
+def test_protected_bytes_matches_active_readers_and_non_expired_leases(
+    tmp_path: Path,
+) -> None:
+    """_protected_bytes_locked sums readers + unexpired leases once without full _index cost."""
+    cache = Cache(
+        CacheConfig(
+            cache_dir=tmp_path / "warm",
+            max_size_bytes=10 * 1024 * 1024,
+            metrics_enabled=False,
+        )
+    )
+
+    async def _run() -> None:
+        # Insert 50 chunks; only chunks 1, 2, 3, 4 get active readers/leases.
+        for idx in range(50):
+            await cache.put("m.mkv", idx * 100, b"x" * 100)
+
+        # Unexpired lease on chunk 1, overlap with reader on chunk 2, expired lease on chunk 3,
+        # and reader-only (no lease) on chunk 4.
+        cache.acquire_lease(
+            stream_id="s1", cache_key="m.mkv", start=100, size=100, lease_seconds=60.0
+        )
+        cache.acquire_lease(
+            stream_id="s1", cache_key="m.mkv", start=200, size=100, lease_seconds=60.0
+        )
+        cache.acquire_lease(
+            stream_id="s1", cache_key="m.mkv", start=300, size=100, lease_seconds=-1.0
+        )
+        k2 = cache._key("m.mkv", 200)
+        k4 = cache._key("m.mkv", 400)
+        with cache.reading_chunk(k2):
+            assert cache.protected_bytes() == 200
+            assert cache.watermark_status()["protected_bytes"] == 200
+            with cache.reading_chunk(k4):
+                assert cache.protected_bytes() == 300
+                assert cache.watermark_status()["protected_bytes"] == 300
+        assert cache.protected_bytes() == 200
+
+    trio.run(_run)

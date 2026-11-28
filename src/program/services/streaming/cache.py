@@ -1340,19 +1340,35 @@ class Cache:
     ) -> None:
         self._on_put_latency = callback
 
+    def _protected_bytes_locked(self) -> int:
+        """Compute total protected bytes while caller holds ``self._thread_lock``.
+
+        Iterates only entries referenced by ``_active_readers`` or
+        ``_leases_by_key`` (`O(|active_protected|)`) instead of scanning all
+        entries in ``self._index``.
+        """
+        now = time.monotonic()
+        protected = 0
+        counted: set[str] = set()
+        for k, readers in self._active_readers.items():
+            if readers > 0:
+                entry = self._index.get(k)
+                if entry is not None:
+                    protected += entry.size
+                    counted.add(k)
+        for k, leases in self._leases_by_key.items():
+            if k in counted or not leases:
+                continue
+            if any(lease.expires_at > now for lease in leases.values()):
+                entry = self._index.get(k)
+                if entry is not None:
+                    protected += entry.size
+        return protected
+
     def protected_bytes(self) -> int:
         """Return total bytes of currently protected chunks."""
         with self._thread_lock:
-            now = time.monotonic()
-            protected = 0
-            for k, entry in self._index.items():
-                if self._active_readers.get(k, 0) > 0:
-                    protected += entry.size
-                    continue
-                leases = self._leases_by_key.get(k)
-                if leases and any(l.expires_at > now for l in leases.values()):
-                    protected += entry.size
-            return protected
+            return self._protected_bytes_locked()
 
     def protected_usage_percentage(self) -> float:
         """Return percentage of total cache capacity currently protected by active playback (0.0 to 100.0)."""
@@ -1430,9 +1446,17 @@ class Cache:
         demoted_any = False
         t_demote_start = time.perf_counter()
 
-        async with self._hot_demotion_lock:
+        if need_bytes > 0:
+            try:
+                self._hot_demotion_lock.acquire_nowait()
+            except trio.WouldBlock:
+                return
+        else:
+            await self._hot_demotion_lock.acquire()
+        try:
             if need_bytes > 0 and self._hot_demotion_in_progress:
                 return
+            self._hot_demotion_in_progress = True
 
             async with self.locks():
                 projected = self._hot_bytes + self._hot_reserved_bytes + need_bytes
@@ -1474,45 +1498,90 @@ class Cache:
             if not to_demote:
                 return
 
-            self._hot_demotion_in_progress = True
-            try:
-                for entry in to_demote:
-                    # Selection and disk I/O are separated, so fence the candidate again
-                    # immediately before staging it. A read or lease acquired while another candidate
-                    # is being staged must make this candidate ineligible.
+            for entry in to_demote:
+                # Selection and disk I/O are separated, so fence the candidate again
+                # immediately before staging it. A read or lease acquired while another candidate
+                # is being staged must make this candidate ineligible.
+                async with self.locks():
+                    with self._thread_lock:
+                        current = self._index.get(entry.key)
+                        if (
+                            current is None
+                            or current.tier != "hot"
+                            or current.size != entry.size
+                            or current.mtime != entry.mtime
+                            or self._active_readers.get(entry.key, 0) > 0
+                            or self._is_entry_protected(entry.key, current)
+                        ):
+                            continue
+
+                staged_payload: Path | None = None
+                staged_meta: Path | None = None
+                try:
+                    staged_payload, staged_meta = await trio.to_thread.run_sync(
+                        self._stage_demote_hot_to_warm_temp, entry.key
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to stage hot cache demotion for {entry.key}: {e}"
+                    )
+                    await trio.to_thread.run_sync(
+                        self._cleanup_staged_demotion, staged_payload, staged_meta
+                    )
+                    continue
+
+                # Revalidate and run Phase 2..4 under the per-chunk shard so concurrent
+                # writes or evictions for this key cannot interleave with warm
+                # placement, index publication, or stale file cleanup.
+                async with self._shard(entry.key):
+                    revalidated = False
                     async with self.locks():
                         with self._thread_lock:
                             current = self._index.get(entry.key)
                             if (
-                                current is None
-                                or current.tier != "hot"
-                                or current.size != entry.size
-                                or current.mtime != entry.mtime
-                                or self._active_readers.get(entry.key, 0) > 0
-                                or self._is_entry_protected(entry.key, current)
+                                current is not None
+                                and current.tier == "hot"
+                                and current.size == entry.size
+                                and current.mtime == entry.mtime
+                                and self._active_readers.get(entry.key, 0) == 0
+                                and not self._is_entry_protected(entry.key, current)
                             ):
-                                continue
+                                revalidated = True
 
-                    staged_payload: Path | None = None
-                    staged_meta: Path | None = None
-                    try:
-                        staged_payload, staged_meta = await trio.to_thread.run_sync(
-                            self._stage_demote_hot_to_warm_temp, entry.key
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to stage hot cache demotion for {entry.key}: {e}"
-                        )
+                    if not revalidated:
+                        # Entry acquired an active reader, lease, or was invalidated during staging — discard temps.
                         await trio.to_thread.run_sync(
-                            self._cleanup_staged_demotion, staged_payload, staged_meta
+                            self._cleanup_staged_demotion,
+                            staged_payload,
+                            staged_meta,
                         )
                         continue
 
-                    # Revalidate and run Phase 2..4 under the per-chunk shard so concurrent
-                    # writes or evictions for this key cannot interleave with warm
-                    # placement, index publication, or stale file cleanup.
-                    async with self._shard(entry.key):
-                        revalidated = False
+                    # Phase 2: place warm files on disk under per-chunk shard.
+                    # If this fails, hot remains authoritative; do NOT update the index.
+                    placed = await trio.to_thread.run_sync(
+                        self._place_staged_demotion,
+                        entry.key,
+                        staged_payload,
+                        staged_meta,
+                    )
+                    if not placed:
+                        logger.warning(
+                            f"Failed to place staged demotion for {entry.key}; hot preserved"
+                        )
+                        await trio.to_thread.run_sync(
+                            self._cleanup_staged_demotion,
+                            staged_payload,
+                            staged_meta,
+                        )
+                        continue
+
+                    # Phase 3: publish index update under locks — warm is now authoritative.
+                    # A second revalidation fence here catches readers or leases that arrived
+                    # between Phase 1 revalidation and Phase 2 disk placement.
+                    published = False
+                    warm_is_authoritative = False
+                    try:
                         async with self.locks():
                             with self._thread_lock:
                                 current = self._index.get(entry.key)
@@ -1524,110 +1593,60 @@ class Cache:
                                     and self._active_readers.get(entry.key, 0) == 0
                                     and not self._is_entry_protected(entry.key, current)
                                 ):
-                                    revalidated = True
-
-                        if not revalidated:
-                            # Entry acquired an active reader, lease, or was invalidated during staging — discard temps.
-                            await trio.to_thread.run_sync(
-                                self._cleanup_staged_demotion,
-                                staged_payload,
-                                staged_meta,
-                            )
-                            continue
-
-                        # Phase 2: place warm files on disk under per-chunk shard.
-                        # If this fails, hot remains authoritative; do NOT update the index.
-                        placed = await trio.to_thread.run_sync(
-                            self._place_staged_demotion,
-                            entry.key,
-                            staged_payload,
-                            staged_meta,
-                        )
-                        if not placed:
-                            logger.warning(
-                                f"Failed to place staged demotion for {entry.key}; hot preserved"
-                            )
-                            await trio.to_thread.run_sync(
-                                self._cleanup_staged_demotion,
-                                staged_payload,
-                                staged_meta,
-                            )
-                            continue
-
-                        # Phase 3: publish index update under locks — warm is now authoritative.
-                        # A second revalidation fence here catches readers or leases that arrived
-                        # between Phase 1 revalidation and Phase 2 disk placement.
-                        published = False
-                        warm_is_authoritative = False
-                        try:
-                            async with self.locks():
-                                with self._thread_lock:
-                                    current = self._index.get(entry.key)
-                                    if (
-                                        current is not None
-                                        and current.tier == "hot"
-                                        and current.size == entry.size
-                                        and current.mtime == entry.mtime
-                                        and self._active_readers.get(entry.key, 0) == 0
-                                        and not self._is_entry_protected(
-                                            entry.key, current
-                                        )
-                                    ):
-                                        self._index[entry.key] = CacheEntry(
-                                            key=current.key,
-                                            cache_key=current.cache_key,
-                                            start=current.start,
-                                            size=current.size,
-                                            mtime=current.mtime,
-                                            tier="warm",
-                                        )
-                                        # NOTE: Do NOT do self._index.move_to_end(entry.key, last=False)!
-                                        # Demoted chunks must NOT be pushed to the head of the LRU queue,
-                                        # which caused active playback chunks to be immediately evicted.
-                                        self._hot_bytes = max(
-                                            0, self._hot_bytes - current.size
-                                        )
-                                        self._adjust_cached_disk_free_locked(
-                                            -current.size
-                                        )
-                                        published = True
-                                        demoted_any = True
-                                    elif current is not None and current.tier == "warm":
-                                        warm_is_authoritative = True
-                        finally:
-                            if published:
-                                # Phase 4: remove stale hot files under the same shard —
-                                # warm is already authoritative.
-                                try:
-                                    with trio.CancelScope(shield=True):
-                                        await trio.to_thread.run_sync(
-                                            self._remove_hot_after_demotion, entry.key
-                                        )
-                                except Exception as e:
-                                    logger.warning(
-                                        f"Failed to remove hot files after demotion for {entry.key}: {e}; "
-                                        "warm is authoritative — stale hot duplicate will be cleaned on next scan"
+                                    self._index[entry.key] = CacheEntry(
+                                        key=current.key,
+                                        cache_key=current.cache_key,
+                                        start=current.start,
+                                        size=current.size,
+                                        mtime=current.mtime,
+                                        tier="warm",
                                     )
-                            elif not warm_is_authoritative:
-                                # Entry was protected or cancelled between Phase 2 and Phase 3 (hot still authoritative).
-                                # Clean up the warm file under the shard so hot remains the sole authoritative copy.
-                                logger.debug(
-                                    f"Demotion of {entry.key} aborted after disk placement (new reader/lease); "
-                                    "removing warm file to restore hot-only state"
+                                    # NOTE: Do NOT do self._index.move_to_end(entry.key, last=False)!
+                                    # Demoted chunks must NOT be pushed to the head of the LRU queue,
+                                    # which caused active playback chunks to be immediately evicted.
+                                    self._hot_bytes = max(
+                                        0, self._hot_bytes - current.size
+                                    )
+                                    self._adjust_cached_disk_free_locked(-current.size)
+                                    published = True
+                                    demoted_any = True
+                                elif current is not None and current.tier == "warm":
+                                    warm_is_authoritative = True
+                    finally:
+                        if published:
+                            # Phase 4: remove stale hot files under the same shard —
+                            # warm is already authoritative.
+                            try:
+                                with trio.CancelScope(shield=True):
+                                    await trio.to_thread.run_sync(
+                                        self._remove_hot_after_demotion, entry.key
+                                    )
+                            except Exception as e:
+                                logger.warning(
+                                    f"Failed to remove hot files after demotion for {entry.key}: {e}; "
+                                    "warm is authoritative — stale hot duplicate will be cleaned on next scan"
                                 )
-                                try:
-                                    with trio.CancelScope(shield=True):
-                                        await trio.to_thread.run_sync(
-                                            self._unlink_tier_files_sync,
-                                            entry.key,
-                                            "warm",
-                                        )
-                                except Exception as e:
-                                    logger.warning(
-                                        f"Failed to clean warm file after aborted demotion for {entry.key}: {e}"
+                        elif not warm_is_authoritative:
+                            # Entry was protected or cancelled between Phase 2 and Phase 3 (hot still authoritative).
+                            # Clean up the warm file under the shard so hot remains the sole authoritative copy.
+                            logger.debug(
+                                f"Demotion of {entry.key} aborted after disk placement (new reader/lease); "
+                                "removing warm file to restore hot-only state"
+                            )
+                            try:
+                                with trio.CancelScope(shield=True):
+                                    await trio.to_thread.run_sync(
+                                        self._unlink_tier_files_sync,
+                                        entry.key,
+                                        "warm",
                                     )
-            finally:
-                self._hot_demotion_in_progress = False
+                            except Exception as e:
+                                logger.warning(
+                                    f"Failed to clean warm file after aborted demotion for {entry.key}: {e}"
+                                )
+        finally:
+            self._hot_demotion_in_progress = False
+            self._hot_demotion_lock.release()
 
         # Warm may now be over budget
         if demoted_any:
@@ -1646,7 +1665,13 @@ class Cache:
         """Reserve hot-tier bytes, immediately returning false for warm fallback if congested."""
         if self._hot_demotion_in_progress:
             return False
-        async with self._hot_write_lock:
+        try:
+            self._hot_write_lock.acquire_nowait()
+        except trio.WouldBlock:
+            # Another writer holds _hot_write_lock (e.g. awaiting hot->warm demotion);
+            # fall back immediately to warm tier instead of queueing for seconds.
+            return False
+        try:
             if self._hot_demotion_in_progress:
                 return False
             await self._ensure_hot_capacity(need_bytes, put_breakdown=put_breakdown)
@@ -1664,6 +1689,8 @@ class Cache:
             # avoid queuing writers behind trio.Event waits (which stalls prefetchers).
             # Fast-fallback immediately to warm tier.
             return False
+        finally:
+            self._hot_write_lock.release()
 
     async def _release_hot_capacity(self, reserved_bytes: int) -> None:
         """Release a pending hot-tier reservation without queueing behind demotion I/O."""
@@ -2864,11 +2891,7 @@ class Cache:
                 "warm_watermark_low_pct": warm_low_pct,
                 "warm_min_free_mb": self.cfg.warm_min_free_mb,
                 "free_disk_mb": free_disk_mb,
-                "protected_bytes": sum(
-                    entry.size
-                    for key, entry in self._index.items()
-                    if self._is_entry_protected(key, entry)
-                ),
+                "protected_bytes": self._protected_bytes_locked(),
                 "eviction_refusals": self.eviction_refusals,
             }
 
