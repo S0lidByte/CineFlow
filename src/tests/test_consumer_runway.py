@@ -326,16 +326,26 @@ def test_active_streaming_cache_hit_and_runway_avoid_full_window_scans(
             monkeypatch.setattr(
                 stream.chunker, "get_prefetch_uncached", counting_prefetch
             )
+            # Ensure pre-cached body chunks stay on cache_hit path without network stalls.
+            cache.data[start] = b"x" * CHUNK
+            cache.data[start + CHUNK] = b"x" * CHUNK
             leases_before = len(cache.leases)
             for idx in range(1, 5):
                 assert len(await read(stream, start + idx * 128 * 1024)) == 128 * 1024
+            # Read at absolute offset CHUNK (still inside body chunk 0 because header_size > 0)
+            # must stay in body bucket 0 and remain throttled.
+            assert len(await read(stream, CHUNK)) == 128 * 1024
             # Active streaming cache_hit path skipped dead get_prefetch_uncached lookup
             assert prefetch_calls == 0
-            # Reconciled only on first transition into bucket 0, not repeated per 128 KiB slice
+            # Reconciled only on first transition into body bucket 0, not repeated inside chunk 0
             assert len(cache.leases) == leases_before + 1
 
-            # Moving across chunk boundary into chunk 1 triggers reconcile again.
+            # Moving across the body-relative chunk boundary into chunk 1 (start + CHUNK)
+            # must reconcile immediately despite sharing (offset // CHUNK) == 1 with CHUNK.
             assert len(await read(stream, start + CHUNK)) == 128 * 1024
+            assert len(cache.leases) == leases_before + 2
+            # Subsequent slices inside body chunk 1 are throttled again.
+            assert len(await read(stream, start + CHUNK + 128 * 1024)) == 128 * 1024
             assert len(cache.leases) == leases_before + 2
 
             await stream.close()

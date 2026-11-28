@@ -2359,6 +2359,75 @@ def test_pending_backward_demand_triggers_seek_instead_of_skipping() -> None:
     trio.run(run)
 
 
+def test_transient_ready_chunk_behind_connection_position_does_not_seek_backward() -> (
+    None
+):
+    """Uncached chunks already published as READY_TRANSIENT must not trigger backward seeks."""
+    from contextlib import asynccontextmanager
+
+    from ordered_set import OrderedSet
+
+    from program.services.streaming.stream_connection import StreamConnection
+
+    async def run() -> None:
+        h = _Harness(workers=2)
+        h.stream.adaptive_prefetch.calculate_window = lambda **_: 0
+        h.gates[3].set()
+        seek_calls = 0
+
+        @asynccontextmanager
+        async def connection(*, position):
+            nonlocal seek_calls
+            async with h.connection(position=position) as conn:
+                orig_seek = StreamConnection.seek.__get__(conn)
+
+                def tracked_seek(chunk_range):
+                    nonlocal seek_calls
+                    seek_calls += 1
+                    orig_seek(chunk_range)
+
+                conn.seek = tracked_seek
+                yield conn
+
+        h.stream.manage_connection = connection
+
+        # Chunk 1 (offset 4) was published transiently (not stored on disk cache, so is_cached=False)
+        # while the wire connection is ahead at offset 12 (Chunk 3).
+        await h.stream._delivery_registry.publish(4, b"1111")
+        h.stream._consumer_end = 15
+
+        with trio.fail_after(2):
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(h.stream.run, 12)
+                # First emit read listing transient Chunk 1 behind current_read_position (12).
+                h.stream.recent_reads.current_read.value = SimpleNamespace(
+                    read_type="body_read",
+                    chunk_range=SimpleNamespace(
+                        request_range=(4, 7),
+                        uncached_chunks=OrderedSet([h.chunks[1]]),
+                        position=4,
+                    ),
+                )
+                await trio.testing.wait_all_tasks_blocked()
+                # Follow up with mixed [transient Chunk 1, uncached Chunk 3] on the same connection.
+                h.stream.recent_reads.current_read.value = SimpleNamespace(
+                    read_type="body_read",
+                    chunk_range=SimpleNamespace(
+                        request_range=(4, 15),
+                        uncached_chunks=OrderedSet([h.chunks[1], h.chunks[3]]),
+                        position=4,
+                    ),
+                )
+                await h.published[3].wait()
+                await h.stream.close()
+
+        assert seek_calls == 0
+        assert ("foreground", 4) not in h.requests
+        assert ("foreground", 12) in h.requests
+
+    trio.run(run)
+
+
 def test_speculative_span_slow_cache_commit_does_not_trip_network_stall_deadline() -> (
     None
 ):

@@ -2482,7 +2482,12 @@ class MediaStream:
                                                 raise
 
                                 if seek_range:
-                                    await _process_chunks(seek_range.uncached_chunks)
+                                    seek_uncached = OrderedSet(
+                                        chunk
+                                        for chunk in seek_range.uncached_chunks
+                                        if not self._is_transient_ready(chunk.start)
+                                    )
+                                    await _process_chunks(seek_uncached)
                                     seek_range = None
 
                                 async def _drain_pending_demands() -> bool:
@@ -2497,6 +2502,10 @@ class MediaStream:
                                         if not pending_chunks:
                                             continue
                                         first_pending = pending_chunks[0]
+                                        if self._is_transient_ready(
+                                            first_pending.start
+                                        ):
+                                            continue
                                         if (
                                             connection.current_read_position
                                             != first_pending.start
@@ -2532,8 +2541,13 @@ class MediaStream:
                                                 )
                                             )
 
-                                        uncached_chunks = (
+                                        raw_uncached_chunks = (
                                             read.chunk_range.uncached_chunks
+                                        )
+                                        uncached_chunks = OrderedSet(
+                                            chunk
+                                            for chunk in raw_uncached_chunks
+                                            if not self._is_transient_ready(chunk.start)
                                         )
 
                                         if len(uncached_chunks) > 0:
@@ -2548,63 +2562,57 @@ class MediaStream:
                                             request_start, _ = (
                                                 read.chunk_range.request_range
                                             )
-
-                                            if (
+                                            is_backward_seek = (
                                                 self.config.header_size
                                                 < uncached_chunks[0].start
                                                 < connection.current_read_position
-                                            ):
-                                                # Backward seek detection:
-                                                #
-                                                # If the requested start is before the current wire position, we will always need to seek.
-                                                # This is because streams can only read forwards, so a new connection must be made.
-
-                                                if self.enable_tracing:
-                                                    logger.log(
-                                                        "STREAM",
-                                                        self.build_log_message(
-                                                            f"Requested start {request_start} "
-                                                            f"is before current read position {connection.current_read_position} "
-                                                            f"for {self.file_metadata.path}. "
-                                                            f"Seeking to new start position {uncached_chunks[0].start}/{self.file_metadata.file_size}."
-                                                        ),
-                                                    )
-
-                                                connection.seek(
-                                                    chunk_range=read.chunk_range
-                                                )
-                                                self._protect_consumer(
-                                                    read.chunk_range.position
-                                                )
-
-                                                break
-
-                                            if (
+                                            )
+                                            is_forward_seek = (
                                                 connection.current_read_position
                                                 < uncached_chunks[0].start
-                                            ):
-                                                # Forward seek detection:
-                                                #
-                                                # If the requested start is after the current read position, we need to seek forward.
-                                                # This is because streams cannot skip chunks of data, so a new connection must be made,
-                                                # to avoid requesting data that will be discarded and using unnecessary bandwidth.
+                                            )
+
+                                            if is_backward_seek or is_forward_seek:
+                                                # Backward/forward seek detection:
+                                                # streams can only read sequentially forward without skipping bytes,
+                                                # so reconnect at the first non-transient uncached chunk boundary.
+                                                seek_chunk_range = (
+                                                    read.chunk_range
+                                                    if uncached_chunks[0]
+                                                    == raw_uncached_chunks[0]
+                                                    else self.chunker.get_chunk_range(
+                                                        position=uncached_chunks[
+                                                            0
+                                                        ].start,
+                                                        size=max(
+                                                            1,
+                                                            uncached_chunks[-1].end
+                                                            - uncached_chunks[0].start
+                                                            + 1,
+                                                        ),
+                                                    )
+                                                )
 
                                                 if self.enable_tracing:
+                                                    reason = (
+                                                        f"Requested start {request_start} is before"
+                                                        if is_backward_seek
+                                                        else f"Request chunk start {uncached_chunks[0].start} is after"
+                                                    )
                                                     logger.log(
                                                         "STREAM",
                                                         self.build_log_message(
-                                                            f"Request chunk start {uncached_chunks[0].start} "
-                                                            f"is after current read position {connection.current_read_position} "
+                                                            f"{reason} current read position {connection.current_read_position} "
                                                             f"for {self.file_metadata.path}. "
                                                             f"Seeking to new start position {uncached_chunks[0].start}/{self.file_metadata.file_size}."
                                                         ),
                                                     )
 
                                                 connection.seek(
-                                                    chunk_range=read.chunk_range
+                                                    chunk_range=seek_chunk_range
                                                 )
                                                 self._protect_consumer(
-                                                    read.chunk_range.position
+                                                    seek_chunk_range.position
                                                 )
 
                                                 break
@@ -3333,22 +3341,59 @@ class MediaStream:
 
         return False
 
+    def _is_transient_ready(self, start: int) -> bool:
+        """Return True if an in-memory transient payload is already ready at start."""
+        registry = getattr(self, "_delivery_registry", None)
+        if isinstance(registry, _DeliveryRegistry):
+            delivery = registry.get_entry(start)
+            return (
+                delivery is not None
+                and delivery.state == _DeliveryState.READY_TRANSIENT
+            )
+        get_entry = getattr(registry, "get_entry", None)
+        if not callable(get_entry):
+            return False
+        delivery_obj: Any = cast(Callable[[int], Any], get_entry)(start)
+        return (
+            delivery_obj is not None
+            and getattr(delivery_obj, "state", None) == _DeliveryState.READY_TRANSIENT
+        )
+
     def _protect_consumer(self, request_start: int) -> None:
         """Metadata probes must not move the foreground lease window."""
         # Protect active playhead lookback and lookahead chunks in VFS cache.
-        # Throttle reconciliation to chunk-boundary transitions or >= 5s intervals
+        # Throttle reconciliation to body-chunk boundary transitions or >= 5s intervals
         # so 128 KiB FUSE slice reads inside the same chunk do not repeatedly
         # recompute SHA-1 keys and rebuild hundreds of StreamLease entries under _thread_lock.
         try:
             from .cache import Cache
 
             if Cache in di and hasattr(self, "stream_id"):
-                chunk_size = getattr(getattr(self, "chunker", None), "chunk_size", 0)
-                bucket = (
-                    request_start // chunk_size
-                    if isinstance(chunk_size, int) and chunk_size > 0
-                    else None
+                chunker = getattr(self, "chunker", None)
+                chunk_size = getattr(chunker, "chunk_size", 0)
+                header_size = max(
+                    0,
+                    int(
+                        getattr(
+                            getattr(self, "config", None),
+                            "header_size",
+                            getattr(chunker, "header_size", 0),
+                        )
+                        or 0
+                    ),
                 )
+                footer_start = getattr(chunker, "footer_start", None)
+                if isinstance(chunk_size, int) and chunk_size > 0:
+                    if request_start < header_size:
+                        bucket = -1
+                    elif (
+                        isinstance(footer_start, int) and request_start >= footer_start
+                    ):
+                        bucket = -2
+                    else:
+                        bucket = (request_start - header_size) // chunk_size
+                else:
+                    bucket = None
                 now = monotonic()
                 last_bucket = getattr(self, "_last_protected_bucket", None)
                 last_at = getattr(self, "_last_protected_at", None)
