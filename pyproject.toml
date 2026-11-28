@@ -58,7 +58,7 @@ dev = [
     "pytest-asyncio>=1.4.0,<2",
     "pytest-mock>=3.14.0,<4",
     "responses==0.26.3",
-    "pyfakefs>=6.2.0,<7",
+    "pyfakefs>=6.3.2,<7",
     "ruff>=0.16.6,<0.17",
     "isort>=9.0.1,<10",
     "codecov>=2.1.13,<3",
